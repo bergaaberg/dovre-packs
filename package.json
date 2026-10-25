@@ -1,0 +1,28 @@
+{
+  "name": "dovre-packs",
+  "version": "0.2.0",
+  "private": false,
+  "license": "MIT",
+  "type": "module",
+  "description": "Pre-built Pluggable Packs for Dovre (cf-health, http-otel, docker, jira, custom-app).",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bergaaberg/dovre-packs.git"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --test 'packs/*/test/*.test.ts'",
+    "check": "pnpm typecheck && pnpm test"
+  },
+  "dependencies": {
+    "dovre": "link:../dovre",
+    "hono": "^4.13.13"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.0",
+    "typescript": "^7.0.2"
+  }
+}

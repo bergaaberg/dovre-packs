@@ -1,0 +1,28 @@
+name: Pluggable Pack Request
+description: Propose or contribute a new Pluggable Pack (or Slot hook)
+title: "[pack]: "
+labels: ["pack"]
+body:
+  - type: input
+    id: pack_id
+    attributes:
+      label: Pack ID (lowercase-dashed)
+      placeholder: e.g. linear, sentry, fly-io
+    validations:
+      required: true
+  - type: dropdown
+    id: execution
+    attributes:
+      label: Execution Affinity
+      options:
+        - any (runs both locally and on Cloudflare Workers)
+        - local-only (needs local CLI or filesystem)
+        - hosted-only (needs Cloudflare Worker bindings)
+    validations:
+      required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: What does this pack surface on Today, Search (Ctrl+K), and Assistant context?
+    validations:
+      required: true

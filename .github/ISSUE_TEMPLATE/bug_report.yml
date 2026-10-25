@@ -1,0 +1,41 @@
+name: Bug Report
+description: Report a bug in Dovre Core, Hosted Worker, or Outbound Bridge
+title: "[bug]: "
+labels: ["bug"]
+body:
+  - type: dropdown
+    id: topology
+    attributes:
+      label: Hosting Model
+      options:
+        - Local (127.0.0.1:4848 loopback)
+        - Self-Hosted Server (Node 24 + SQLite)
+        - Cloudflare Worker + D1 + Outbound Bridge
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating System
+      options:
+        - macOS
+        - Linux
+        - Windows
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Clear description of the bug and what you expected.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Run `pnpm start`
+        2. Open `/agents`
+    validations:
+      required: false

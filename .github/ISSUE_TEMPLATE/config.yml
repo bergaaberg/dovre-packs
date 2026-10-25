@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Interactive Cockpit & Setup Builder
+    url: https://dovre.dev
+    about: Configure your hosting model, packs, and download a 1-command setup script at dovre.dev
+  - name: Pre-Built Packs Repository
+    url: https://github.com/bergaaberg/dovre-packs
+    about: Browse or file issues for optional pre-built packs (cf-health, http-otel, docker, jira, custom-app)
