@@ -3,5 +3,6 @@ export { cfHealthPack, cfHealthCrate, createCfHealthPack } from "./packs/cf-heal
 export { httpOtelPack, httpOtelCrate, createHttpOtelPack } from "./packs/http-otel/index.ts";
 export { dockerPack, dockerCrate, createDockerPack } from "./packs/docker/index.ts";
 export { jiraPack, jiraCrate, createJiraPack } from "./packs/jira/index.ts";
+export { kafkaPack, kafkaCrate, createKafkaPack } from "./packs/kafka/index.ts";
 export { customAppPack, customAppCrate } from "./packs/custom-app/index.ts";
 export { gitlabPack, createGitlabPack } from "./packs/gitlab/index.ts";
