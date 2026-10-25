@@ -181,3 +181,27 @@ test("slack: the send act re-checks the channel, posts, and logs without the bod
   assert.equal(failed.ok, false);
   assert.ok(inserts3.some((i) => i.sql.includes("actions") && i.binds[4] === 0));
 });
+
+test("slack: channels past the first page of conversations.list are found, and an unlisted ID is asked for directly", async () => {
+  const calls: string[] = [];
+  const json = (b: unknown) => new Response(JSON.stringify(b), { headers: { "content-type": "application/json" } });
+  const fetchFn = (async (input: string | URL | Request) => {
+    const url = String(input);
+    calls.push(url.replace("https://slack.com/api/", ""));
+    if (url.includes("auth.test")) return json({ ok: true, user_id: ME });
+    if (url.includes("conversations.list")) {
+      return url.includes("cursor=p2")
+        ? json({ ok: true, channels: [{ id: "C200", name: "deploys" }], response_metadata: { next_cursor: "" } })
+        : json({ ok: true, channels: [{ id: "C1", name: "general" }], response_metadata: { next_cursor: "p2" } });
+    }
+    if (url.includes("conversations.info")) return json({ ok: true, channel: { id: "C999XYZ", name: "far-away" } });
+    if (url.includes("conversations.history")) return json({ ok: true, messages: [] });
+    return json({ ok: true, items: [] });
+  }) as typeof fetch;
+  const pack = createSlackPack({ fetchFn });
+  await pack.refresh!(testContext({ env: { SLACK_TOKEN: "xoxp-1", SLACK_CHANNELS: "deploys,C999XYZ" } }));
+  const kept = pack.kept()!;
+  assert.ok(kept.ok, kept.error);
+  assert.deepEqual(kept.channels.map((c) => c.name), ["deploys", "far-away"]);
+  assert.ok(calls.some((c) => c.startsWith("conversations.info") && c.includes("channel=C999XYZ")));
+});

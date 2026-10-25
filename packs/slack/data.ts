@@ -89,22 +89,28 @@ export async function readSlack(ctx: PackContext, fetchFn: typeof fetch = fetch,
     const wanted = wantedChannels(ctx.env.SLACK_CHANNELS);
     if (!wanted.length) return { ...fail("Set SLACK_CHANNELS to the channels to watch (names or IDs, comma-separated)."), me };
 
-    // Resolve names to IDs: list the channels I can see, match case-insensitively.
-    const list = await call("conversations.list", { types: "public_channel,private_channel", limit: "200", exclude_archived: "true" }, token, fetchFn);
-    const rows = Array.isArray(list.channels) ? list.channels : [];
+    // Resolve names to IDs: list the channels I can see (up to 5 pages of 200), match case-insensitively.
+    const rows: unknown[] = [];
+    let cursor = "";
+    for (let page = 0; page < 5; page++) {
+      const list = await call("conversations.list", { types: "public_channel,private_channel", limit: "200", exclude_archived: "true", ...(cursor ? { cursor } : {}) }, token, fetchFn);
+      if (Array.isArray(list.channels)) rows.push(...list.channels);
+      cursor = String((list.response_metadata as { next_cursor?: unknown } | undefined)?.next_cursor ?? "");
+      if (!cursor) break;
+    }
     const known = rows.flatMap((r) => {
       if (typeof r !== "object" || r === null) return [];
       const { id, name } = r as { id?: unknown; name?: unknown };
       return typeof id === "string" && id ? [{ id, name: channelName(name) }] : [];
     });
     const lower = new Map(known.map((c) => [c.name.toLowerCase(), c.id]));
-    const channels = wanted.flatMap((w) => {
-      const byId = known.find((c) => c.id === w);
-      if (byId) return [byId];
-      const id = lower.get(w.toLowerCase());
-      const c = known.find((x) => x.id === id);
-      return c ? [c] : [];
-    });
+    const channels: { id: string; name: string }[] = [];
+    for (const w of wanted) {
+      const c = known.find((x) => x.id === w) ?? known.find((x) => x.id === lower.get(w.toLowerCase()));
+      // An ID past the listed pages (a big workspace): ask Slack for that one channel.
+      const found = c ?? (/^[CG][A-Z0-9]{6,}$/.test(w) ? await checkChannel(token, w, fetchFn) : null);
+      if (found && !channels.some((x) => x.id === found.id)) channels.push(found);
+    }
     if (!channels.length) return { ...fail("None of SLACK_CHANNELS matched a channel I can see."), me };
 
     // Each watched channel's recent history: only messages naming me are kept.
