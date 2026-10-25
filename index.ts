@@ -8,3 +8,4 @@ export { linearPack, linearCrate, createLinearPack } from "./packs/linear/index.
 export { customAppPack, customAppCrate } from "./packs/custom-app/index.ts";
 export { gitlabPack, createGitlabPack } from "./packs/gitlab/index.ts";
 export { serviceBusPack, createServiceBusPack } from "./packs/service-bus/index.ts";
+export { pubsubPack, createPubsubPack } from "./packs/pubsub/index.ts";
