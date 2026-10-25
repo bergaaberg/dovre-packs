@@ -1,9 +1,9 @@
 /**
  * GitLab as a Dovre forge (REST API v4, a personal access token with `read_api`). Merge requests map
  * onto Dovre's PRs, todos onto notifications, project events onto movement, and blocked deployments
- * onto waiting deploys. Read-only: nothing here writes to GitLab.
+ * onto waiting deploys, issues onto the Issues pack's sets. Read-only: nothing here writes to GitLab.
  */
-import type { Deploy, Forge, Move, Note, Pr, PrRef } from "dovre/forge/types.ts";
+import type { Deploy, Forge, Issue, IssueSets, Move, Note, Pr, PrRef } from "dovre/forge/types.ts";
 import { ownersOf } from "dovre/owners.ts";
 
 export type Fetch = typeof fetch;
@@ -268,6 +268,78 @@ export async function loadDeploys(gl: GitLab, repos: string[]): Promise<Deploy[]
   return out.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
+// ── Issues (the core Issues pack, bergaaberg/dovre#36) ───────────────────────
+
+type RawIssue = {
+  iid: number; project_id: number; title: string; web_url: string; state: string; created_at: string; updated_at: string;
+  author: { username: string } | null; assignees?: { username: string }[] | null; labels?: string[]; user_notes_count?: number;
+  milestone?: { title: string } | null; issue_type?: string | null;
+};
+type RawTodo2 = { action_name: string; target_type: string; target: RawIssue | null };
+type RawClosedBy = { iid: number; state: string; web_url: string };
+
+const mrState = (s: string): Issue["prs"][number]["state"] => (s === "merged" ? "MERGED" : s === "opened" ? "OPEN" : "CLOSED");
+
+export function toIssue(r: RawIssue, prs: RawClosedBy[] = []): Issue {
+  return {
+    repo: repoOfUrl(r.web_url),
+    number: r.iid,
+    title: r.title,
+    url: r.web_url,
+    state: r.state === "opened" ? "OPEN" : "CLOSED",
+    labels: r.labels ?? [],
+    author: r.author?.username ?? "ghost",
+    assignees: (r.assignees ?? []).map((a) => a.username),
+    comments: r.user_notes_count ?? 0,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+    ...(r.milestone ? { milestone: r.milestone.title } : {}),
+    ...(r.issue_type && r.issue_type !== "issue" ? { type: r.issue_type[0]!.toUpperCase() + r.issue_type.slice(1) } : {}),
+    prs: prs.flatMap((m) => (repoOfUrl(m.web_url) ? [{ key: `${repoOfUrl(m.web_url)}#${m.iid}`, state: mrState(m.state) }] : [])),
+  };
+}
+
+const REPO_PATH = /^[\w.-]+(\/[\w.-]+)+$/;
+/** Merge requests looked up for "closed by", at most: one call each. */
+const MAX_CLOSED_BY = 40;
+
+/**
+ * My open issues: assigned (scope=assigned_to_me), opened by me (created_by_me), mentioning me
+ * (pending todos for a mention), and triage (open, no assignee, no label) in the `triage` projects.
+ * In the owners' groups only; newest first.
+ */
+export async function loadIssues(gl: GitLab, owners: string, opts: { triage?: string[] } = {}): Promise<IssueSets> {
+  const groups = ownersOf(owners);
+  const ours = (list: RawIssue[]) => list.filter((i) => i.state === "opened" && inOwners(repoOfUrl(i.web_url), groups));
+  const triage = [...new Set(opts.triage ?? [])].filter((r) => REPO_PATH.test(r) && !r.split("/").some((p) => p === "." || p === "..") && inOwners(r, groups));
+  const [assigned, authored, todos, ...waiting] = await Promise.all([
+    gl.get<RawIssue[]>(`/issues?state=opened&scope=assigned_to_me&per_page=100`),
+    gl.get<RawIssue[]>(`/issues?state=opened&scope=created_by_me&per_page=100`),
+    gl.get<RawTodo2[]>(`/todos?state=pending&type=Issue&per_page=100`),
+    ...triage.map((r) => gl.get<RawIssue[]>(`/projects/${enc(r)}/issues?state=opened&assignee_id=None&labels=None&per_page=30`)),
+  ]);
+  const mentioned = todos.flatMap((t) => (t.target_type === "Issue" && t.target && /^(mentioned|directly_addressed)$/.test(t.action_name) ? [t.target] : []));
+  const raw = { assigned: ours(assigned), mentioned: ours(mentioned), authored: ours(authored), triage: ours(waiting.flat()) };
+  // Each issue once, by key; then what closes it, for the first few.
+  const keyOf = (i: RawIssue) => `${i.project_id}#${i.iid}`;
+  const unique = new Map<string, RawIssue>();
+  for (const list of Object.values(raw)) for (const i of list) unique.set(keyOf(i), i);
+  const closedBy = new Map<string, RawClosedBy[]>();
+  await Promise.all(
+    [...unique.values()].slice(0, MAX_CLOSED_BY).map(async (i) => {
+      closedBy.set(keyOf(i), await gl.get<RawClosedBy[]>(`/projects/${i.project_id}/issues/${i.iid}/closed_by`).catch(() => []));
+    }),
+  );
+  const seen = (list: RawIssue[]) => {
+    const once = new Set<string>();
+    return list
+      .filter((i) => (once.has(keyOf(i)) ? false : (once.add(keyOf(i)), true)))
+      .map((i) => toIssue(i, closedBy.get(keyOf(i))))
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  };
+  return { assigned: seen(raw.assigned), mentioned: seen(raw.mentioned), authored: seen(raw.authored), triage: seen(raw.triage) };
+}
+
 // ── The forge ─────────────────────────────────────────────────────────────────
 
 export function gitlabForge(gl: GitLab): Forge {
@@ -289,5 +361,6 @@ export function gitlabForge(gl: GitLab): Forge {
       return m && hostOf(url.split("/")[2]) === gl.host ? `${m[1]}#${m[2]}` : undefined;
     },
     deploys: (repos) => loadDeploys(gl, repos),
+    issues: (_login, owners, opts) => loadIssues(gl, owners, opts),
   };
 }
