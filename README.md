@@ -10,6 +10,7 @@ Core (`bergaaberg/dovre`) ships with the built-in cockpit packs (`agents`, `assi
 |---|---|---|---|---|
 | `cf-health` | **Cloudflare Health** | `any` (Local & Hosted) | 24h Cloudflare Workers GraphQL telemetry (`workersInvocationsAdaptive` requests, 5xx errors, status). | `CF_ACCOUNT_ID`, `CF_API_TOKEN`, `CF_WORKERS` |
 | `http-otel` | **HTTP & OpenTelemetry** | `any` (Local & Hosted) | Polls `/healthz` JSON/HTTP endpoints and optional OpenTelemetry collector metrics. | `HTTP_HEALTH_URLS` |
+| `otel` | **OpenTelemetry & Prometheus** | `any` (Local & Hosted) | RED metrics (rate, 5xx %, p95/p99) per service from a Prometheus-compatible API (Prometheus, Mimir, VictoriaMetrics, Grafana Cloud), firing alerts, a 24h error/alert lane on Today's horizon, avatar storm/fire, and the running prod version beside mapped repos on /deploys. | `OTEL_PROMETHEUS_URL`, `OTEL_SERVICES` (`OTEL_BEARER_TOKEN` optional) |
 | `docker` | **Docker Containers** | `local-only` | Inspects local Docker containers (`docker ps --format json`), status, ports, and health. | `docker` CLI on `PATH` |
 | `jira` | **Jira Issues** | `any` (Local & Hosted) | Tracks assigned open Jira issues, links `PROJ-123` keys in PRs/My List, and renders a Today card. | `JIRA_SITE`, `JIRA_EMAIL`, `JIRA_TOKEN` |
 | `kafka` | **Kafka / Redpanda** | `any` (Local & Hosted) | Consumer group lag, dead-letter topics and partition health from a lag endpoint (Redpanda Admin API, Confluent REST Proxy v3, or a lag exporter). Metadata only; rings a need when lag grows. | `KAFKA_ADMIN_URL` |
