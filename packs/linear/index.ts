@@ -1,6 +1,7 @@
 /**
  * Linear Pack (`linear`): assigned open issues, active cycle progress, un-triaged team issues,
- * `TEAM-123` reference linking, and Bino acts (create an issue, comment on one).
+ * `TEAM-123` reference linking, Today's glance and opening line, and Bino acts (create an issue,
+ * comment on one).
  *
  * PR pills (`pr.lead`, `pr.facts`) wait for core: those slots are told only the repo, so a pill
  * would land on every PR in it, not the one that names the issue (bergaaberg/dovre#15).
@@ -8,7 +9,7 @@
 import { html } from "hono/html";
 import { type Pack, PACK_API, type RefRule } from "dovre/packs/types.ts";
 import { logAction } from "dovre/actions/deploys.ts";
-import { checkIssue, commentIssue, createIssue, type LinearKept, PRIORITY, readLinear } from "./data.ts";
+import { checkIssue, commentIssue, createIssue, type LinearIssue, type LinearKept, PRIORITY, readLinear } from "./data.ts";
 import { linearCard, linearPage } from "./view.ts";
 
 /** The keys this Dovre links: the configured team, else every team key seen in the data. */
@@ -20,9 +21,23 @@ function refPattern(envTeam: string | undefined, kept: LinearKept | undefined): 
   return new RegExp(`\\b(?:${uniq.join("|")})-\\d{1,7}\\b`, "g");
 }
 
-export function createLinearPack(opts: { fetchFn?: typeof fetch } = {}): Pack & { kept(): LinearKept | undefined } {
+/** Each issue's link through `href`, when one is given. */
+function relink(k: LinearKept, href: ((key: string) => string) | undefined): LinearKept {
+  if (!href) return k;
+  const one = (i: LinearIssue) => ({ ...i, url: href(i.key) });
+  return { ...k, mine: k.mine.map(one), teams: k.teams.map((t) => ({ ...t, untriaged: t.untriaged.map(one) })) };
+}
+
+export function createLinearPack(
+  opts: {
+    fetchFn?: typeof fetch;
+    /** Where an issue's link points, in place of linear.app (the public demo's "External link" page). */
+    issueHref?: (key: string) => string;
+  } = {},
+): Pack & { kept(): LinearKept | undefined } {
   const fetchFn = opts.fetchFn ?? fetch;
   let kept: LinearKept | undefined;
+  const read = async (ctx: Parameters<typeof readLinear>[0]) => relink(await readLinear(ctx, fetchFn), opts.issueHref);
   return {
     kept: () => kept,
     manifest: {
@@ -39,7 +54,7 @@ export function createLinearPack(opts: { fetchFn?: typeof fetch } = {}): Pack & 
       ],
     },
     async refresh(ctx) {
-      kept = await readLinear(ctx, fetchFn);
+      kept = await read(ctx);
       ctx.publish(["linear", "snapshot"]);
     },
     nav: () => [{ href: "/linear", title: "Linear", icon: "ticket", group: "Code" }],
@@ -48,11 +63,17 @@ export function createLinearPack(opts: { fetchFn?: typeof fetch } = {}): Pack & 
       app.get("/linear", (c) => ctx.page(c, { title: "Linear", body: linearPage(kept) }));
     },
     today: () => (kept ? [{ id: "now", render: linearCard(kept) }] : []),
+    glance: () => (kept?.ok ? [{ label: "Linear", value: kept.mine.length }] : []),
+    brief() {
+      const n = kept?.ok ? kept.mine.filter((i) => i.priority === 1).length : 0;
+      return n ? [{ text: `${n} urgent Linear ${n === 1 ? "issue" : "issues"}`, href: "/linear", tone: "warn" }] : [];
+    },
     refs(ctx): RefRule[] {
       // Links need the workspace, which the first refresh learns.
       const pattern = refPattern(ctx.env.LINEAR_TEAM, kept);
       const workspace = kept?.workspace;
-      return pattern && workspace ? [{ pattern, href: (m) => `https://linear.app/${workspace}/issue/${m}` }] : [];
+      const href = opts.issueHref ?? (workspace ? (m: string) => `https://linear.app/${workspace}/issue/${m}` : undefined);
+      return pattern && href ? [{ pattern, href }] : [];
     },
     bino: () => {
       if (!kept?.ok) return "";
@@ -102,9 +123,9 @@ export function createLinearPack(opts: { fetchFn?: typeof fetch } = {}): Pack & 
                 return { ok: false, error: r.error };
               }
               await logAction(ctx.db, { kind: "linear.create", target, detail: title, ok: true });
-              kept = await readLinear(ctx, fetchFn);
+              kept = await read(ctx);
               ctx.publish(["linear"]);
-              return { ok: true, done: `Created ${r.key}`, href: r.url || "/linear" };
+              return { ok: true, done: `Created ${r.key}`, href: opts.issueHref?.(r.key) ?? (r.url || "/linear") };
             } catch (e) {
               const error = String((e as Error)?.message ?? e);
               await logAction(ctx.db, { kind: "linear.create", target, ok: false, error });
@@ -146,7 +167,7 @@ export function createLinearPack(opts: { fetchFn?: typeof fetch } = {}): Pack & 
                 return { ok: false, error: r.error };
               }
               await logAction(ctx.db, { kind: "linear.comment", target, ok: true });
-              return { ok: true, done: `Commented on ${issue.key}`, href: issue.url || "/linear" };
+              return { ok: true, done: `Commented on ${issue.key}`, href: opts.issueHref?.(issue.key) ?? (issue.url || "/linear") };
             } catch (e) {
               const error = String((e as Error)?.message ?? e);
               await logAction(ctx.db, { kind: "linear.comment", target, ok: false, error });

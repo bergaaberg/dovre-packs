@@ -137,6 +137,32 @@ test("linear: bino says counts and states, never a title's raw markup", async ()
   assert.match(bino, /ENG: 1 un-triaged/);
 });
 
+test("linear: glance counts my issues; the opening line speaks only for urgent ones", async () => {
+  const urgent = { ...READ, issues: { nodes: [ISSUE("ENG-7", "Ship the pack", { priority: 1 }), ISSUE("ENG-8", "Tidy up")] } };
+  for (const [body, line] of [[READ, undefined], [urgent, "1 urgent Linear issue"]] as const) {
+    const { fetchFn } = fakeLinear([{ match: /viewer/, body }]);
+    const pack = createLinearPack({ fetchFn });
+    const ctx = testContext({ env: { LINEAR_API_KEY: "k" } });
+    assert.deepEqual(pack.glance!(ctx), [], "nothing before the first read");
+    await pack.refresh!(ctx);
+    assert.deepEqual(pack.glance!(ctx), [{ label: "Linear", value: 2 }]);
+    const brief = pack.brief!(ctx);
+    if (line) assert.deepEqual(brief, [{ text: line, href: "/linear", tone: "warn" }]);
+    else assert.deepEqual(brief, []);
+  }
+});
+
+test("linear: issueHref points every issue link (and refs) elsewhere", async () => {
+  const { fetchFn } = fakeLinear([{ match: /viewer/, body: READ }]);
+  const pack = createLinearPack({ fetchFn, issueHref: (key) => `/elsewhere/linear.app/acme/issue/${key}` });
+  const ctx = testContext({ env: { LINEAR_API_KEY: "k" } });
+  await pack.refresh!(ctx);
+  const kept = pack.kept()!;
+  for (const i of [...kept.mine, ...kept.teams.flatMap((t) => t.untriaged)]) assert.equal(i.url, `/elsewhere/linear.app/acme/issue/${i.key}`);
+  assert.equal(pack.refs!(ctx)[0]!.href("ENG-1"), "/elsewhere/linear.app/acme/issue/ENG-1");
+  assert.ok(!String(await linearPage(kept)).includes("https://linear.app"));
+});
+
 test("linear: the create act re-checks the team, writes, and logs to the actions table", async () => {
   const { fetchFn, calls } = fakeLinear([
     { match: /DovreLinearTeam/, body: { teams: { nodes: [{ id: "team-uuid", key: "ENG", name: "Engineering" }] } } },
