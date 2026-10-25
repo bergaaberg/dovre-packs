@@ -146,3 +146,24 @@ test("otel: Basic auth is used when the token has a colon", async () => {
   await pack.refresh!(testContext({ env: { ...ENV, OTEL_BEARER_TOKEN: "user:pass" } }));
   assert.ok(seen.length > 0 && seen.every((a) => a.startsWith("Basic ")));
 });
+
+test("otel: a service with no request series is 'no data', never ok, and the page says so", async () => {
+  const pack = createOtelPack({ fetchFn: fakeProm().fetchFn });
+  await pack.refresh!(testContext({ env: { ...ENV, OTEL_SERVICES: "api=bergaaberg/api,typo" } }));
+  const kept = pack.kept()!;
+  assert.ok(kept.ok);
+  const typo = kept.services.find((s) => s.name === "typo")!;
+  assert.equal(typo.status, "none");
+  const page = String(await otelPage(kept));
+  assert.match(page, /No data for typo/);
+  assert.match(page, /no data/);
+});
+
+test("otel: status pills render as markup, not as escaped text", async () => {
+  const pack = createOtelPack({ fetchFn: fakeProm().fetchFn });
+  await pack.refresh!(testContext({ env: ENV }));
+  const page = String(await otelPage(pack.kept()));
+  assert.ok(!page.includes("&lt;span class=&quot;pill"), "no escaped pill markup");
+  assert.match(page, /<span class="pill[^"]*">down<\/span>/);
+  assert.match(page, /<div data-live id="otel">/);
+});

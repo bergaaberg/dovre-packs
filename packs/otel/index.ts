@@ -34,7 +34,10 @@ export function createOtelPack(opts: { fetchFn?: typeof fetch } = {}): Pack & { 
     routes(app, ctx) {
       app.get("/otel", (c) => ctx.page(c, { title: "OpenTelemetry", body: otelPage(kept) }));
     },
-    today: () => (kept ? [{ id: "otel", render: otelCard(kept) }] : []),
+    today: () => {
+      const card = otelCard(kept);
+      return card ? [{ id: "otel", render: card }] : [];
+    },
     glance() {
       if (!kept?.ok || !kept.services.length) return [];
       return [{ label: "req/s", value: Math.round(kept.services.reduce((a, s) => a + s.rps, 0) * 10) / 10 }];

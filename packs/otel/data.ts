@@ -23,7 +23,8 @@ export type OtelService = {
   /** p95 / p99 latency in ms. */
   p95: number;
   p99: number;
-  status: "ok" | "warn" | "bad";
+  /** "none": the API has no request series for this name (a typo, or a backend that labels it differently): never "ok". */
+  status: "ok" | "warn" | "bad" | "none";
   /** Running version, from the `service_version`/`build_info` label. */
   version?: string;
   /** 5xx ratio % per hour over the last 24h, for the horizon lane. */
@@ -59,6 +60,9 @@ function value(v: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+/** Whether an instant query answered any series at all. */
+const answered = (v: unknown) => ((v as { data?: { result?: unknown[] } } | undefined)?.data?.result?.length ?? 0) > 0;
+
 /** A query_range's values as numbers with their times. */
 function series(v: unknown): { at: number; n: number }[] {
   const vals = (v as { data?: { result?: { values?: [number, string][] }[] } } | undefined)?.data?.result?.[0]?.values ?? [];
@@ -67,7 +71,7 @@ function series(v: unknown): { at: number; n: number }[] {
 
 const q = (s: string) => `?query=${encodeURIComponent(s)}`;
 
-/** The metric prefix real OTel SDKs emit; fall back to the bare Prometheus http one. */
+/** The OTel semantic-convention HTTP server metric, by its `service_name` label. */
 function count(service: string) {
   const m = `http_server_request_duration_seconds_count{service_name="${service}"}`;
   return { all: m, err: `http_server_request_duration_seconds_count{service_name="${service}",http_response_status_code=~"5.."}` };
@@ -125,12 +129,15 @@ export async function readOtel(ctx: PackContext, fetchFn?: typeof fetch): Promis
       const errPct = Math.max(0, value(e));
       const p95 = Math.round(value(q95) * 1000);
       const p99 = Math.round(value(q99) * 1000);
+      // An alert still counts without metrics; no request series and no alert is "none", never "ok".
       const status: OtelService["status"] =
         errPct >= BAD_ERR || p95 >= BAD_P95 || svcAlerts.some((a) => a.severity === "critical")
           ? "bad"
           : errPct >= WARN_ERR || p95 >= WARN_P95 || svcAlerts.some((a) => a.severity === "warning")
             ? "warn"
-            : "ok";
+            : answered(r)
+              ? "ok"
+              : "none";
       const versionLabel = ver as { data?: { result?: { metric?: Record<string, string> }[] } } | null;
       services.push({
         name: s.name,
