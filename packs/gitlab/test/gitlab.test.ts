@@ -146,3 +146,38 @@ test("blocked deployments: the newest per environment waits, older ones are supe
   assert.equal(prod.sha, "sha2aaa");
   assert.equal(prod.url, `https://${HOST}/jobs/2`);
 });
+
+test("issues(): assigned, opened by me, mentioned from todos, triage per project; the owners' groups only, each once, with what closes it", async () => {
+  const issue = (iid: number, o: Record<string, unknown> = {}) => ({
+    iid, project_id: 42, title: `Issue ${iid}`, web_url: `https://${HOST}/northwind/web/shop/-/issues/${iid}`, state: "opened",
+    created_at: "2026-10-20T00:00:00Z", updated_at: `2026-10-2${iid % 10}T00:00:00Z`, author: { username: "kari" },
+    assignees: [{ username: "kari" }], labels: ["bug"], user_notes_count: 2, milestone: { title: "Q4" }, issue_type: "issue", ...o,
+  });
+  const outside = issue(9, { project_id: 7, web_url: `https://${HOST}/someone-else/tool/-/issues/9` });
+  const { gl, asked } = fakeGitLab({
+    "/issues?state=opened&scope=assigned_to_me": [issue(1), issue(2, { issue_type: "incident" }), outside],
+    "/issues?state=opened&scope=created_by_me": [issue(3, { assignees: [] })],
+    "/todos?state=pending&type=Issue": [
+      { action_name: "mentioned", target_type: "Issue", target: issue(1) },
+      { action_name: "mentioned", target_type: "Issue", target: issue(1) },
+      { action_name: "assigned", target_type: "Issue", target: issue(4) },
+      { action_name: "directly_addressed", target_type: "Issue", target: issue(5) },
+      { action_name: "mentioned", target_type: "MergeRequest", target: null },
+    ],
+    "/projects/northwind%2Fweb%2Fshop/issues?state=opened&assignee_id=None&labels=None": [issue(6, { assignees: [], labels: [] })],
+    "/projects/42/issues/1/closed_by": [{ iid: 3, state: "merged", web_url: `https://${HOST}/northwind/web/shop/-/merge_requests/3` }],
+  });
+  const sets = await gitlabForge(gl).issues!("kari", "northwind", { triage: ["northwind/web/shop", "someone-else/tool", "northwind/../x"] });
+  assert.deepEqual(sets.assigned.map((i) => i.number), [2, 1]);
+  assert.deepEqual(sets.mentioned.map((i) => i.number), [5, 1], "a mention once; an assignment todo isn't one");
+  assert.deepEqual(sets.authored.map((i) => i.number), [3]);
+  assert.deepEqual(sets.triage.map((i) => i.number), [6]);
+  const one = sets.assigned.find((i) => i.number === 1)!;
+  assert.deepEqual(
+    { repo: one.repo, labels: one.labels, assignees: one.assignees, comments: one.comments, milestone: one.milestone, prs: one.prs, type: one.type },
+    { repo: "northwind/web/shop", labels: ["bug"], assignees: ["kari"], comments: 2, milestone: "Q4", prs: [{ key: "northwind/web/shop#3", state: "MERGED" }], type: undefined },
+  );
+  assert.equal(sets.assigned[0]!.type, "Incident");
+  assert.ok(!asked.some((a) => a.includes("someone-else")), "a project outside the owners is never asked");
+  assert.ok(!asked.some((a) => a.includes("/projects/7/")), "nor what closes an issue outside them");
+});
