@@ -16,6 +16,7 @@ Core (`bergaaberg/dovre`) ships with the built-in cockpit packs (`agents`, `assi
 | `gitlab` | **GitLab forge** | `any` (Local & Hosted) | GitLab as the forge (`FORGE=gitlab`): merge requests with reviews, pipelines and threads, todos, group activity and blocked deployments. `REPO_OWNERS` lists the top-level groups. Read-only. | `GITLAB_HOST`, `GITLAB_TOKEN` (`read_api`) |
 | `service-bus` | **Azure Service Bus** | `any` (Local & Hosted) | Active, scheduled and dead-lettered counts per queue and topic subscription, with a DLQ radar: a non-empty dead-letter queue is a need, a ring and avatar trouble. Counts and names only, never message bodies. | `SERVICEBUS_ENDPOINT`, `SERVICEBUS_TOKEN` |
 | `linear` | **Linear** | `any` (Local & Hosted) | Assigned open Linear issues, active cycle progress, un-triaged team issues, `TEAM-123` linking and Bino acts (create an issue, comment). | `LINEAR_API_KEY` |
+| `pubsub` | **Google Cloud Pub/Sub** | `any` (Local & Hosted) | Pub/Sub subscription backlog, oldest unacked message age, and dead-letter radar. | `PUBSUB_PROJECT`, `PUBSUB_TOKEN` |
 | `custom-app` | **Custom App Starter** | `any` (Local & Hosted) | Clean 3-file starter pack (`index.ts`, `data.ts`, `view.ts`) + hostile-input test suite. | *(Optional)* `CUSTOM_APP_URL` |
 
 ## Installing a Pack in 1 Command
