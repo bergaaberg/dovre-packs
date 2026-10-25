@@ -4,3 +4,4 @@ export { httpOtelPack, httpOtelCrate, createHttpOtelPack } from "./packs/http-ot
 export { dockerPack, dockerCrate, createDockerPack } from "./packs/docker/index.ts";
 export { jiraPack, jiraCrate, createJiraPack } from "./packs/jira/index.ts";
 export { customAppPack, customAppCrate } from "./packs/custom-app/index.ts";
+export { gitlabPack, createGitlabPack } from "./packs/gitlab/index.ts";
