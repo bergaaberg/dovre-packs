@@ -58,7 +58,8 @@ export function createKafkaPack(opts: { fetchFn?: typeof fetch } = {}): Pack & {
       const urp = kept.cluster?.underReplicatedPartitions ?? 0;
       if (urp > 0) {
         out.push({
-          key: `under-replicated ${urp}`,
+          // Stable while partitions stay under-replicated: a changing count doesn't ring again.
+          key: `under-replicated${urp > 10 ? " bad" : ""}`,
           title: `${urp} partitions under-replicated`,
           line: "Cluster health",
           href: "/kafka",

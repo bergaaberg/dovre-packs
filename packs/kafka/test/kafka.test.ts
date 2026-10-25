@@ -61,8 +61,10 @@ test("kafka: reads lag, sends the token as a header, and escalates across refres
   let needs = pack.needs!(ctx);
   assert.ok(needs.some((n) => n.tone === "bad" && n.title.includes("payments.dlq")));
   assert.ok(needs.some((n) => n.title.includes("under-replicated")));
-  // The next refresh: orders grows 50 → 900 (still under the threshold) and needs a warning.
-  body = { ...READING, groups: [READING.groups[0]!, READING.groups[1]!] };
+  // Two more refreshes: orders grows 50 → 300 → 900 (still under the threshold) and needs a warning.
+  body = { ...READING, groups: [{ ...READING.groups[0]!, totalLag: 300 }, READING.groups[1]!] };
+  await pack.refresh!(ctx);
+  assert.ok(!pack.needs!(ctx).some((n) => n.title.includes("growing")), "one rise isn't growing yet");
   body = { ...READING, groups: [{ ...READING.groups[0]!, totalLag: 900 }, READING.groups[1]!] };
   await pack.refresh!(ctx);
   kept = pack.kept()!;
@@ -119,9 +121,10 @@ test("kafka: a missing URL, a bad one, and a failing endpoint each say so withou
 
 test("kafka: lagState says which level, and why", () => {
   const g = { key: "g/t", group: "g", topic: "t", totalLag: 20, maxLagPartition: 0, partitions: 0, dlq: false };
-  const kept: KafkaKept = { at: 0, ok: true, groups: [], history: new Map([["g/t", [{ at: 1, lag: 10 }, { at: 2, lag: 20 }]]]) };
+  const kept: KafkaKept = { at: 0, ok: true, groups: [], history: new Map([["g/t", [{ at: 1, lag: 100 }, { at: 2, lag: 150 }, { at: 3, lag: 200 }]], ["s/t", [{ at: 1, lag: 1 }, { at: 2, lag: 2 }, { at: 3, lag: 3 }]], ["w/t", [{ at: 1, lag: 100 }, { at: 2, lag: 300 }, { at: 3, lag: 200 }]]]) };
   assert.equal(lagState(kept, { ...g, totalLag: 100_000 }, 1000).level, "bad"); // 100× the threshold
   assert.equal(lagState(kept, { ...g, totalLag: 1000 }, 1000).level, "warn");
-  assert.equal(lagState(kept, g, 1000).level, "warn"); // growing 10 → 20
-  assert.equal(lagState(kept, { ...g, totalLag: 5 }, 1000).level, "ok");
+  assert.equal(lagState(kept, { ...g, totalLag: 200 }, 1000).level, "warn"); // growing 100 → 150 → 200
+  assert.equal(lagState(kept, { ...g, key: "s/t", totalLag: 3 }, 1000).level, "ok"); // rising, but tiny
+  assert.equal(lagState(kept, { ...g, key: "w/t", totalLag: 200 }, 1000).level, "ok"); // wobbling
 });

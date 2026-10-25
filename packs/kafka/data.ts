@@ -37,6 +37,8 @@ export type KafkaKept = {
 
 export const LAG_WARN_DEFAULT = 1000;
 export const HISTORY_MAX = 12;
+/** Samples in a row that must each be higher for lag to count as growing. */
+export const GROWING_RUNS = 3;
 
 const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? Math.max(0, Math.trunc(v)) : 0);
 const dlqTopic = (topic: string) => /(?:\.|^-)(?:dlq|dlt)(?:$|[.-])/i.test(topic) || /(?:^|[.-])(?:dlq|dlt)(?:$|[.-])/i.test(topic);
@@ -121,10 +123,12 @@ export async function readKafka(
 
 /** What a group's samples say: behind the threshold, or growing across consecutive refreshes. */
 export function lagState(kept: KafkaKept, g: GroupLag, warn: number): { level: "bad" | "warn" | "ok"; why: string } {
-  const samples = kept.history.get(g.key) ?? [];
-  const previous = samples.length > 1 ? samples[samples.length - 2] : undefined;
   if (g.dlq && g.totalLag > 0) return { level: "bad", why: `dead-letter ${g.topic} is ${g.totalLag} behind` };
   if (g.totalLag >= warn) return { level: g.totalLag >= warn * 10 ? "bad" : "warn", why: `${g.totalLag} behind on ${g.topic}` };
-  if (previous && g.totalLag > previous.lag && g.totalLag > 0) return { level: "warn", why: `growing (${previous.lag} → ${g.totalLag}) on ${g.topic}` };
+  // Growing: up on each of the last GROWING_RUNS refreshes, and past a tenth of the threshold,
+  // so lag that wobbles (1 → 2) doesn't ring.
+  const last = (kept.history.get(g.key) ?? []).slice(-GROWING_RUNS);
+  const rising = last.length === GROWING_RUNS && last.every((s, i) => i === 0 || s.lag > last[i - 1]!.lag);
+  if (rising && g.totalLag >= warn / 10) return { level: "warn", why: `growing (${last[0]!.lag} → ${g.totalLag}) on ${g.topic}` };
   return { level: "ok", why: "" };
 }
