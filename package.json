@@ -4,7 +4,7 @@
   "private": false,
   "license": "MIT",
   "type": "module",
-  "description": "Pre-built Pluggable Packs for Dovre (cf-health, http-otel, docker, jira, custom-app).",
+  "description": "Pre-built Pluggable Packs for Dovre (cf-health, http-otel, docker, jira, gitlab, custom-app).",
   "repository": {
     "type": "git",
     "url": "https://github.com/bergaaberg/dovre-packs.git"
