@@ -56,9 +56,13 @@ export type DuckDbRunner = (
 
 export const defaultRunner: DuckDbRunner = async (args, opts = {}) => {
   try {
+    // Without AI_AGENT: DuckDB 2's CLI switches to an "agent mode" output when it's set.
+    const env = { ...process.env };
+    delete env.AI_AGENT;
     const child = execFileAsync("duckdb", args, {
       timeout: opts.timeoutMs ?? 30_000,
       maxBuffer: 16 * 1024 * 1024,
+      env,
     });
     if (opts.input && child.child.stdin) {
       child.child.stdin.write(opts.input);
@@ -167,6 +171,15 @@ export function directoryViewsSql(dirPath: string): string {
   }
 }
 
+/** What every in-memory run starts with: file access only under `dir` (none without one), then locked. */
+export function lockdownSql(dir: string | undefined): string {
+  const allowed = dir ? `SET allowed_directories = ['${join(dir, "/").replace(/'/g, "''")}'];\n` : "";
+  return `${allowed}SET enable_external_access = false;
+SET autoinstall_known_extensions = false;
+SET autoload_known_extensions = false;
+SET lock_configuration = true;`;
+}
+
 export type DuckDbData = {
   sources(): DuckDbTarget[];
   source(id: string): DuckDbTarget | undefined;
@@ -193,15 +206,18 @@ export function createDuckDbData(o: {
   const runQuery = async (target: DuckDbTarget, querySql: string, maxRows = MAX_ROWS): Promise<Rows> => {
     const t0 = now();
     const isMemoryOrDir = target.path === ":memory:" || target.isDir;
-    const dbArg = isMemoryOrDir ? ":memory:" : target.path;
-    const args = ["-readonly", "-json", dbArg];
+    // sqlOk keeps a query to one SELECT, but a SELECT can still read any file (read_text, read_csv),
+    // call getenv() or autoload httpfs. So DuckDB itself is shut in (tested against the real CLI):
+    // - a database file: -safe (no file access beyond it, no .shell) and -readonly;
+    // - a directory or :memory: (an in-memory database can't be -readonly): files only under that
+    //   directory, no environment, no extension autoloading, and the configuration locked before
+    //   the query runs.
+    const args = isMemoryOrDir ? ["-json", ":memory:"] : ["-safe", "-readonly", "-json", target.path];
 
     let inputSql = querySql.trim();
-    if (target.isDir) {
-      const views = directoryViewsSql(target.path);
-      if (views) {
-        inputSql = `${views}\n${inputSql}`;
-      }
+    if (isMemoryOrDir) {
+      const views = target.isDir ? directoryViewsSql(target.path) : "";
+      inputSql = `${lockdownSql(target.isDir ? target.path : undefined)}\n${views ? `${views}\n` : ""}${inputSql}`;
     }
 
     const res = await runner(args, { input: inputSql, timeoutMs: 30_000 });

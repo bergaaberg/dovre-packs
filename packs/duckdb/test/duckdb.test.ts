@@ -564,3 +564,44 @@ test("duckdb: HTTP routes respond with 200, 303 or 404 appropriately", async () 
   const qBadHtml = await rQBad.text();
   assert.ok(qBadHtml.includes("Query rejected"));
 });
+
+// ── Against the real duckdb CLI (skipped where it isn't installed) ──
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, writeFileSync as writeFileSyncReal } from "node:fs";
+import { tmpdir } from "node:os";
+import { join as joinPath } from "node:path";
+import { createDuckDbData as realData, parseSources as realSources } from "../data.ts";
+
+const hasDuckDb = (() => {
+  try {
+    execFileSync("duckdb", ["-version"], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+})();
+
+test("real duckdb: a directory source reads its files, and nothing outside it, no env, no unlocking", { skip: !hasDuckDb && "duckdb not installed" }, async () => {
+  const root = mkdtempSync(joinPath(tmpdir(), "duckdb-pack-"));
+  const dir = joinPath(root, "data");
+  execFileSync("mkdir", [dir]);
+  writeFileSyncReal(joinPath(dir, "orders.csv"), "id,total\n1,10\n2,32\n");
+  writeFileSyncReal(joinPath(root, "secret.txt"), "do-not-read");
+  const data = realData({ sources: realSources(`d=${dir}`) });
+  const got = await data.query("d", "SELECT sum(total) AS s FROM orders");
+  assert.equal(Number(got.rows[0]!.s), 42);
+  await assert.rejects(data.query("d", `SELECT content FROM read_text('${joinPath(root, "secret.txt")}')`), /disabled|Permission/i);
+  await assert.rejects(data.query("d", "SELECT getenv('HOME') AS h"), /disabled|Permission/i);
+  await assert.rejects(data.query("d", "SET enable_external_access = true"), /locked|Permission/i);
+});
+
+test("real duckdb: a database file source can't read other files or the environment", { skip: !hasDuckDb && "duckdb not installed" }, async () => {
+  const root = mkdtempSync(joinPath(tmpdir(), "duckdb-pack-"));
+  const db = joinPath(root, "shop.duckdb");
+  execFileSync("duckdb", [db], { input: "CREATE TABLE t AS SELECT 7 AS a;" });
+  writeFileSyncReal(joinPath(root, "secret.txt"), "do-not-read");
+  const data = realData({ sources: realSources(`shop=${db}`) });
+  assert.equal(Number((await data.query("shop", "SELECT a FROM t")).rows[0]!.a), 7);
+  await assert.rejects(data.query("shop", `SELECT content FROM read_text('${joinPath(root, "secret.txt")}')`), /disabled|Permission/i);
+  await assert.rejects(data.query("shop", "SELECT getenv('HOME') AS h"), /disabled|Permission/i);
+});

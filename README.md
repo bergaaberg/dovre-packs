@@ -19,7 +19,7 @@ Core (`bergaaberg/dovre`) ships with the built-in cockpit packs (`agents`, `assi
 | `service-bus` | **Azure Service Bus** | `any` (Local & Hosted) | Active, scheduled and dead-lettered counts per queue and topic subscription, with a DLQ radar: a non-empty dead-letter queue is a need, a ring and avatar trouble. Counts and names only, never message bodies. | `SERVICEBUS_ENDPOINT`, `SERVICEBUS_TOKEN` |
 | `linear` | **Linear** | `any` (Local & Hosted) | Assigned open Linear issues, active cycle progress, un-triaged team issues, `TEAM-123` linking and Bino acts (create an issue, comment). | `LINEAR_API_KEY` |
 | `pubsub` | **Google Cloud Pub/Sub** | `any` (Local & Hosted) | Pub/Sub subscription backlog, oldest unacked message age, and dead-letter radar. | `PUBSUB_PROJECT`, `PUBSUB_TOKEN` |
-| `duckdb` | **DuckDB** | `local-only` | Agentic analytics on local DuckDB databases, Parquet, CSV, and JSON lines files (zero-row schema discovery, AI query builder, manual/agentic execution, AI result review). | `DUCKDB_SOURCES`, `duckdb` CLI on `PATH` |
+| `duckdb` | **DuckDB** | `local-only` | Agentic analytics on local DuckDB databases, Parquet, CSV, and JSON lines files (zero-row schema discovery, AI query builder, manual/agentic execution, AI result review). | `DUCKDB_SOURCES`, `duckdb` CLI (1.3+) on `PATH`. Queries run shut in: no file access outside the source, no environment, no extensions loaded. |
 | `custom-app` | **Custom App Starter** | `any` (Local & Hosted) | Clean 3-file starter pack (`index.ts`, `data.ts`, `view.ts`) + hostile-input test suite. | *(Optional)* `CUSTOM_APP_URL` |
 
 ## Installing a Pack in 1 Command
