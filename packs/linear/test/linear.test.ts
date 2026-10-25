@@ -2,9 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { testContext } from "dovre/packs/testing.ts";
-import type { PackContext } from "dovre/packs/types.ts";
 import type { D1 } from "dovre/db.ts";
-import type { Snapshot } from "dovre/gather.ts";
 import { createLinearPack } from "../index.ts";
 import { linearCard, linearPage } from "../view.ts";
 
@@ -29,7 +27,7 @@ function fakeLinear(routes: { match: RegExp; body: unknown }[] = []) {
 const ISSUE = (key: string, title: string, over: Record<string, unknown> = {}) => ({
   identifier: key,
   title,
-  url: `https://linear.app/issue/${key}`,
+  url: `https://linear.app/acme/issue/${key}/some-slug`,
   priority: 2,
   updatedAt: "2026-10-24T10:00:00Z",
   team: { key: key.split("-")[0] },
@@ -41,6 +39,7 @@ const ISSUE = (key: string, title: string, over: Record<string, unknown> = {}) =
 
 const READ = {
   viewer: { name: "Kari Nordmann" },
+  organization: { urlKey: "acme" },
   issues: { nodes: [ISSUE("ENG-7", "Ship the pack"), ISSUE("OPS-3", H, { state: { name: H, type: "started" }, url: JS, project: { name: H } })] },
   teams: {
     nodes: [
@@ -75,12 +74,6 @@ function fakeDb() {
 }
 
 /** A snapshot whose one PR names an issue in its branch. */
-function snapshotWithPr(branch: string, title = "A change"): Snapshot {
-  return {
-    at: Date.now(),
-    prs: { ok: true, value: { mine: [{ repo: "shop", number: 1, title, branch, url: "https://example.com/1", updatedAt: "", author: "kari", review: null, checks: "NONE" }], review: [] } },
-  } as unknown as Snapshot;
-}
 
 test("linear: reads assigned issues, cycles and un-triaged; hostile titles and urls come out inert", async () => {
   const { fetchFn, calls } = fakeLinear([{ match: /viewer/, body: READ }]);
@@ -98,7 +91,9 @@ test("linear: reads assigned issues, cycles and un-triaged; hostile titles and u
   assert.equal(calls[0]!.headers.authorization, "lin_api_test");
   // Refs link both teams' keys.
   const refs = pack.refs!(ctx);
-  assert.equal(refs[0]!.href("ENG-7"), "https://linear.app/issue/ENG-7");
+  assert.equal(refs[0]!.href("ENG-7"), "https://linear.app/acme/issue/ENG-7");
+  // Linear's own link (workspace, key, slug) is kept as given.
+  assert.equal(kept.mine.find((i) => i.key === "ENG-7")!.url, "https://linear.app/acme/issue/ENG-7/some-slug");
   // Page and card escape the hostile title, state and project, and make the hostile url inert.
   for (const out of [String(await linearPage(kept)), String(linearCard(kept))]) {
     assert.ok(!out.includes("<script>"), "script escaped");
@@ -127,34 +122,9 @@ test("linear: LINEAR_TEAM narrows teams to one; refs still link its keys", async
   const kept = pack.kept()!;
   assert.equal(kept.teams.length, 1);
   assert.equal(kept.teams[0]!.key, "ENG");
-  // Even with nothing kept, the configured team's keys still link.
-  const bare = createLinearPack();
-  const refs = bare.refs!(testContext({ env: { LINEAR_TEAM: "ENG" } }));
-  assert.equal(refs[0]!.href("ENG-123"), "https://linear.app/issue/ENG-123");
-});
-
-test("linear: a PR naming an issue in its branch gets the pill and the facts", async () => {
-  const { fetchFn } = fakeLinear([{ match: /viewer/, body: READ }]);
-  const pack = createLinearPack({ fetchFn });
-  const snap = snapshotWithPr("feat/ENG-7-pack");
-  const ctx: PackContext = testContext({ env: { LINEAR_API_KEY: "k" }, snapshot: () => snap });
-  await pack.refresh!(ctx);
-  const slots = pack.slots!(ctx);
-  const lead = String(slots["pr.lead"]!({ repo: "shop" }));
-  assert.match(lead, /ENG-7 In Progress/);
-  const facts = slots["pr.facts"]!({ repo: "shop" });
-  assert.deepEqual(
-    facts.map(([k]) => k),
-    ["Linear", "Priority", "Cycle"],
-  );
-  assert.match(String(facts[0]![1]), /ENG-7/);
-  // A PR that names nothing gets nothing, and hostile branch text stays inert.
-  const hostile = snapshotWithPr(H, H);
-  const ctxH = testContext({ env: { LINEAR_API_KEY: "k" }, snapshot: () => hostile });
-  const slotsH = pack.slots!(ctxH);
-  assert.equal(String(slotsH["pr.lead"]!({ repo: "shop" })), "");
-  const inert = String(slotsH["pr.facts"]!({ repo: "shop" }).map(([, v]) => v).join(""));
-  assert.ok(!inert.includes("<script>"));
+  assert.equal(pack.refs!(ctx)[0]!.href("ENG-123"), "https://linear.app/acme/issue/ENG-123");
+  // Before the first refresh there's no workspace to link into, so nothing links yet.
+  assert.deepEqual(createLinearPack().refs!(testContext({ env: { LINEAR_TEAM: "ENG" } })), []);
 });
 
 test("linear: bino says counts and states, never a title's raw markup", async () => {
@@ -168,9 +138,9 @@ test("linear: bino says counts and states, never a title's raw markup", async ()
 });
 
 test("linear: the create act re-checks the team, writes, and logs to the actions table", async () => {
-  const { fetchFn } = fakeLinear([
-    { match: /DovreLinearTeam/, body: { teams: { nodes: [{ key: "ENG", name: "Engineering" }] } } },
-    { match: /DovreLinearCreate/, body: { issueCreate: { success: true, issue: { identifier: "ENG-77", url: "https://linear.app/issue/ENG-77" } } } },
+  const { fetchFn, calls } = fakeLinear([
+    { match: /DovreLinearTeam/, body: { teams: { nodes: [{ id: "team-uuid", key: "ENG", name: "Engineering" }] } } },
+    { match: /DovreLinearCreate/, body: { issueCreate: { success: true, issue: { identifier: "ENG-77", url: "https://linear.app/acme/issue/ENG-77/new-thing" } } } },
     { match: /viewer/, body: READ },
   ]);
   const pack = createLinearPack({ fetchFn });
@@ -181,6 +151,10 @@ test("linear: the create act re-checks the team, writes, and logs to the actions
   const done = await create.run({ team: "eng", title: "New thing", description: "Body" }, {}, ctx);
   assert.ok(done.ok, JSON.stringify(done));
   assert.equal(done.ok && done.done, "Created ENG-77");
+  assert.equal(done.ok && done.href, "https://linear.app/acme/issue/ENG-77/new-thing");
+  // Linear's issueCreate takes the team's id, not its key.
+  const created = calls.find((c) => String((c.body as { query?: string }).query).includes("DovreLinearCreate"))!;
+  assert.equal((created.body as { variables: { teamId: string } }).variables.teamId, "team-uuid");
   assert.equal(inserts.length, 1);
   assert.match(inserts[0]!.sql, /INSERT INTO actions/);
   assert.equal(inserts[0]!.binds[1], "linear.create");
@@ -198,7 +172,7 @@ test("linear: the create act re-checks the team, writes, and logs to the actions
 });
 
 test("linear: the comment act re-checks the issue, refuses closed ones, and logs", async () => {
-  const { fetchFn } = fakeLinear([
+  const { fetchFn, calls } = fakeLinear([
     { match: /DovreLinearIssue/, body: { issue: { id: "abc", identifier: "ENG-7", title: "Ship", state: { name: "In Progress", type: "started" } } } },
     { match: /DovreLinearComment/, body: { commentCreate: { success: true } } },
   ]);
@@ -210,6 +184,8 @@ test("linear: the comment act re-checks the issue, refuses closed ones, and logs
   const done = await comment.run({ issue: "eng-7", text: "On it" }, {}, ctx);
   assert.ok(done.ok, JSON.stringify(done));
   assert.equal(inserts[0]!.binds[1], "linear.comment");
+  const asked = calls.find((c) => String((c.body as { query?: string }).query).includes("DovreLinearIssue"))!;
+  assert.match(String((asked.body as { query: string }).query), /issue\(id: \$key\) \{ id identifier/, "asks Linear for the issue's id");
   assert.equal(inserts[0]!.binds[4], 1, "logged as ok");
   // A completed issue is refused before any write.
   const { fetchFn: closed } = fakeLinear([

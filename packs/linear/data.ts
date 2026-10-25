@@ -31,6 +31,8 @@ export type LinearKept = {
   ok: boolean;
   error?: string;
   viewer?: string;
+  /** The workspace's URL key (linear.app/<workspace>/issue/…): issue links need it. */
+  workspace?: string;
   mine: LinearIssue[];
   teams: LinearTeam[];
 };
@@ -48,16 +50,26 @@ type RawIssue = {
 };
 
 const cut = (v: unknown, max: number, fallback = "") => (typeof v === "string" ? v.slice(0, max) : fallback);
+
+/** An issue page as Linear gives it: linear.app/<workspace>/issue/<KEY>, then an optional slug. */
+const ISSUE_URL = /^https:\/\/linear\.app\/[\w-]{1,64}\/issue\/[A-Z][A-Z0-9]{0,9}-\d{1,7}(?:\/[\w%-]*)?$/;
+/** A workspace URL key, as far as it's safe to put in a link. */
+export const workspaceOk = (w: unknown): w is string => typeof w === "string" && /^[\w-]{1,64}$/.test(w);
+/** An issue's link: the URL Linear gave when it checks out, else built from the workspace, else none. */
+export function issueUrl(key: string, given: unknown, workspace: string | undefined): string {
+  if (typeof given === "string" && ISSUE_URL.test(given)) return given;
+  return workspaceOk(workspace) ? `https://linear.app/${workspace}/issue/${key}` : "";
+}
 const at = (v: unknown) => (typeof v === "string" && !Number.isNaN(Date.parse(v)) ? Date.parse(v) : 0);
 
 /** One raw node, as far as it checks out; an identifier that isn't a Linear key is dropped. */
-function toIssue(n: RawIssue, now: number): LinearIssue | null {
+function toIssue(n: RawIssue, now: number, workspace: string | undefined): LinearIssue | null {
   const key = String(n.identifier ?? "").trim();
   if (!/^[A-Z][A-Z0-9]{0,9}-\d{1,7}$/.test(key)) return null;
   return {
     key,
     title: cut(n.title, 200, key),
-    url: /^https:\/\/linear\.app\/issue\/[A-Za-z0-9-]+$/.test(String(n.url ?? "")) ? String(n.url) : `https://linear.app/issue/${key}`,
+    url: issueUrl(key, n.url, workspace),
     state: cut(n.state?.name, 60, "Open"),
     stateType: cut(n.state?.type, 30, "backlog"),
     priority: typeof n.priority === "number" && n.priority >= 0 && n.priority <= 4 ? Math.trunc(n.priority) : 0,
@@ -94,6 +106,7 @@ export async function gql<T>(
 
 type ReadData = {
   viewer?: { name?: string };
+  organization?: { urlKey?: string };
   issues?: { nodes?: RawIssue[] };
   teams?: {
     nodes?: ({
@@ -107,6 +120,7 @@ type ReadData = {
 
 const READ_QUERY = `query DovreLinear {
   viewer { name }
+  organization { urlKey }
   issues(first: 50, filter: { assignee: { isMe: { eq: true } }, state: { type: { nin: ["completed", "canceled"] } } }, orderBy: updatedAt) {
     nodes { identifier title url priority updatedAt team { key } state { name type } project { name } cycle { number } }
   }
@@ -128,8 +142,9 @@ export async function readLinear(ctx: PackContext, fetchFn: typeof fetch = fetch
   const r = await gql<ReadData>(apiKey, READ_QUERY, {}, fetchFn);
   if (!r.ok) return { at: now, ok: false, error: r.error, mine: [], teams: [] };
 
+  const workspace = workspaceOk(r.data.organization?.urlKey) ? r.data.organization.urlKey : undefined;
   const mine = (r.data.issues?.nodes ?? []).flatMap((n) => {
-    const i = toIssue(n, now);
+    const i = toIssue(n, now, workspace);
     return i ? [i] : [];
   });
   const teams: LinearTeam[] = [];
@@ -141,7 +156,7 @@ export async function readLinear(ctx: PackContext, fetchFn: typeof fetch = fetch
       key,
       name: cut(t.name, 120, key),
       untriaged: (t.issues?.nodes ?? []).flatMap((n) => {
-        const i = toIssue(n, now);
+        const i = toIssue(n, now, workspace);
         return i && i.team === key ? [i] : [];
       }),
       cycle:
@@ -157,16 +172,16 @@ export async function readLinear(ctx: PackContext, fetchFn: typeof fetch = fetch
     });
   }
   const wanted = (ctx.env.LINEAR_TEAM ?? "").trim().toUpperCase();
-  return { at: now, ok: true, viewer: cut(r.data.viewer?.name, 80) || undefined, mine, teams: wanted ? teams.filter((t) => t.key === wanted) : teams };
+  return { at: now, ok: true, viewer: cut(r.data.viewer?.name, 80) || undefined, workspace, mine, teams: wanted ? teams.filter((t) => t.key === wanted) : teams };
 }
 
 // ── Writes (Bino acts): each re-checks the current state before it writes ──────
 
 const TEAM_QUERY = `query DovreLinearTeam($key: String!) {
-  teams(first: 1, filter: { key: { eq: $key } }) { nodes { key name } }
+  teams(first: 1, filter: { key: { eq: $key } }) { nodes { id key name } }
 }`;
 const ISSUE_QUERY = `query DovreLinearIssue($key: String!) {
-  issue(id: $key) { identifier title url state { name type } team { key } }
+  issue(id: $key) { id identifier title url state { name type } team { key } }
 }`;
 const CREATE_MUTATION = `mutation DovreLinearCreate($teamId: String!, $title: String!, $description: String) {
   issueCreate(input: { teamId: $teamId, title: $title, description: $description }) {
@@ -182,14 +197,15 @@ export async function checkIssue(
   apiKey: string,
   key: string,
   fetchFn: typeof fetch,
-): Promise<{ id: string; key: string; title: string; state: string; open: boolean } | null> {
-  const r = await gql<{ issue?: { id?: string; identifier?: string; title?: string; state?: { type?: string; name?: string } } }>(apiKey, ISSUE_QUERY, { key }, fetchFn);
+): Promise<{ id: string; key: string; title: string; url: string; state: string; open: boolean } | null> {
+  const r = await gql<{ issue?: { id?: string; identifier?: string; title?: string; url?: string; state?: { type?: string; name?: string } } }>(apiKey, ISSUE_QUERY, { key }, fetchFn);
   if (!r.ok || !r.data.issue?.id || !r.data.issue.identifier) return null;
   const type = cut(r.data.issue.state?.type, 30);
   return {
     id: String(r.data.issue.id),
     key: String(r.data.issue.identifier),
     title: cut(r.data.issue.title, 200),
+    url: issueUrl(String(r.data.issue.identifier), r.data.issue.url, undefined),
     state: cut(r.data.issue.state?.name, 60, "Open"),
     open: type !== "completed" && type !== "canceled",
   };
@@ -203,20 +219,21 @@ export async function createIssue(
   description: string,
   fetchFn: typeof fetch,
 ): Promise<{ key: string; url: string } | null | { error: string }> {
-  const t = await gql<{ teams?: { nodes?: { key?: string; name?: string }[] } }>(apiKey, TEAM_QUERY, { key: teamKey }, fetchFn);
+  const t = await gql<{ teams?: { nodes?: { id?: string; key?: string; name?: string }[] } }>(apiKey, TEAM_QUERY, { key: teamKey }, fetchFn);
   if (!t.ok) return { error: t.error };
   const team = t.data.teams?.nodes?.[0];
-  if (!team) return null;
+  if (!team?.id) return null;
   const r = await gql<{ issueCreate?: { success?: boolean; issue?: { identifier?: string; url?: string } } }>(
     apiKey,
     CREATE_MUTATION,
-    { teamId: team.key, title, description: description || undefined },
+    // Linear wants the team's id here, not its key.
+    { teamId: team.id, title, description: description || undefined },
     fetchFn,
   );
   if (!r.ok) return { error: r.error };
   const issue = r.data.issueCreate?.issue;
   if (!r.data.issueCreate?.success || !issue?.identifier) return { error: "Linear didn't create the issue" };
-  return { key: issue.identifier, url: /^https:\/\/linear\.app\/issue\/[A-Za-z0-9-]+$/.test(String(issue.url ?? "")) ? String(issue.url) : `https://linear.app/issue/${issue.identifier}` };
+  return { key: issue.identifier, url: issueUrl(issue.identifier, issue.url, undefined) };
 }
 
 /** Comments on an issue whose id was re-checked first. */

@@ -1,14 +1,15 @@
 /**
  * Linear Pack (`linear`): assigned open issues, active cycle progress, un-triaged team issues,
- * `TEAM-123` reference linking, PR pills, and Bino acts (create an issue, comment on one).
+ * `TEAM-123` reference linking, and Bino acts (create an issue, comment on one).
+ *
+ * PR pills (`pr.lead`, `pr.facts`) wait for core: those slots are told only the repo, so a pill
+ * would land on every PR in it, not the one that names the issue (bergaaberg/dovre#15).
  */
 import { html } from "hono/html";
-import { type Html, Pill } from "dovre/ui/kit.ts";
 import { type Pack, PACK_API, type RefRule } from "dovre/packs/types.ts";
 import { logAction } from "dovre/actions/deploys.ts";
-import type { Snapshot } from "dovre/gather.ts";
-import { checkIssue, commentIssue, createIssue, type LinearIssue, type LinearKept, PRIORITY, readLinear } from "./data.ts";
-import { linearCard, linearLead, linearPage } from "./view.ts";
+import { checkIssue, commentIssue, createIssue, type LinearKept, PRIORITY, readLinear } from "./data.ts";
+import { linearCard, linearPage } from "./view.ts";
 
 /** The keys this Dovre links: the configured team, else every team key seen in the data. */
 function refPattern(envTeam: string | undefined, kept: LinearKept | undefined): RegExp | null {
@@ -17,22 +18,6 @@ function refPattern(envTeam: string | undefined, kept: LinearKept | undefined): 
   const uniq = [...new Set(keys)];
   if (!uniq.length) return null;
   return new RegExp(`\\b(?:${uniq.join("|")})-\\d{1,7}\\b`, "g");
-}
-
-/** The issue a text names, from what's kept; undefined when it names none we know. */
-function namedIssue(pattern: RegExp, kept: LinearKept | undefined, text: string): LinearIssue | undefined {
-  if (!kept?.ok) return undefined;
-  const m = text.match(pattern);
-  if (!m) return undefined;
-  const all = [...kept.mine, ...kept.teams.flatMap((t) => t.untriaged)];
-  return all.find((i) => i.key === m[0]);
-}
-
-/** This repo's PRs in the snapshot: their branches and titles name issues. */
-function prTexts(snapshot: Snapshot | undefined, repo: string): string[] {
-  const prs = snapshot?.prs;
-  if (!prs?.ok) return [];
-  return [...prs.value.mine, ...prs.value.review].filter((p) => p.repo === repo).flatMap((p) => [p.branch, p.title]);
 }
 
 export function createLinearPack(opts: { fetchFn?: typeof fetch } = {}): Pack & { kept(): LinearKept | undefined } {
@@ -64,8 +49,10 @@ export function createLinearPack(opts: { fetchFn?: typeof fetch } = {}): Pack & 
     },
     today: () => (kept ? [{ id: "now", render: linearCard(kept) }] : []),
     refs(ctx): RefRule[] {
+      // Links need the workspace, which the first refresh learns.
       const pattern = refPattern(ctx.env.LINEAR_TEAM, kept);
-      return pattern ? [{ pattern, href: (m) => `https://linear.app/issue/${m}` }] : [];
+      const workspace = kept?.workspace;
+      return pattern && workspace ? [{ pattern, href: (m) => `https://linear.app/${workspace}/issue/${m}` }] : [];
     },
     bino: () => {
       if (!kept?.ok) return "";
@@ -81,34 +68,6 @@ export function createLinearPack(opts: { fetchFn?: typeof fetch } = {}): Pack & 
         if (t.untriaged.length) lines.push(`${t.key}: ${t.untriaged.length} un-triaged.`);
       }
       return lines.join("\n");
-    },
-    slots(ctx) {
-      return {
-        "pr.lead": ({ repo }) => {
-          const pattern = refPattern(ctx.env.LINEAR_TEAM, kept);
-          if (!pattern) return "";
-          const hits = prTexts(ctx.snapshot(), repo).flatMap((text) => {
-            const issue = namedIssue(pattern, kept, text);
-            return issue ? [issue] : [];
-          });
-          return hits.length ? html` ${hits.slice(0, 2).map(linearLead).join(" ")}` : "";
-        },
-        "pr.facts": ({ repo }) => {
-          const pattern = refPattern(ctx.env.LINEAR_TEAM, kept);
-          if (!pattern) return [];
-          const issue = prTexts(ctx.snapshot(), repo).flatMap((text) => {
-            const hit = namedIssue(pattern, kept, text);
-            return hit ? [hit] : [];
-          })[0];
-          if (!issue) return [];
-          const facts: [string, Html][] = [
-            ["Linear", html`${Pill({ tone: "neutral", children: issue.state })} <a href="https://linear.app/issue/${issue.key}">${issue.key}</a>`],
-            ["Priority", html`${PRIORITY[issue.priority] ?? "No priority"}`],
-          ];
-          if (issue.cycle) facts.push(["Cycle", html`Cycle ${issue.cycle}`]);
-          return facts;
-        },
-      };
     },
     acts(ctx) {
       const apiKey = () => (ctx.env.LINEAR_API_KEY ?? "").trim();
@@ -145,7 +104,7 @@ export function createLinearPack(opts: { fetchFn?: typeof fetch } = {}): Pack & 
               await logAction(ctx.db, { kind: "linear.create", target, detail: title, ok: true });
               kept = await readLinear(ctx, fetchFn);
               ctx.publish(["linear"]);
-              return { ok: true, done: `Created ${r.key}`, href: r.url };
+              return { ok: true, done: `Created ${r.key}`, href: r.url || "/linear" };
             } catch (e) {
               const error = String((e as Error)?.message ?? e);
               await logAction(ctx.db, { kind: "linear.create", target, ok: false, error });
@@ -187,7 +146,7 @@ export function createLinearPack(opts: { fetchFn?: typeof fetch } = {}): Pack & 
                 return { ok: false, error: r.error };
               }
               await logAction(ctx.db, { kind: "linear.comment", target, ok: true });
-              return { ok: true, done: `Commented on ${issue.key}`, href: `https://linear.app/issue/${issue.key}` };
+              return { ok: true, done: `Commented on ${issue.key}`, href: issue.url || "/linear" };
             } catch (e) {
               const error = String((e as Error)?.message ?? e);
               await logAction(ctx.db, { kind: "linear.comment", target, ok: false, error });
