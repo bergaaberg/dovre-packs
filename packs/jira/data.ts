@@ -4,6 +4,7 @@
  * `mcp`, Claude Code's Atlassian MCP (mcp.ts) where tokens are locked down.
  */
 import type { PackContext } from "dovre/packs/types.ts";
+import { type CreateType, type RawCreateField, type Screen, TICKET_KEY } from "./tickets.ts";
 
 export type JiraIssue = {
   key: string;
@@ -92,14 +93,20 @@ async function searchRest(site: string, auth: string, jql: string, max: number, 
   return (j.issues ?? []).flatMap((i) => issueOf(site, i) ?? []);
 }
 
+/** The Authorization header for REST: Basic with JIRA_EMAIL (Atlassian Cloud), else Bearer. */
+export function authOf(env: Record<string, string | undefined>): string {
+  const email = (env.JIRA_EMAIL ?? "").trim();
+  const token = (env.JIRA_TOKEN ?? "").trim();
+  return email ? `Basic ${Buffer.from(`${email}:${token}`).toString("base64")}` : `Bearer ${token}`;
+}
+
 /** Jira through its REST API: mine (JIRA_JQL, or assigned and not done) and, with JIRA_PROJECTS, what moved in 3 days. */
 export async function readJira(ctx: PackContext, fetchFn: typeof fetch = fetch, now = Date.now()): Promise<JiraKept> {
   const site = siteOf(ctx.env);
-  const email = (ctx.env.JIRA_EMAIL ?? "").trim();
   const token = (ctx.env.JIRA_TOKEN ?? "").trim();
   const base = { at: now, site, via: "rest" as const, mine: [], moving: [] };
   if (!site || !token) return { ...base, ok: false, error: "Set JIRA_SITE and JIRA_TOKEN to read Jira issues." };
-  const auth = email ? `Basic ${Buffer.from(`${email}:${token}`).toString("base64")}` : `Bearer ${token}`;
+  const auth = authOf(ctx.env);
   const projects = projectsOf(ctx.env);
   try {
     const [mine, moving] = await Promise.all([
@@ -110,4 +117,55 @@ export async function readJira(ctx: PackContext, fetchFn: typeof fetch = fetch, 
   } catch (e) {
     return { ...base, ok: false, error: String((e as Error)?.message ?? e).slice(0, 180) };
   }
+}
+
+// ── Filing a ticket through REST ──
+
+export type Rest = { site: string; auth: string; fetchFn: typeof fetch };
+
+async function rest<T>(r: Rest, path: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
+  const res = await r.fetchFn(`https://${r.site}${path}`, {
+    method: init.method ?? "GET",
+    headers: { authorization: r.auth, accept: "application/json", ...(init.body !== undefined ? { "content-type": "application/json" } : {}) },
+    body: init.body !== undefined ? JSON.stringify(init.body) : undefined,
+    signal: AbortSignal.timeout(15_000),
+  });
+  const text = await res.text();
+  if (!res.ok) throw new Error(`Jira ${init.method ?? "GET"} ${path.split("?")[0]}: ${res.status} ${text.slice(0, 300)}`);
+  return (text ? JSON.parse(text) : null) as T;
+}
+
+type RawType = { id?: unknown; name?: unknown; description?: unknown; subtask?: unknown };
+/** A project's work types as Jira lists them (createmeta), sub-tasks left out, every value checked. */
+export const typesOf = (list: RawType[]): CreateType[] =>
+  list
+    .filter((t) => t.subtask !== true && /^\d{1,12}$/.test(String(t.id ?? "")) && typeof t.name === "string")
+    .map((t) => ({ id: String(t.id), name: String(t.name).slice(0, 80), description: (typeof t.description === "string" ? t.description : "").slice(0, 300) }));
+
+/** A project's create screen through REST: its work types, then each one's fields. */
+export async function loadScreenRest(r: Rest, project: string): Promise<Screen> {
+  const [p] = safeProjects([project]);
+  if (!p) throw new Error(`«${project}» isn't a Jira project key`);
+  const t = await rest<{ issueTypes?: RawType[]; values?: RawType[] }>(r, `/rest/api/3/issue/createmeta/${p}/issuetypes?maxResults=50`);
+  const types = typesOf(t.issueTypes ?? t.values ?? []);
+  const fields: Record<string, RawCreateField[]> = {};
+  await Promise.all(
+    types.map(async (ty) => {
+      try {
+        const f = await rest<{ fields?: RawCreateField[]; values?: RawCreateField[] }>(r, `/rest/api/3/issue/createmeta/${p}/issuetypes/${ty.id}?maxResults=100`);
+        fields[ty.id] = f.fields ?? f.values ?? [];
+      } catch {
+        // A type whose fields didn't come: its form says so when it's picked.
+      }
+    }),
+  );
+  return { types, fields };
+}
+
+/** Files the ticket through REST; the key comes from Jira's answer. */
+export async function createRest(r: Rest, payload: { fields: Record<string, unknown> }): Promise<{ key: string; url: string }> {
+  const a = await rest<{ key?: unknown }>(r, "/rest/api/3/issue", { method: "POST", body: payload });
+  const key = typeof a?.key === "string" ? a.key : "";
+  if (!TICKET_KEY.test(key)) throw new Error("Jira's answer has no ticket key: check Jira before trying again");
+  return { key, url: `https://${r.site}/browse/${encodeURIComponent(key)}` };
 }

@@ -12,13 +12,17 @@
  * a preview), so searches ask for few fields: the moving list goes without type and assignee.
  */
 import type { Ran } from "dovre/spawn.ts";
-import { type JiraIssue, safeProjects } from "./data.ts";
+import { type JiraIssue, safeProjects, typesOf } from "./data.ts";
+import { type RawCreateField, type Screen, TICKET_KEY } from "./tickets.ts";
 
 export type RunOff = (bin: string, args: string[], opts: { cwd?: string; timeoutMs?: number; input?: string; maxBuffer?: number }) => Promise<Ran>;
 
 export const ATLASSIAN_MCP = { mcpServers: { atlassian: { type: "http", url: "https://mcp.atlassian.com/v1/mcp" } } };
 const tool = (name: string) => `mcp__atlassian__${name}`;
 export const SEARCH = tool("searchJiraIssuesUsingJql");
+export const TYPES = tool("getJiraProjectIssueTypesMetadata");
+export const FIELDS = tool("getJiraIssueTypeMetaWithFields");
+export const CREATE = tool("createJiraIssue");
 /** Everything in the Atlassian MCP that changes something: denied outright unless a job is allowed it. */
 export const WRITES = [
   "createJiraIssue", "editJiraIssue", "transitionJiraIssue", "addCommentToJiraIssue", "addWorklogToJiraIssue", "createIssueLink",
@@ -177,4 +181,47 @@ export async function loadViaMcp(a: Agent, site: string, projects: string[], jql
   const mine = issuesOf(site, resultOf(s, SEARCH, q.mine));
   const moving = q.moving ? issuesOf(site, resultOf(s, SEARCH, q.moving)) : [];
   return { mine, moving, cost: s.cost };
+}
+
+// ── Filing a ticket through the MCP ──
+
+const bare = (name: string) => name.replace("mcp__atlassian__", "");
+
+/** A project's create screen, in one job: its work types, and the fields of each one. */
+export async function loadScreenViaMcp(a: Agent, site: string, project: string): Promise<Screen & { cost: number }> {
+  const [p] = safeProjects([project]);
+  if (!p) throw new Error(`«${project}» isn't a Jira project key`);
+  const typesIn = { cloudId: site, projectIdOrKey: p };
+  const prompt = `First call ${bare(TYPES)} ${JSON.stringify(typesIn)}. Then, for every issue type in its answer that isn't a subtask, call ${bare(FIELDS)} with {"cloudId":${JSON.stringify(site)},"projectIdOrKey":${JSON.stringify(p)},"issueTypeId":"<its id>","requiredFieldsOnly":false}, all in parallel.`;
+  const s = await runJob(a, prompt, [TYPES, FIELDS]);
+  const raw = obj(JSON.parse(resultOf(s, TYPES, typesIn)));
+  const types = typesOf((Array.isArray(raw.issueTypes) ? raw.issueTypes : Array.isArray(raw.values) ? raw.values : []).map(obj));
+  const fields: Record<string, RawCreateField[]> = {};
+  for (const t of types) {
+    try {
+      const r = obj(JSON.parse(resultOf(s, FIELDS, { cloudId: site, projectIdOrKey: p, issueTypeId: t.id, requiredFieldsOnly: false })));
+      fields[t.id] = (Array.isArray(r.fields) ? r.fields : Array.isArray(r.values) ? r.values : []) as RawCreateField[];
+    } catch {
+      // A type whose fields didn't come: its form says so when it's picked.
+    }
+  }
+  return { types, fields, cost: s.cost };
+}
+
+/** What createJiraIssue gets, from the create payload the pack builds (tickets.ts). */
+export function createInput(site: string, payload: { fields: Record<string, unknown> }, typeName: string): Record<string, unknown> {
+  const { project, issuetype: _type, summary, description, ...rest } = payload.fields;
+  const input: Record<string, unknown> = { cloudId: site, projectKey: str(obj(project).key) ?? "", issueTypeName: typeName, summary: str(summary) ?? "" };
+  if (description) Object.assign(input, { description, contentFormat: "adf" });
+  if (Object.keys(rest).length) input.additional_fields = rest;
+  return input;
+}
+
+/** Files one ticket: a job that may call createJiraIssue only, with exactly these arguments. The key comes from Jira's answer. */
+export async function createViaMcp(a: Agent, site: string, input: Record<string, unknown>): Promise<{ key: string; url: string; cost: number; warning?: string }> {
+  const s = await runJob(a, `Make this one call now:\n${callLine(1, CREATE, input)}`, [CREATE]);
+  const creates = s.calls.filter((x) => x.name === CREATE);
+  const key = str(obj(JSON.parse(resultOf(s, CREATE, input))).key);
+  if (!key || !TICKET_KEY.test(key)) throw new Error("Jira's answer has no ticket key: check Jira before trying again");
+  return { key, url: `https://${site}/browse/${encodeURIComponent(key)}`, cost: s.cost, warning: creates.length > 1 ? `The agent called createJiraIssue ${creates.length} times: check ${site} for duplicates.` : undefined };
 }
