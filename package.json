@@ -14,7 +14,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "node --test 'packs/*/test/*.test.ts'",
+    "test": "node --test \"packs/*/test/*.test.ts\"",
     "check": "pnpm typecheck && pnpm test"
   },
   "dependencies": {
