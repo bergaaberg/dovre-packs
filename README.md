@@ -20,6 +20,7 @@ Core (`bergaaberg/dovre`) ships with the built-in cockpit packs (`agents`, `assi
 | `linear` | **Linear** | `any` (Local & Hosted) | Assigned open Linear issues, active cycle progress, un-triaged team issues, `TEAM-123` linking and Bino acts (create an issue, comment). | `LINEAR_API_KEY` |
 | `pubsub` | **Google Cloud Pub/Sub** | `any` (Local & Hosted) | Pub/Sub subscription backlog, oldest unacked message age, and dead-letter radar. | `PUBSUB_PROJECT`, `PUBSUB_TOKEN` |
 | `duckdb` | **DuckDB** | `local-only` | Agentic analytics on local DuckDB databases, Parquet, CSV, and JSON lines files (zero-row schema discovery, AI query builder, manual/agentic execution, AI result review). | `DUCKDB_SOURCES`, `duckdb` CLI (1.3+) on `PATH`. Queries run shut in: no file access outside the source, no environment, no extensions loaded. |
+| `json` | **JSON tools** | `any` (Local & Hosted) | Format, minify and validate JSON (error at line and column), a tree with each node's JSONPath and copy buttons, a JSONPath query (subset: keys, indexes, slices, wildcards, `..`, simple filters), a structural diff (key order ignored), and decoders: JWT (header, payload, expiry; never verified), base64/base64url, URL-encoding, Unix time ↔ date. Pasted text is handled in the request and never logged, stored or sent anywhere; `private` to Bino. | *(None)* |
 | `custom-app` | **Custom App Starter** | `any` (Local & Hosted) | Clean 3-file starter pack (`index.ts`, `data.ts`, `view.ts`) + hostile-input test suite. | *(Optional)* `CUSTOM_APP_URL` |
 
 ## Installing a Pack in 1 Command
