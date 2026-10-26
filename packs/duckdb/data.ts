@@ -56,9 +56,10 @@ export type DuckDbRunner = (
 
 export const defaultRunner: DuckDbRunner = async (args, opts = {}) => {
   try {
-    // Without AI_AGENT: DuckDB 2's CLI switches to an "agent mode" output when it's set.
-    const env = { ...process.env };
-    delete env.AI_AGENT;
+    // A bare environment: no tokens for getenv() to read, and no AI_AGENT / CLAUDECODE, which switch
+    // DuckDB 2's CLI to an "agent mode" output.
+    const env: NodeJS.ProcessEnv = {};
+    for (const k of ["PATH", "HOME", "TMPDIR", "LANG", "LC_ALL"]) if (process.env[k]) env[k] = process.env[k];
     const child = execFileAsync("duckdb", args, {
       timeout: opts.timeoutMs ?? 30_000,
       maxBuffer: 16 * 1024 * 1024,
