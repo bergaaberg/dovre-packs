@@ -1,18 +1,28 @@
 /**
  * Jira Pack (`jira`): what's assigned to me and not done, what moved lately in the projects I
- * follow, a Today card, Jira in search, and ticket keys (`PROJ-123`) as links.
+ * follow, a Today card, Jira in search, ticket keys (`PROJ-123`) as links, and filing tickets in
+ * TICKET_PROJECTS (filing.ts): from New work, search ("New ticket in …") and Bino's card.
  *
  * Two ways to Jira (JIRA_VIA): `rest` with an API token, or `mcp` through Claude Code's Atlassian
  * MCP where tokens are locked down (mcp.ts; local only). A job through the MCP takes ~15 s and a
  * little money, so it runs every JIRA_EVERY_MIN (10) or on "Read now", never per page; a job that
  * fails keeps the last good answer, which is also kept on disk so a restart has something to draw.
  */
+import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { keptFile, type Kept } from "dovre/issues/templates.ts";
-import { type FindItem, type Pack, PACK_API, type PackContext } from "dovre/packs/types.ts";
+import type { Context } from "hono";
+import { html } from "hono/html";
+import type { AppEnv } from "dovre/env.ts";
+import type { ActKind, FindItem, Pack, PackContext } from "dovre/packs/types.ts";
+import { PACK_API } from "dovre/packs/types.ts";
+import { type Html, Notice } from "dovre/ui/kit.ts";
 import { type JiraKept, projectsOf, readJira, siteOf, siteOk, viaOf } from "./data.ts";
 import { type Agent, JiraSetupError, loadViaMcp } from "./mcp.ts";
+import { createFiling, type Filed, SCREEN_MS } from "./filing.ts";
+import { draftPrompt, emptyTicket, first, MAX_SUMMARY, nameOf, ticketFields, ticketProjectsOf, ticketValid, validateTicket } from "./tickets.ts";
+import { doneBody, failedBody, formBody, loadingBody, NEW, newHref, noProjectsBody, pickProjectBody, previewBody, problemBody, projectsPanel, workingBody } from "./tickets.view.ts";
 import { jiraCard, jiraPage } from "./view.ts";
 
 const everyMsOf = (env: Record<string, string | undefined>) => {
@@ -45,6 +55,13 @@ export function createJiraPack(
   /** When the last MCP job started: the cadence counts from attempts, so a signed-out MCP isn't asked every round. */
   let triedAt = Number.NEGATIVE_INFINITY;
   let force = false;
+  const theAgent = async () => (agent ??= opts.agent ?? (await serverAgent()));
+  const filing = createFiling({ agent: theAgent, fetchFn: opts.fetchFn, now });
+  /** Creates started from a preview, by its one-time value: pressing Create twice shows the same one. */
+  type Job = { state: "working"; project: string; summary: string } | { state: "done"; key: string; warning?: string } | { state: "failed"; problem: string; again: Parameters<typeof previewBody>[0] };
+  const jobs = new Map<string, Job>();
+  const isNonce = (s: string) => /^[0-9a-f-]{36}$/.test(s);
+  const pending = html`<meta name="u-topics" content="jira">`;
 
   async function readMcp(ctx: PackContext): Promise<void> {
     const site = siteOf(ctx.env);
@@ -69,7 +86,49 @@ export function createJiraPack(
     if (viaOf(ctx.env) === "mcp") await readMcp(ctx);
     else kept = await readJira(ctx, opts.fetchFn, now());
     ctx.publish(["jira", "snapshot"]);
+    // The ticket forms' create screens, read once in the background so the first form doesn't wait.
+    for (const p of ticketProjectsOf(ctx.env)) if (!filing.kept(p) && !filing.reading(p)) filing.kick(ctx, p);
   }
+
+  /** Bino's ticket: a card with the project, type, summary and description; Create asks again, then files it as the form does. */
+  const ticketAct = (ctx: PackContext): ActKind => {
+    const projects = ticketProjectsOf(ctx.env);
+    return {
+      kind: "ticket",
+      title: "A ticket in Jira",
+      when: `When the user asks you to file, create or write a Jira ticket (a story, a bug, an improvement). \`project\` is one of ${projects.join(", ")}; \`type\` is the work type by name (Story, Bug, Task, or another the project has); \`summary\` one line; \`description\` plain text, in the user's language. Anything else the project asks for takes Jira's default; the user changes it on Jira's form if it matters.`,
+      fields: [
+        { name: "project", about: `one of ${projects.join(", ")}`, required: true, max: 20 },
+        { name: "type", about: "the work type, by name", max: 60 },
+        { name: "summary", about: "one line", required: true, max: MAX_SUMMARY },
+        { name: "description", about: "plain text", max: 4000, text: true },
+      ],
+      button: "Create ticket",
+      question: "Create this ticket in Jira?",
+      hint: "Other fields take Jira's defaults. For more, open the form.",
+      inputs(act, k) {
+        const v = (name: string) => k?.[name] ?? act[name] ?? "";
+        const project = projects.includes(v("project").toUpperCase()) ? v("project").toUpperCase() : (projects[0] ?? "");
+        if (!projects.length) return Notice({ tone: "warn", children: html`No project to file in: set <code>TICKET_PROJECTS</code> on the Packs page.` });
+        const desc = v("description");
+        return html`<label class="field"><span class="label">Project</span><select name="project" required>${projects.map((p) => html`<option value="${p}"${p === project ? html` selected` : ""}>${p}</option>`)}</select></label>
+<label class="field"><span class="label">Work type</span><input type="text" name="type" value="${v("type")}" maxlength="60"><span class="hint">By name; empty or unknown: the project's first. <a href="${newHref(project)}">Open the form</a></span></label>
+<label class="field"><span class="label">Summary</span><input type="text" name="summary" value="${v("summary")}" maxlength="${MAX_SUMMARY}" required></label>
+<label class="field"><span class="label">Description</span><textarea name="description" rows="${Math.min(12, Math.max(4, desc.split("\n").length + 1))}" maxlength="4000">\n${desc}</textarea></label>`;
+      },
+      async run(form) {
+        const got = await filing.fromForm(ctx, { project: form.project ?? "", type_name: form.type ?? "" });
+        if ("problem" in got) return { ok: false, error: got.problem };
+        const line = got.fields.find((f) => f.kind === "line");
+        const para = got.fields.find((f) => f.kind === "paragraph");
+        const values: Record<string, string> = { [line ? nameOf(line) : "j_summary"]: form.summary ?? "", ...(para ? { [nameOf(para)]: form.description ?? "" } : {}) };
+        const filled = await filing.fromForm(ctx, { project: got.project, type: got.type.id, ...values });
+        if ("problem" in filled) return { ok: false, error: filled.problem };
+        const r: Filed = await filing.file(ctx, filled);
+        return r.ok ? { ok: true, done: `Created ${r.key}${r.warning ? ` (${r.warning})` : ""}`, href: r.url } : { ok: false, error: r.problem };
+      },
+    };
+  };
 
   return {
     kept: () => kept,
@@ -77,7 +136,7 @@ export function createJiraPack(
       api: PACK_API,
       id: "jira",
       name: "Jira",
-      description: "Jira issues assigned to me, what moved in my projects, and ticket keys as links.",
+      description: "Jira issues assigned to me, what moved in my projects, ticket keys as links, and filing tickets.",
       domain: "work",
       execution: "any",
       everyMs: 5 * 60_000,
@@ -89,6 +148,7 @@ export function createJiraPack(
         { key: "JIRA_PROJECTS", label: "Projects to watch", help: "Jira keys, comma-separated: what moved in them in 3 days, and which keys become links" },
         { key: "JIRA_JQL", label: "Mine (JQL)", help: "Default: assigned to me and not done" },
         { key: "JIRA_EVERY_MIN", label: "Read every (minutes, mcp)", help: "Each read through the MCP is an agent job (default 10)" },
+        { key: "TICKET_PROJECTS", label: "File tickets in", help: "Jira keys, comma-separated: where New work, search and Bino can create a ticket. Empty: none." },
       ],
     },
     available: (ctx) => {
@@ -114,12 +174,94 @@ export function createJiraPack(
         void refresh(ctx);
         return c.redirect("/jira", 303);
       });
+
+      // ── Filing a ticket: the project's create screen, a preview, then Create (the second click) ──
+      const site = () => siteOf(ctx.env);
+      const draw = async (c: Context<AppEnv>, body: Html, o: { status?: number; live?: boolean; title?: string } = {}) => {
+        const res = await ctx.page(c, { title: o.title ?? "New ticket", current: "/jira", body, ...(o.live ? { head: pending } : {}) });
+        return o.status && o.status !== 200 ? new Response(res.body, { status: o.status, headers: res.headers }) : res;
+      };
+
+      app.get(NEW, async (c) => {
+        const projects = ticketProjectsOf(ctx.env);
+        if (!projects.length) return draw(c, noProjectsBody());
+        const asked = (c.req.query("project") ?? "").trim().toUpperCase();
+        if (!asked && projects.length > 1) return draw(c, pickProjectBody(projects));
+        const project = asked || projects[0]!;
+        if (!projects.includes(project)) return draw(c, problemBody(`Tickets go to ${projects.join(", ")}.`), { status: 400 });
+        if (c.req.query("again")) filing.retry(project);
+        const k = filing.kept(project);
+        // Something to draw: draw it, and read it again in the background when it's old.
+        if (k?.screen) {
+          if (now() - k.at >= SCREEN_MS) filing.kick(ctx, project);
+          const s = k.screen;
+          if (!s.types.length) return draw(c, failedBody(site(), project, undefined));
+          const typeId = c.req.query("type");
+          const type = (typeId && s.types.find((t) => t.id === typeId)) || s.types[0]!;
+          const raw = s.fields[type.id];
+          const f = raw ? ticketFields(raw) : { fields: [], blocked: [] };
+          return draw(c, formBody({ project, types: s.types, ticket: emptyTicket(project, type, f.fields), fields: f.fields, blocked: f.blocked, fieldsFailed: raw ? undefined : "They didn't come back from Jira. Try again in a moment." }), { title: `Ticket in ${project}` });
+        }
+        if (k?.error && !filing.reading(project)) return draw(c, failedBody(site(), project, k.error), { status: 502 });
+        filing.kick(ctx, project);
+        return draw(c, loadingBody(project), { live: true, title: `Ticket in ${project}` });
+      });
+
+      app.post(`${NEW}/preview`, async (c) => {
+        const form = await c.req.parseBody({ all: true });
+        const got = await filing.fromForm(ctx, form);
+        if ("problem" in got) return draw(c, problemBody(got.problem), { status: got.status });
+        const errors = validateTicket(got.ticket, got.fields);
+        const again = { project: got.project, types: got.types, ticket: got.ticket, fields: got.fields, blocked: [] };
+        if (first(form.edit) === "1") return draw(c, formBody(again));
+        if (!ticketValid(errors)) return draw(c, formBody({ ...again, errors }), { status: 422 });
+        return draw(c, previewBody({ ticket: got.ticket, fields: got.fields, nonce: randomUUID() }), { title: "Preview" });
+      });
+
+      /** Create: checked here, then filed in the background; the job's page fills itself in when it lands. */
+      app.post(`${NEW}/create`, async (c) => {
+        const form = await c.req.parseBody({ all: true });
+        const nonce = first(form.nonce);
+        // Pressed twice: the same job. One that failed may be tried again from the same preview.
+        if (isNonce(nonce) && jobs.has(nonce) && jobs.get(nonce)!.state !== "failed") return c.redirect(`${NEW}/job/${nonce}`, 303);
+        const got = await filing.fromForm(ctx, form);
+        if ("problem" in got) return draw(c, problemBody(got.problem), { status: got.status });
+        if (!isNonce(nonce)) return draw(c, previewBody({ ticket: got.ticket, fields: got.fields, nonce: randomUUID(), problem: "Create from the preview: nothing was created." }), { status: 400, title: "Preview" });
+        const errors = validateTicket(got.ticket, got.fields);
+        if (!ticketValid(errors)) return draw(c, formBody({ project: got.project, types: got.types, ticket: got.ticket, fields: got.fields, blocked: [], errors }), { status: 422 });
+        jobs.set(nonce, { state: "working", project: got.project, summary: (got.ticket.values[got.fields.find((f) => f.kind === "line")?.id ?? "summary"] ?? "").trim() });
+        while (jobs.size > 50) jobs.delete(jobs.keys().next().value!);
+        void filing
+          .file(ctx, got, { myList: first(form.mylist) === "1" })
+          .then((r) => jobs.set(nonce, r.ok ? { state: "done", key: r.key, warning: r.warning } : { state: "failed", problem: r.problem, again: { ticket: got.ticket, fields: got.fields, nonce: randomUUID(), problem: r.problem } }))
+          .finally(() => ctx.publish(["jira"]));
+        return c.redirect(`${NEW}/job/${nonce}`, 303);
+      });
+
+      app.get(`${NEW}/job/:nonce`, async (c) => {
+        const job = jobs.get(c.req.param("nonce"));
+        if (!job) return draw(c, problemBody("That ticket isn't one this Dovre is creating (it may have restarted): check Jira before trying again."), { status: 404 });
+        if (job.state === "working") return draw(c, workingBody(job), { live: true, title: "Creating the ticket" });
+        if (job.state === "done") return draw(c, doneBody({ site: site(), key: job.key, warning: job.warning }), { title: "Ticket created" });
+        return draw(c, previewBody(job.again), { status: 502, title: "Preview" });
+      });
+
+      /** "Or let an agent file it": the note becomes the prompt, shown on /agents/new before anything starts. */
+      app.post(`${NEW}/draft`, async (c) => {
+        const form = await c.req.parseBody();
+        const project = first(form.project).trim().toUpperCase();
+        const note = first(form.note).trim();
+        const projects = ticketProjectsOf(ctx.env);
+        if (!projects.includes(project)) return draw(c, problemBody(`Tickets go to ${projects.join(", ") || "no project"}.`), { status: 400 });
+        if (!note || note.length > 4000) return draw(c, problemBody("Describe it first, in under 4000 characters: the agent starts from your note.", newHref(project)), { status: 400 });
+        return c.redirect(`/agents/new?prompt=${encodeURIComponent(draftPrompt(site(), project, note))}`, 303);
+      });
     },
     today: () => (kept ? [{ id: "now", render: jiraCard(kept) }] : []),
-    finds: () => {
-      if (!kept?.ok) return [];
+    finds: (ctx) => {
+      const out: FindItem[] = ticketProjectsOf(ctx.env).map((p) => ({ title: `New ticket in ${p}`, sub: "Jira", href: newHref(p), kind: "actions", also: ["ticket", "new ticket", "jira", "sak"], icon: "🎫" }));
+      if (!kept?.ok) return out;
       const seen = new Set<string>();
-      const out: FindItem[] = [];
       for (const i of [...kept.mine, ...kept.moving]) {
         if (seen.has(i.key)) continue;
         seen.add(i.key);
@@ -131,17 +273,24 @@ export function createJiraPack(
     refs: (ctx) => {
       const site = siteOf(ctx.env);
       if (!siteOk(site)) return [];
-      const projects = new Set([...projectsOf(ctx.env), ...(kept?.mine ?? []).map((i) => i.project)]);
+      const projects = new Set([...projectsOf(ctx.env), ...ticketProjectsOf(ctx.env), ...(kept?.mine ?? []).map((i) => i.project)]);
       const pattern = projects.size ? new RegExp(`\\b(?:${[...projects].join("|")})-\\d{1,9}\\b`, "g") : /\b[A-Z][A-Z0-9_]{1,9}-\d{1,6}\b/g;
       return [{ pattern, href: (m) => `https://${site}/browse/${encodeURIComponent(m)}` }];
     },
-    bino: () => {
-      if (!kept?.ok) return "";
+    bino: (ctx) => {
+      const filed = ticketProjectsOf(ctx.env);
+      const where = filed.length ? `Jira tickets can be filed in ${filed.join(", ")}.` : "";
+      if (!kept?.ok) return where;
       const mine = kept.mine.map((i) => `${i.key} [${i.status}]: ${i.summary}`);
       const moved = new Map<string, number>();
       for (const i of kept.moving) moved.set(i.project, (moved.get(i.project) ?? 0) + 1);
-      return [mine.length ? `Mine in Jira:\n${mine.join("\n")}` : "Nothing in Jira assigned to me.", ...[...moved].map(([p, n]) => `${n} moved in ${p} in 3 days.`)].join("\n");
+      return [mine.length ? `Mine in Jira:\n${mine.join("\n")}` : "Nothing in Jira assigned to me.", ...[...moved].map(([p, n]) => `${n} moved in ${p} in 3 days.`), where].filter(Boolean).join("\n");
     },
+    acts: (ctx) => (ticketProjectsOf(ctx.env).length && !ctx.hosted ? [ticketAct(ctx)] : []),
+    slots: (ctx) => ({
+      "work.new": () => projectsPanel(ticketProjectsOf(ctx.env)),
+      "actions.what": ({ kind }) => (kind === "ticket.create" ? "Created a Jira ticket" : undefined),
+    }),
   };
 }
 
