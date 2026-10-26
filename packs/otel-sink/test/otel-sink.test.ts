@@ -312,7 +312,7 @@ async function throughWorker(withRoutes: boolean) {
 }
 
 test("otel-sink: through a hosted worker, a token from Settings lets an exporter in", () => throughWorker(false));
-test("otel-sink: the same with the pack's pages mounted", { todo: "bergaaberg/dovre#113" }, () => throughWorker(true));
+test("otel-sink: the same with the pack's pages mounted", () => throughWorker(true));
 
 test("otel-sink: small helpers", () => {
   assert.equal(hexId(TRACE.toUpperCase(), 16), TRACE);
