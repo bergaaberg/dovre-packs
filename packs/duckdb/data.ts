@@ -188,6 +188,12 @@ export type DuckDbData = {
   cols(t: string, table: string): Promise<Column[]>;
   peek(t: string, table: string, n?: number): Promise<Rows>;
   find(t: string, text: string): Promise<Found[]>;
+  /**
+   * One statement in a directory source, shut in as every in-memory run is, but without the
+   * directory's views (the file viewer names its files itself, and one unreadable file elsewhere in
+   * the directory mustn't break it).
+   */
+  scan(t: string, sql: string, maxRows?: number): Promise<Rows>;
 };
 
 export function createDuckDbData(o: {
@@ -203,7 +209,7 @@ export function createDuckDbData(o: {
     targetMap.set(s.id, s);
   }
 
-  const runQuery = async (target: DuckDbTarget, querySql: string, maxRows = MAX_ROWS): Promise<Rows> => {
+  const runQuery = async (target: DuckDbTarget, querySql: string, maxRows = MAX_ROWS, views = true): Promise<Rows> => {
     const t0 = now();
     const isMemoryOrDir = target.path === ":memory:" || target.isDir;
     // sqlOk keeps a query to one SELECT, but a SELECT can still read any file (read_text, read_csv),
@@ -216,8 +222,8 @@ export function createDuckDbData(o: {
 
     let inputSql = querySql.trim();
     if (isMemoryOrDir) {
-      const views = target.isDir ? directoryViewsSql(target.path) : "";
-      inputSql = `${lockdownSql(target.isDir ? target.path : undefined)}\n${views ? `${views}\n` : ""}${inputSql}`;
+      const viewSql = target.isDir && views ? directoryViewsSql(target.path) : "";
+      inputSql = `${lockdownSql(target.isDir ? target.path : undefined)}\n${viewSql ? `${viewSql}\n` : ""}${inputSql}`;
     }
 
     const res = await runner(args, { input: inputSql, timeoutMs: 30_000 });
@@ -249,6 +255,13 @@ export function createDuckDbData(o: {
       const target = targetMap.get(t);
       if (!target) throw new Error(`Unknown DuckDB source: ${t}`);
       return runQuery(target, sql, maxRows);
+    },
+
+    async scan(t: string, sql: string, maxRows = MAX_ROWS): Promise<Rows> {
+      const target = targetMap.get(t);
+      if (!target) throw new Error(`Unknown DuckDB source: ${t}`);
+      if (!target.isDir) throw new Error(`Not a directory source: ${t}`);
+      return runQuery(target, sql, maxRows, false);
     },
 
     async tables(t: string): Promise<TableInfo[]> {

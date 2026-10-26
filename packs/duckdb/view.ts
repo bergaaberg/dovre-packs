@@ -121,6 +121,7 @@ ${
 ${Panel({
   title: "Configured Sources",
   meta: String(o.sources.length),
+  actions: o.sources.some((s) => s.isDir) ? html`<a href="/duckdb/files">Open a file</a>` : undefined,
   flush: true,
   children: o.sources.length
     ? tgrid(
@@ -171,7 +172,9 @@ export function duckdbSourcePage(o: {
   return html`${PageHeader({
     title: o.target.label,
     crumbs: crumbs(),
-    sub: html`Source: <code>${o.target.path}</code> · Read-only.`,
+    sub: html`Source: <code>${o.target.path}</code> · Read-only.${
+      o.target.isDir ? html` <a href="${safeUrl(`/duckdb/files?t=${encodeURIComponent(o.target.id)}`)}">Browse its files</a>` : ""
+    }`,
   })}
 <div data-live id="duckdb-${o.target.id}">
 ${o.error ? Notice({ tone: "bad", children: html`<strong>DuckDB error:</strong> ${o.error}` }) : ""}

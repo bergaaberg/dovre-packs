@@ -13,6 +13,8 @@ import {
   parseSources,
   readDuckDb,
 } from "./data.ts";
+import { look, open, PAGE_SIZES } from "./files.ts";
+import { FILES_STYLES, filePage, filesHome, folderPage, notOpenPage } from "./filesview.ts";
 import { createDuckDbSchemas, type DuckDbSchemas, toAutocomplete } from "./schema.ts";
 import {
   type Asker,
@@ -111,6 +113,8 @@ export function createDuckDbPack(opts: CreateDuckDbPackOpts = {}): Pack & {
       ctx.publish(["duckdb", "snapshot"]);
     },
 
+    styles: FILES_STYLES,
+
     nav: () => [{ href: "/duckdb", title: "DuckDB", icon: "db", group: "Code" }],
 
     pages: () => [
@@ -120,6 +124,13 @@ export function createDuckDbPack(opts: CreateDuckDbPackOpts = {}): Pack & {
         icon: "🦆",
         about: "DuckDB agentic data pack",
         also: ["sql", "parquet", "query", "duckdb"],
+      },
+      {
+        title: "DuckDB files",
+        href: "/duckdb/files",
+        icon: "🦆",
+        about: "Open a Parquet, CSV or JSON lines file: schema, stats and rows",
+        also: ["parquet", "csv", "jsonl", "schema", "file viewer"],
       },
     ],
 
@@ -220,6 +231,31 @@ export function createDuckDbPack(opts: CreateDuckDbPackOpts = {}): Pack & {
             error,
           }),
         });
+      });
+
+      // The file viewer: GET only (it reads), the path checked inside a folder source before DuckDB sees it.
+      app.get("/duckdb/files", async (c) => {
+        const { data } = initServices(ctx.env, ctx);
+        const sources = data.sources();
+        const t = c.req.query("t") ?? "";
+        const f = c.req.query("f") ?? "";
+        if (!t) return ctx.page(c, { title: "Files", body: filesHome({ sources }) });
+        const target = data.source(t);
+        const opened = target ? open(target, f, c.req.query("all") === "1") : undefined;
+        if (!target || !target.isDir || !opened) {
+          c.status(404);
+          return ctx.page(c, { title: "Files", body: notOpenPage({ target: target?.isDir ? target : undefined, t, f, sources }) });
+        }
+        if (opened.type === "dir") {
+          return ctx.page(c, { title: opened.rel || target.label, body: folderPage({ target, dir: opened }) });
+        }
+        const n = Number(c.req.query("n"));
+        const size = (PAGE_SIZES as readonly number[]).includes(n) ? n : 50;
+        const page = Math.min(100_000, Math.max(0, Math.floor(Number(c.req.query("p")) || 0)));
+        const cols = c.req.queries("c")?.slice(0, 1000);
+        const q = { cols, size, page, stats: c.req.query("stats") === "1" };
+        const seen = await look(data, t, opened, q);
+        return ctx.page(c, { title: opened.rel.split("/").pop() || target.label, body: filePage({ target, file: opened, look: seen, q }) });
       });
 
       app.post("/duckdb/q", async (c) => {
