@@ -12,3 +12,4 @@ export { serviceBusPack, createServiceBusPack } from "./packs/service-bus/index.
 export { pubsubPack, createPubsubPack } from "./packs/pubsub/index.ts";
 export { otelPack, otelCrate, createOtelPack } from "./packs/otel/index.ts";
 export { duckdbPack, duckdbCrate, createDuckDbPack } from "./packs/duckdb/index.ts";
+export { jsonPack, createJsonPack } from "./packs/json/index.ts";
