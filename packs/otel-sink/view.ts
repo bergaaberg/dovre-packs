@@ -5,6 +5,7 @@
  */
 import { html } from "hono/html";
 import { safeUrl } from "dovre/pages/parts.ts";
+import type { SpanSlotArg } from "dovre/packs/types.ts";
 import { Card, Empty, Item, KeyValues, List, Notice, PageHeader, Panel, Pill, Pulse, Stat, Stats, type Html } from "dovre/ui/kit.ts";
 import { LEVELS, levelName } from "./otlp.ts";
 import { BAD_ERR, WARN_ERR, type ErrorSpan, type LogEntry, type ServiceSum, type SinkKept, type TraceSpan } from "./store.ts";
@@ -140,7 +141,22 @@ export function treeOrder(spans: TraceSpan[]): Node[] {
 
 const KIND = ["", "internal", "server", "client", "producer", "consumer"];
 
-export function tracePage(traceId: string, spans: TraceSpan[], logs: LogEntry[]): Html {
+/** What the "span.actions" slot sees of an HTTP span (what it kept, read back as untrusted), or undefined for one that isn't. */
+export function spanArg(s: TraceSpan): SpanSlotArg | undefined {
+  if (!s.http_method) return undefined;
+  let attrs: SpanSlotArg["attrs"] = {};
+  try {
+    const o = s.attrs ? (JSON.parse(s.attrs) as unknown) : {};
+    if (o && typeof o === "object" && !Array.isArray(o))
+      attrs = Object.fromEntries(Object.entries(o).filter((e): e is [string, string | number | boolean] => ["string", "number", "boolean"].includes(typeof e[1])).slice(0, 20));
+  } catch {
+    // kept as JSON by us; unreadable means none
+  }
+  return { service: s.service, kind: s.kind === 2 ? "server" : s.kind === 3 ? "client" : "other", method: s.http_method, route: s.http_route ?? "", attrs };
+}
+
+/** `actions`: what other packs put beside an HTTP span (the "span.actions" slot; http: open it in the editor). */
+export function tracePage(traceId: string, spans: TraceSpan[], logs: LogEntry[], actions: (s: SpanSlotArg) => (Html | "")[] = () => []): Html {
   const crumbs = [{ href: safeUrl(`/${ID}`), label: "OTel sink" }, { label: `Trace ${traceId.slice(0, 12)}` }];
   if (!spans.length)
     return html`${PageHeader({ title: "Trace", crumbs })}${Empty({ title: "No such trace", children: html`<p class="notes">Not here, or older than 24 hours.</p>` })}`;
@@ -158,7 +174,11 @@ export function tracePage(traceId: string, spans: TraceSpan[], logs: LogEntry[])
 <svg class="osink-bar" viewBox="0 0 1000 10" preserveAspectRatio="none" role="img" aria-label="${`${s.name}: ${ms(s.dur_us / 1000)} from +${ms((s.start_us - start) / 1000)}`}"><rect class="osink-track" x="0" y="0" width="1000" height="10"></rect><rect class="osink-span" x="${Math.min(x, 998)}" y="0" width="${Math.min(w, 1000 - Math.min(x, 998))}" height="10"></rect></svg>
 <div class="osink-dur">${ms(s.dur_us / 1000)}</div>
 ${s.err && (s.err_type || s.err_msg) ? html`<div class="osink-detail">${s.err_type ?? ""}${s.err_type && s.err_msg ? ": " : ""}${s.err_msg ?? ""}</div>` : ""}
-${s.http_method || s.http_route ? html`<div class="osink-detail t3">${s.http_method ?? ""} ${s.http_route ?? ""}</div>` : ""}
+${s.http_method || s.http_route ? html`<div class="osink-detail t3">${s.http_method ?? ""} ${s.http_route ?? ""}${(() => {
+  const a = spanArg(s);
+  const got = a ? actions(a).filter(Boolean) : [];
+  return got.length ? html` ${got}` : "";
+})()}</div>` : ""}
 ${s.attrs ? html`<div class="osink-detail t3">${attrsText(s.attrs)}</div>` : ""}
 </li>`;
   });

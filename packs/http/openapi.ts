@@ -24,7 +24,7 @@ type Obj = { [k: string]: Json };
 const isObj = (v: unknown): v is Obj => !!v && typeof v === "object" && !Array.isArray(v);
 const one = (v: unknown, max = 200) => (typeof v === "string" ? v.replace(/[\r\n\t]+/g, " ").trim().slice(0, max) : "");
 /** A placeholder name the `.http` variables accept. */
-const varName = (s: string) => (s.replace(/[^\w.-]/g, "_").replace(/^[^A-Za-z_]/, "_$&").slice(0, 64) || "value");
+export const varName = (s: string) => (s.replace(/[^\w.-]/g, "_").replace(/^[^A-Za-z_]/, "_$&").slice(0, 64) || "value");
 const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,100}$/;
 
 /** `#/a/b` in the spec, or undefined. */

@@ -477,6 +477,9 @@ test("OpenAPI import: preview and open send nothing; save adds every operation t
   const opened = await (await m.post("/http/open", send({ method: "POST", url: "{{baseUrl}}/items", mode: "json", body: '{"a":1}', name: "add" }))).text();
   assert.match(opened, /Opened: nothing was sent/);
   assert.match(opened, /value="\{\{baseUrl\}\}\/items"/);
+  const traced = await (await m.post("/http/open", send({ method: "GET", url: "{{baseUrl}}/items/{{id}}", name: "api GET /items/:id", from: "trace" }))).text();
+  assert.match(traced, /Opened from a trace: nothing was sent\. A trace keeps no headers or body, and the \{\{…\}\} parts need values/);
+  assert.equal((await m.post("/http/open", send({ url: "{{baseUrl}}/x", from: "trace" }), { origin: "https://evil.example" })).status, 403, "another site can't open one");
 
   const refused = await m.post("/http/openapi/save", { spec, repo: "shop", file: "../x.http" });
   assert.equal(refused.status, 400);

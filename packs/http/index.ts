@@ -21,6 +21,8 @@
  *    each request's `# @expect` checks, sending nothing; one click on POST /http/run sends them one
  *    after the other (each an ordinary send, re-checked against the file as it was shown), and the
  *    results fill in over the hub. Logged as `http.run` (the file, how many passed).
+ *  - A span on otel-sink's trace page (core's "span.actions" slot, trace.ts) opens in the editor
+ *    from what the trace kept (method, route, a query-less URL): nothing is sent.
  *  - Importing curl, an OpenAPI spec (openapi.ts) or a Postman / Bruno collection (collections.ts)
  *    only reads the text: nothing is fetched or sent. Saving the requests adds them to a new file or the end of one (`http.save`, one click).
  */
@@ -39,6 +41,7 @@ import { styles as jsonStyles } from "../json/view.ts";
 import { confirmSavePage, fileOk, homeHref, type HomeOpts, homePage, noWhere, openapiPage, runPage, runPageHref, runPlanPage, sentHref, sentPage, type Where } from "./view.ts";
 import { fileNameOf, fromOpenApi, MAX_SPEC } from "./openapi.ts";
 import { fromCollection, varLines } from "./collections.ts";
+import { spanActions } from "./trace.ts";
 
 /** Pasted text as requests: a Postman or Bruno collection, else an OpenAPI spec. */
 const importText = (text: string) => fromCollection(text) ?? fromOpenApi(text);
@@ -283,6 +286,7 @@ export function createHttpPack(opts: CreateHttpPackOpts = {}): Pack & { history(
 
     slots: () => ({
       "actions.what": ({ kind }) => (kind === "http.send" ? "Sent an HTTP request" : kind === "http.run" ? "Ran a .http file as a smoke test" : kind === "http.save" ? "Saved an HTTP request to a repo" : undefined),
+      "span.actions": spanActions,
     }),
 
     settings: (ctx) => {
@@ -408,8 +412,10 @@ export function createHttpPack(opts: CreateHttpPackOpts = {}): Pack & { history(
 
       // A request from an imported spec, into the editor: nothing is sent.
       app.post("/http/open", async (c) => {
-        const r = placeholdSecrets(reqOfForm(await c.req.parseBody()), secretsOf(ctx));
-        return draw(ctx, c, r, noWhere(), { flash: { tone: "neutral", text: "Opened: nothing was sent." } });
+        const f = await c.req.parseBody();
+        const r = placeholdSecrets(reqOfForm(f), secretsOf(ctx));
+        const text = f.from === "trace" ? `Opened from a trace: nothing was sent. A trace keeps no headers or body${r.url.includes("{{") ? ", and the {{…}} parts need values (an environment's baseUrl, the path's ids)" : ""}.` : "Opened: nothing was sent.";
+        return draw(ctx, c, r, noWhere(), { flash: { tone: "neutral", text } });
       });
 
       app.post("/http/openapi", async (c) => {
