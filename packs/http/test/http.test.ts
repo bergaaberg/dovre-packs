@@ -96,7 +96,7 @@ test("manifest: PACK_API, local only, private, its settings; off when hosted", (
   assert.equal(httpPack.manifest.id, "http");
   assert.equal(httpPack.manifest.execution, "local-only");
   assert.equal(httpPack.manifest.private, true);
-  assert.deepEqual(httpPack.manifest.settings!.map((s) => s.key), ["HTTP_SECRETS", "HTTP_ENVS"]);
+  assert.deepEqual(httpPack.manifest.settings!.map((s) => s.key), ["HTTP_SECRETS", "HTTP_AGENT_HOSTS", "HTTP_ENVS"]);
   assert.equal(httpPack.available!(testContext({ hosted: true })), false);
   assert.equal(httpPack.available!(testContext({ hosted: false })), true);
 });
@@ -539,4 +539,53 @@ test("agents: a failing send offers Debug with an agent (masked, header names on
   assert.equal(w.repo, "shop");
   assert.match(w.prompt, /\{\{baseUrl\}\}/);
   assert.match(w.prompt, /never a real token/);
+});
+
+test("the send tool (agents, over Dovre's MCP): GET/HEAD to this machine or listed hosts only, secrets masked, in history, logged", async () => {
+  const LOCAL = "l0cal-key-value-123";
+  const fake = fakeFetch((url, init) => new Response(`echo ${url} ${new Headers(init.headers).get("authorization") ?? ""} ${"y".repeat(9000)}`, { status: 200, headers: { "content-type": "text/plain", "set-cookie": "s=1" } }));
+  const m = mounted({ fetchFn: fake.fetchFn, env: { HTTP_SECRETS: "API_TOKEN@api.example.com,LOCAL_KEY@localhost:3000", LOCAL_KEY: LOCAL } });
+  assert.deepEqual(createHttpPack().tools!(testContext({ env: { HTTP_AGENT_HOSTS: "off" } })), [], "off: no tool");
+  const [send] = m.pack.tools!(m.ctx);
+  assert.equal(send!.name, "send");
+  const call = { run: "run-1", repo: "shop", cwd: join(m.code, "shop") };
+  const run = (a: Record<string, unknown>) => send!.run(a, m.ctx, call) as Promise<{ text: string; error?: boolean }>;
+
+  for (const [a, re] of [
+    [{ method: "POST", url: "http://localhost:3000/x" }, /Only GET and HEAD/],
+    [{ method: "DELETE", url: "http://localhost:3000/x" }, /Only GET and HEAD/],
+    [{ url: "https://api.example.com/x" }, /only send to this machine.*api\.example\.com isn't one/],
+    [{ url: "{{baseUrl}}/x", env: "dev" }, /api\.example\.com isn't one/],
+    [{ url: "http://localhost:3000/x", headers: { Authorization: "Bearer {{API_TOKEN}}" } }, /API_TOKEN only goes to api\.example\.com/],
+    [{ url: "http://localhost:3000/x", headers: { "X-Leak": SECRET } }, /API_TOKEN's value in it/],
+    [{ url: "file:///etc/passwd" }, /Only http/],
+    [{ url: "" }, /A url is needed/],
+  ] as const) {
+    const out = await run(a);
+    assert.equal(out.error, true, JSON.stringify(a));
+    assert.match(out.text, re);
+  }
+  assert.equal(fake.calls.length, 0, "nothing refused was sent");
+
+  const ok = await run({ url: "http://localhost:3000/items?q=1", headers: { Authorization: "Bearer {{LOCAL_KEY}}" } });
+  assert.equal(ok.error, false);
+  assert.match(ok.text, /^200 · \d+ ms · \d+ bytes\ncontent-type: text\/plain\n\necho http:\/\/localhost:3000\/items\?q=1 Bearer •••• y+\n…\(cut\)$/);
+  assert.ok(!ok.text.includes(LOCAL), "a secret's value never goes back");
+  assert.ok(!ok.text.includes("set-cookie"));
+  assert.equal(fake.calls.length, 1);
+  assert.equal(new Headers(fake.calls[0]!.init.headers).get("authorization"), `Bearer ${LOCAL}`, "it went out filled in");
+  assert.equal(fake.calls[0]!.init.method, "GET");
+  assert.equal(m.pack.history().list()[0]!.by, "agent");
+  assert.match(await (await m.get("/http")).text(), /by an agent/);
+
+  const listed = createHttpPack({ fetchFn: fake.fetchFn });
+  const ctx2 = testContext({ env: { ...m.ctx.env, HTTP_AGENT_HOSTS: "api.example.com" }, db: m.db.DB, hosted: false });
+  const out = await (listed.tools!(ctx2)[0]!.run({ method: "HEAD", url: "{{baseUrl}}/health", env: "dev" }, ctx2, call) as Promise<{ text: string; error?: boolean }>);
+  assert.equal(out.error, false);
+  assert.match(listed.tools!(ctx2)[0]!.description, /this machine \(localhost\), api\.example\.com/);
+  assert.equal(fake.calls[1]!.url, "https://api.example.com/health");
+  assert.equal(fake.calls[1]!.init.method, "HEAD");
+
+  const log = (await m.actions()).filter((a) => a.kind === "http.send");
+  assert.match(log[0]!.detail!, /by an agent$/);
 });

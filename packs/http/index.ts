@@ -14,6 +14,9 @@
  *    a new file or a request added to the end is one click (nothing that was there changes);
  *    replacing a request in a file is a two-click Confirm (`http.replace`, one click if I set it so on
  *    Settings → Writes). Both re-check the file first.
+ *  - Agents (agent.ts): drafted prompts on core's /agents/new, and the `send` tool on Dovre's MCP
+ *    server (Pack.tools): a running agent turn's GET or HEAD, only to this machine or HTTP_AGENT_HOSTS,
+ *    secrets bound as for any send, the answer masked and cut short, in history, logged.
  *  - Importing curl or an OpenAPI spec (openapi.ts) only reads the text: nothing is fetched or sent.
  *    Saving a spec's requests adds them to a new file or the end of one (`http.save`, one click).
  */
@@ -21,10 +24,11 @@ import { html } from "hono/html";
 import type { Context } from "hono";
 import { logAction } from "dovre/actions/deploys.ts";
 import type { AppEnv } from "dovre/env.ts";
-import { type Pack, type PackContext, PACK_API } from "dovre/packs/types.ts";
+import { type Pack, type PackContext, PACK_API, type ToolCall, type ToolResult } from "dovre/packs/types.ts";
+import { AGENT_BODY, AGENT_METHODS, agentHosts, agentMayReach, forAgent } from "./agent.ts";
 import { strictOrigin } from "dovre/strict.ts";
 import { codeDirOf, listFiles, listRepos, readFile, repoEnvs, repoRoot, writeFile } from "./files.ts";
-import { blankReq, CREDENTIAL_HEADERS, envNames, fromCurl, masker, parseEnvs, parseHttp, parseSecrets, placeholdSecrets, prepare, type Req, reqOfForm, secretIn, serializeReq, toCurl, varsOf, withReq } from "./model.ts";
+import { blankReq, CREDENTIAL_HEADERS, headerLines, MAX_URL, envNames, fromCurl, masker, parseEnvs, parseHttp, parseSecrets, placeholdSecrets, prepare, type Req, reqOfForm, secretIn, serializeReq, toCurl, varsOf, withReq } from "./model.ts";
 import { createHistory, failure, type History, type Sent, sendOnce } from "./send.ts";
 import { previous } from "./compare.ts";
 import { styles as jsonStyles } from "../json/view.ts";
@@ -91,7 +95,7 @@ export function createHttpPack(opts: CreateHttpPackOpts = {}): Pack & { history(
   }
 
   /** Sends in the background; the page it redirects to fills in when the answer is here. */
-  function start(ctx: PackContext, r: Req, w: Where, p: Extract<ReturnType<typeof prepare>, { ok: true }>): Sent {
+  function start(ctx: PackContext, r: Req, w: Where, p: Extract<ReturnType<typeof prepare>, { ok: true }>, by?: "agent"): { s: Sent; settled: Promise<void> } {
     const secrets = secretsOf(ctx);
     const mask = masker(secrets);
     const id = crypto.randomUUID();
@@ -102,26 +106,48 @@ export function createHttpPack(opts: CreateHttpPackOpts = {}): Pack & { history(
       from: { env: w.env, repo: w.repo, file: w.opened, n: w.n, hash: w.hash },
       out: { method: p.method, url: mask(p.url), headers: p.headers.map(([k, v]) => [k, CREDENTIAL_HEADERS.has(k.toLowerCase()) ? "••••" : mask(v)]) },
       state: "sending",
+      ...(by ? { by } : {}),
     };
     history.add(s);
     const u = new URL(p.url);
     const target = mask(`${p.method} ${u.origin}${u.pathname}`).slice(0, 300);
-    void sendOnce(p, { fetchFn: opts.fetchFn ?? fetch, mask, now, timeoutMs: opts.timeoutMs })
+    const settled = sendOnce(p, { fetchFn: opts.fetchFn ?? fetch, mask, now, timeoutMs: opts.timeoutMs })
       .then(
         async (resp) => {
           s.resp = resp;
           s.state = "done";
-          await logAction(ctx.db, { kind: "http.send", target, detail: `${resp.status} · ${resp.ms} ms`, ok: true });
+          await logAction(ctx.db, { kind: "http.send", target, detail: `${resp.status} · ${resp.ms} ms${by ? " · by an agent" : ""}`, ok: true });
         },
         async (e) => {
           s.state = "failed";
           s.error = failure(e, mask);
-          await logAction(ctx.db, { kind: "http.send", target, ok: false, error: s.error });
+          await logAction(ctx.db, { kind: "http.send", target, detail: by ? "by an agent" : undefined, ok: false, error: s.error });
         },
       )
       .catch((e) => ctx.log(`http: couldn't log a send: ${String((e as Error)?.message ?? e).slice(0, 200)}`))
       .finally(() => ctx.publish(["http", `http-sent:${id}`]));
-    return s;
+    return { s, settled };
+  }
+
+  /** The `send` tool: an agent's GET or HEAD, to this machine or a host I listed; what came back, masked. */
+  async function agentSend(ctx: PackContext, a: Record<string, unknown>, call: ToolCall, listed: string[]): Promise<ToolResult> {
+    const method = typeof a.method === "string" ? a.method.toUpperCase() : "GET";
+    if (!(AGENT_METHODS as readonly string[]).includes(method)) return { text: `Only ${AGENT_METHODS.join(" and ")} requests: an agent can read, not change things. Nothing was sent.`, error: true };
+    const url = str(a.url, MAX_URL).replace(/[\r\n]/g, "").trim();
+    if (!url) return { text: "A url is needed.", error: true };
+    const headers: [string, string][] = a.headers && typeof a.headers === "object" && !Array.isArray(a.headers) ? Object.entries(a.headers as Record<string, unknown>).slice(0, 50).flatMap(([k, v]) => (typeof v === "string" ? headerLines(`${k}: ${v.slice(0, 4000)}`) : [])) : [];
+    const r: Req = { ...blankReq(), method: method as Req["method"], url, headers };
+    const w: Where = { ...noWhere(), env: str(a.env, 64), repo: call.repo };
+    const secrets = secretsOf(ctx);
+    const p = prepare(r, varsFor(ctx, w).vars, secrets, now());
+    if (!p.ok) return { text: p.error, error: true };
+    if (!agentMayReach(p.url, listed)) {
+      const host = masker(secrets)(new URL(p.url).host);
+      return { text: `An agent may only send to this machine (localhost) or the hosts in HTTP_AGENT_HOSTS; ${host} isn't one. Nothing was sent.`, error: true };
+    }
+    const { s, settled } = start(ctx, r, w, p, "agent");
+    await settled;
+    return { text: forAgent(s), error: s.state !== "done" };
   }
 
   return {
@@ -138,6 +164,7 @@ export function createHttpPack(opts: CreateHttpPackOpts = {}): Pack & { history(
       private: true,
       settings: [
         { key: "HTTP_SECRETS", label: "Secrets and their hosts", help: "NAME@host entries, comma separated (API_TOKEN@api.example.com, LOCAL_KEY@localhost:3000). {{NAME}} is filled from this machine's setting NAME, and only in a request to one of its hosts." },
+        { key: "HTTP_AGENT_HOSTS", label: "Hosts an agent may send to", help: "Agents Dovre starts can send GET and HEAD requests through this client (its send tool), to this machine (localhost) and the hosts listed here (api.staging.example.com, host:port), comma separated. off: agents can't send." },
         { key: "HTTP_ENVS", label: "Environments", help: 'Your own environments, as JSON: {"local": {"baseUrl": "http://localhost:3000"}}. Public values only; a repo adds its own in .http/http-client.env.json.' },
       ],
     },
@@ -145,6 +172,30 @@ export function createHttpPack(opts: CreateHttpPackOpts = {}): Pack & { history(
     writes: [{ kind: "replace", label: "Replace a saved request in a .http file" }],
 
     available: (ctx) => !ctx.hosted,
+
+    tools: (ctx) => {
+      const listed = agentHosts(ctx.env.HTTP_AGENT_HOSTS);
+      if (!listed) return [];
+      const where = ["this machine (localhost)", ...listed].join(", ");
+      return [
+        {
+          name: "send",
+          description: `Send a GET or HEAD request through Dovre's HTTP client and get the response back (status, a few headers, the body cut at ${AGENT_BODY} characters). Only to ${where}; anything else is refused. {{name}} fills in from the environment (env) and the repo's .http/http-client.env.json; a secret {{NAME}} fills in only for the hosts it's bound to, and its value never comes back (shown as ••••). No redirects are followed; 30 s at most. Each send shows in the HTTP client's history.`,
+          input: {
+            type: "object",
+            properties: {
+              method: { type: "string", enum: [...AGENT_METHODS], description: "GET (default) or HEAD." },
+              url: { type: "string", description: "http:// or https:// URL; may use {{baseUrl}} and other variables." },
+              headers: { type: "object", additionalProperties: { type: "string" }, description: "Request headers, e.g. {\"Accept\": \"application/json\", \"Authorization\": \"Bearer {{API_TOKEN}}\"}." },
+              env: { type: "string", description: "An environment's name, for its variables." },
+            },
+            required: ["url"],
+            additionalProperties: false,
+          },
+          run: (a, c, call) => agentSend(c, a, call, listed),
+        },
+      ];
+    },
 
     nav: () => [{ href: "/http", title: "HTTP", icon: "arrow", group: "Code" }],
 
@@ -198,7 +249,7 @@ export function createHttpPack(opts: CreateHttpPackOpts = {}): Pack & { history(
         const w = whereOf(f);
         const p = prepare(r, varsFor(ctx, w).vars, secretsOf(ctx), now());
         if (!p.ok) return draw(ctx, c, r, w, { flash: { tone: "warn", text: p.error } }, 400);
-        const s = start(ctx, r, w, p);
+        const { s } = start(ctx, r, w, p);
         return c.redirect(sentHref(s.id), 303);
       });
 
