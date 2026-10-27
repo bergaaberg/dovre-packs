@@ -17,6 +17,10 @@
  *  - Agents (agent.ts): drafted prompts on core's /agents/new, and the `send` tool on Dovre's MCP
  *    server (Pack.tools): a running agent turn's GET or HEAD, only to this machine or HTTP_AGENT_HOSTS,
  *    secrets bound as for any send, the answer masked and cut short, in history, logged.
+ *  - Running a file as a smoke test (run.ts, checks.ts): GET /http/run shows what it will send and
+ *    each request's `# @expect` checks, sending nothing; one click on POST /http/run sends them one
+ *    after the other (each an ordinary send, re-checked against the file as it was shown), and the
+ *    results fill in over the hub. Logged as `http.run` (the file, how many passed).
  *  - Importing curl or an OpenAPI spec (openapi.ts) only reads the text: nothing is fetched or sent.
  *    Saving a spec's requests adds them to a new file or the end of one (`http.save`, one click).
  */
@@ -32,8 +36,10 @@ import { blankReq, CREDENTIAL_HEADERS, headerLines, MAX_URL, envNames, fromCurl,
 import { createHistory, failure, type History, type Sent, sendOnce } from "./send.ts";
 import { previous } from "./compare.ts";
 import { styles as jsonStyles } from "../json/view.ts";
-import { confirmSavePage, fileOk, homeHref, type HomeOpts, homePage, noWhere, openapiPage, sentHref, sentPage, type Where } from "./view.ts";
+import { confirmSavePage, fileOk, homeHref, type HomeOpts, homePage, noWhere, openapiPage, runPage, runPageHref, runPlanPage, sentHref, sentPage, type Where } from "./view.ts";
 import { fileNameOf, fromOpenApi, MAX_SPEC } from "./openapi.ts";
+import { parseCheck, runChecks } from "./checks.ts";
+import { createRuns, failedSteps, MAX_RUN, passed, type Run } from "./run.ts";
 
 /** How a response's body is shown, or `diff` against the send before it. */
 const VIEWS = ["pretty", "tree", "raw", "diff"] as const;
@@ -48,6 +54,7 @@ function whereOf(f: Record<string, unknown>): Where {
 
 export function createHttpPack(opts: CreateHttpPackOpts = {}): Pack & { history(): History } {
   const history = createHistory();
+  const runs = createRuns();
   const now = opts.now ?? Date.now;
 
   const secretsOf = (ctx: PackContext) => parseSecrets(ctx.env.HTTP_SECRETS, ctx.env);
@@ -129,6 +136,73 @@ export function createHttpPack(opts: CreateHttpPackOpts = {}): Pack & { history(
     return { s, settled };
   }
 
+  /** A repo's .http file and its requests, for a run. */
+  function loadRun(ctx: PackContext, repo: string, file: string) {
+    const root = repoRoot(codeDirOf(ctx.env), repo);
+    if (!root) return { ok: false as const, error: "That repo isn't a checkout in your code folder." };
+    if (!fileOk(file)) return { ok: false as const, error: "A request file is a plain name ending in .http." };
+    try {
+      const f = readFile(root, file);
+      const reqs = parseHttp(f.text).reqs;
+      if (!reqs.length) return { ok: false as const, error: `${f.name} has no requests to run.` };
+      return { ok: true as const, f, reqs };
+    } catch (e) {
+      return { ok: false as const, error: (e as Error).message };
+    }
+  }
+
+  function planPage(ctx: PackContext, c: Context<AppEnv>, repo: string, env: string, got: Extract<ReturnType<typeof loadRun>, { ok: true }>, problem?: string) {
+    const w: Where = { ...noWhere(), env, repo, opened: got.f.name };
+    const items = got.reqs.slice(0, MAX_RUN).map((r) => ({
+      method: r.method,
+      name: r.name,
+      target: targetOf(ctx, r, w) ?? { ok: false, text: "No URL." },
+      checks: (r.expect ?? []).map((t) => {
+        const p = parseCheck(t);
+        return { text: t, ...("error" in p ? { error: p.error } : {}) };
+      }),
+    }));
+    c.header("Cache-Control", "no-store");
+    return ctx
+      .page(c, { title: `Run ${got.f.name}`, current: "/http", body: runPlanPage({ repo, file: got.f.name, env, envs: varsFor(ctx, w).envs, hash: got.f.hash, items, more: Math.max(0, got.reqs.length - MAX_RUN), problem }) })
+      .then((res) => (problem ? new Response(res.body, { status: 409, headers: res.headers }) : res));
+  }
+
+  /** Sends a run's requests one after the other, holding each response to its checks. */
+  async function execute(ctx: PackContext, run: Run, reqs: Extract<ReturnType<typeof loadRun>, { ok: true }>["reqs"], hash: string) {
+    const w: Where = { ...noWhere(), env: run.env, repo: run.repo, file: run.file, opened: run.file, hash };
+    const secrets = secretsOf(ctx);
+    const mask = masker(secrets);
+    const vars = varsFor(ctx, w).vars;
+    const publish = () => ctx.publish(["http", `http-run:${run.id}`]);
+    for (const step of run.steps) {
+      const { span: _span, ...r } = reqs[step.n]!;
+      const p = prepare(r, vars, secrets, now());
+      if (!p.ok) {
+        Object.assign(step, { state: "failed", error: `Not sent: ${p.error}` });
+        publish();
+        continue;
+      }
+      Object.assign(step, { state: "sending", url: mask(p.url) });
+      publish();
+      const { s, settled } = start(ctx, r, { ...w, n: String(step.n) }, p);
+      step.sentId = s.id;
+      await settled;
+      if (s.state !== "done" || !s.resp) {
+        Object.assign(step, { state: "failed", error: `Nothing came back: ${s.error ?? "it failed"}.` });
+      } else {
+        step.status = s.resp.status;
+        step.ms = s.resp.ms;
+        step.checks = runChecks(r.expect, s.resp);
+        step.state = step.checks.every((x) => x.ok) ? "passed" : "failed";
+      }
+      publish();
+    }
+    run.state = "done";
+    const bad = failedSteps(run);
+    await logAction(ctx.db, { kind: "http.run", target: `${run.repo}/.http/${run.file}`, detail: `${passed(run)} of ${run.steps.length} passed${run.env ? ` · ${run.env}` : ""}`.slice(0, 200), ok: bad === 0, error: bad ? `${bad} failed` : undefined });
+  }
+
   /** The `send` tool: an agent's GET or HEAD, to this machine or a host I listed; what came back, masked. */
   async function agentSend(ctx: PackContext, a: Record<string, unknown>, call: ToolCall, listed: string[]): Promise<ToolResult> {
     const method = typeof a.method === "string" ? a.method.toUpperCase() : "GET";
@@ -204,7 +278,7 @@ export function createHttpPack(opts: CreateHttpPackOpts = {}): Pack & { history(
     about: (_ctx, path) => (path.startsWith("/http") ? "The HTTP client (requests and responses aren't shared)." : undefined),
 
     slots: () => ({
-      "actions.what": ({ kind }) => (kind === "http.send" ? "Sent an HTTP request" : kind === "http.save" ? "Saved an HTTP request to a repo" : undefined),
+      "actions.what": ({ kind }) => (kind === "http.send" ? "Sent an HTTP request" : kind === "http.run" ? "Ran a .http file as a smoke test" : kind === "http.save" ? "Saved an HTTP request to a repo" : undefined),
     }),
 
     settings: (ctx) => {
@@ -265,6 +339,51 @@ export function createHttpPack(opts: CreateHttpPackOpts = {}): Pack & { history(
           head: html`<meta name="u-topics" content="http http-sent:${s.id}">`,
           body: sentPage({ sent: s, view: VIEWS.find((v) => v === c.req.query("view")) ?? "pretty", prev: previous(history.list(), s), req: s.req, where: w, envs: varsFor(ctx, w).envs, repos: listRepos(codeDir), secrets: secretsOf(ctx), history: history.list() }),
         });
+      });
+
+      // What a run of the file would send, and its checks: nothing is sent here.
+      app.get("/http/run", async (c) => {
+        const q = c.req.query();
+        const repo = str(q.repo, 100);
+        const env = str(q.env, 64);
+        const got = loadRun(ctx, repo, str(q.file, 85));
+        if (!got.ok) return draw(ctx, c, blankReq(), { ...noWhere(), repo, env }, { flash: { tone: "warn", text: got.error } }, 400);
+        return planPage(ctx, c, repo, env, got);
+      });
+
+      app.post("/http/run", async (c) => {
+        const f = await c.req.parseBody();
+        const repo = str(f.repo, 100);
+        const env = str(f.env, 64);
+        const got = loadRun(ctx, repo, str(f.file, 85));
+        if (!got.ok) return draw(ctx, c, blankReq(), { ...noWhere(), repo, env }, { flash: { tone: "warn", text: got.error } }, 400);
+        // Only what was shown runs: a file that changed since is shown again.
+        if (got.f.hash !== str(f.hash, 64)) return planPage(ctx, c, repo, env, got, `${got.f.name} changed since it was shown: nothing was sent. This is what's in it now.`);
+        const mask = masker(secretsOf(ctx));
+        const run: Run = {
+          id: crypto.randomUUID(),
+          at: now(),
+          repo,
+          file: got.f.name,
+          env,
+          state: "running",
+          steps: got.reqs.slice(0, MAX_RUN).map((r, n) => ({ n, name: r.name, method: r.method, url: mask(r.url), state: "waiting", checks: [] })),
+        };
+        runs.add(run);
+        void execute(ctx, run, got.reqs, got.f.hash)
+          .catch((e) => {
+            run.state = "done";
+            ctx.log(`http: a run stopped: ${String((e as Error)?.message ?? e).slice(0, 200)}`);
+          })
+          .finally(() => ctx.publish(["http", `http-run:${run.id}`]));
+        return c.redirect(runPageHref(run.id), 303);
+      });
+
+      app.get("/http/run/:id", async (c) => {
+        const run = runs.get(c.req.param("id"));
+        if (!run) return c.redirect("/http", 303);
+        c.header("Cache-Control", "no-store");
+        return ctx.page(c, { title: `Run ${run.file}`, current: "/http", head: html`<meta name="u-topics" content="http http-run:${run.id}">`, body: runPage(run, (id) => !!history.get(id)) });
       });
 
       app.post("/http/curl", async (c) => {
