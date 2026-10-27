@@ -1,6 +1,6 @@
 /**
  * JSON tools (`json`): format, minify, validate (with line and column), a tree with each node's
- * JSONPath, a JSONPath query, a structural diff, and the decoders that come with JSON (JWT, base64,
+ * JSONPath, a JSONPath query, a structural diff, JSON ↔ YAML and types/a schema from a sample, and the decoders that come with JSON (JWT, base64,
  * URL-encoding, Unix time). Pure: no settings, no refresh, nothing fetched.
  *
  * What's pasted is someone's work data: it's posted to these routes (not put in a URL, where it'd
@@ -12,7 +12,8 @@ import type { AppEnv } from "dovre/env.ts";
 import { type Pack, PACK_API } from "dovre/packs/types.ts";
 import { strictOrigin } from "dovre/strict.ts";
 import { MAX_INPUT, b64Decode, b64Encode, diff, epoch, format, jwtDecode, minify, parse, query, sortKeys, urlDecode, urlEncode } from "./tools.ts";
-import { type DecodeOp, type DecodeResult, DECODE_OPS, decodePage, diffPage, formatPage, queryPage, styles } from "./view.ts";
+import { fromYaml, shapeOf, toJsonSchema, toTypeScript, toYaml } from "./convert.ts";
+import { type ConvertOp, type ConvertState, type DecodeOp, type DecodeResult, CONVERT_OPS, DECODE_OPS, convertPage, decodePage, diffPage, formatPage, queryPage, styles } from "./view.ts";
 
 /** A body bigger than this is refused before it's read (two documents at MAX_INPUT, form-encoded). */
 const MAX_BODY = 8 * MAX_INPUT;
@@ -46,6 +47,18 @@ export function decode(op: DecodeOp, input: string, now: number): DecodeResult {
   return { op: "text", text: r.text, binary: r.binary, json: asJson?.ok ? asJson.value : undefined };
 }
 
+export function convert(op: ConvertOp, input: string, root = "Root"): ConvertState["result"] {
+  if (op === "json") {
+    const y = fromYaml(input);
+    return y.ok ? { out: format(y.value) } : { yaml: y };
+  }
+  const p = parse(input);
+  if (!p.ok) return { json: p };
+  if (op === "yaml") return { out: toYaml(p.value) };
+  if (op === "ts") return { out: toTypeScript(shapeOf(p.value), root) };
+  return { out: format(toJsonSchema(shapeOf(p.value))) };
+}
+
 export function createJsonPack(opts: { now?: () => number } = {}): Pack {
   const now = opts.now ?? Date.now;
   return {
@@ -53,7 +66,7 @@ export function createJsonPack(opts: { now?: () => number } = {}): Pack {
       api: PACK_API,
       id: "json",
       name: "JSON tools",
-      description: "Format, validate, browse, query and diff JSON; decode JWTs, base64, URL-encoding and Unix times. Runs in the request; nothing is sent anywhere.",
+      description: "Format, validate, browse, query, diff and convert JSON (YAML, TypeScript types, JSON Schema); decode JWTs, base64, URL-encoding and Unix times. Runs in the request; nothing is sent anywhere.",
       domain: "general",
       execution: "any",
       private: true,
@@ -64,6 +77,7 @@ export function createJsonPack(opts: { now?: () => number } = {}): Pack {
       { title: "JSON: format & tree", href: "/json", icon: "{}", about: "Format, minify, validate JSON and browse it as a tree", also: ["json", "pretty print", "validate", "minify", "beautify", "tree"] },
       { title: "JSON: query", href: "/json/query", icon: "{}", about: "Run a JSONPath over a document", also: ["jsonpath", "jq", "query"] },
       { title: "JSON: diff", href: "/json/diff", icon: "{}", about: "Compare two JSON documents, key order ignored", also: ["compare", "diff"] },
+      { title: "JSON: convert", href: "/json/convert", icon: "{}", about: "JSON to YAML and back; TypeScript types or a JSON Schema from a sample", also: ["yaml", "typescript", "types", "interface", "json schema", "convert"] },
       { title: "JSON: decode", href: "/json/decode", icon: "{}", about: "Decode a JWT, base64 or URL-encoding; Unix time to date", also: ["jwt", "base64", "url decode", "epoch", "timestamp", "unix time"] },
     ],
     about: (_ctx, path) => (path.startsWith("/json") ? "JSON tools (what's pasted here isn't shared)" : undefined),
@@ -111,6 +125,16 @@ export function createJsonPack(opts: { now?: () => number } = {}): Pack {
         const pa = parse(a), pb = parse(b);
         const r = pa.ok && pb.ok ? diff(pa.value, pb.value) : undefined;
         return page(c, "JSON diff", diffPage({ a, b, result: { pa, pb, changes: r?.changes, more: r?.more } }));
+      });
+
+      app.get("/json/convert", (c) => page(c, "Convert", convertPage({ input: "" })));
+      app.post("/json/convert", strictOrigin, async (c) => {
+        const f = await form(c);
+        if (!f) return tooBig(c);
+        const input = f.input ?? "";
+        const op = (CONVERT_OPS.find(([v]) => v === f.op)?.[0] ?? "yaml") as ConvertOp;
+        const root = (f.root ?? "").trim().slice(0, 60) || "Root";
+        return page(c, "Convert", convertPage({ input, op, root, result: convert(op, input, root) }));
       });
 
       app.get("/json/decode", (c) => page(c, "Decode", decodePage({ input: "", now: now() })));
