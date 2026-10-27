@@ -20,19 +20,21 @@ import { exportHref, fileCell, filesHref, sliceParams } from "../filesview.ts";
 const H = `<script>alert(1)</script>`;
 const IMG = `<img src=x onerror=alert(1)>`;
 const JS_URL = "javascript:alert(1)";
+// Windows refuses < > : in file names, so the hostile names are only made where they can exist.
+const NAMES = process.platform !== "win32";
 
 const base = mkdtempSync(join(tmpdir(), "duckdb-files-"));
 const lake = join(base, "lake");
 const outside = join(base, "outside");
 mkdirSync(join(lake, "sub"), { recursive: true });
-mkdirSync(join(lake, JS_URL), { recursive: true });
+if (NAMES) mkdirSync(join(lake, JS_URL), { recursive: true });
 mkdirSync(outside, { recursive: true });
 writeFileSync(join(lake, "t.parquet"), "PAR1");
 writeFileSync(join(lake, "t2.parquet"), "PAR1");
 writeFileSync(join(lake, "it's.csv"), "a\n1\n");
 writeFileSync(join(lake, "notes.txt"), "x");
 writeFileSync(join(lake, ".hidden.parquet"), "PAR1");
-writeFileSync(join(lake, `${IMG}.parquet`), "PAR1");
+if (NAMES) writeFileSync(join(lake, `${IMG}.parquet`), "PAR1");
 writeFileSync(join(lake, "sub", "e.jsonl"), "{}\n");
 writeFileSync(join(outside, "secret.parquet"), "PAR1");
 symlinkSync(join(outside, "secret.parquet"), join(lake, "link.parquet"));
@@ -80,7 +82,7 @@ test("files: open stays inside the source, symlinks followed", () => {
   assert.equal(all?.type, "file");
   if (all?.type !== "file") return;
   assert.equal(all.all, true);
-  assert.deepEqual(all.files.map((f) => f.slice(lake.length + 1)).sort(), [`${IMG}.parquet`, "t.parquet", "t2.parquet"].sort());
+  assert.deepEqual(all.files.map((f) => f.slice(lake.length + 1)).sort(), [...(NAMES ? [`${IMG}.parquet`] : []), "t.parquet", "t2.parquet"].sort());
   assert.equal(open(t, "sub", true), undefined, "no Parquet files there");
 });
 
@@ -95,7 +97,7 @@ test("files: SQL quotes paths and column names", () => {
   const many = Array.from({ length: 400 }, (_, i) => `/lake/part-${i}-${"x".repeat(40)}.parquet`);
   const sql = handoffSql({ kind: "parquet", files: many, abs: "/lake", all: true }, 20_000);
   assert.ok(sql.length <= 20_000);
-  assert.match(sql, /read_parquet\('\/lake\/\*\.parquet'/);
+  assert.ok(sql.includes(`read_parquet(${lit(join("/lake", "*.parquet"))}`), sql);
 });
 
 test("files: columnsOf reads top-level nullability from parquet's schema tree", () => {
@@ -185,7 +187,7 @@ test("files: a hostile file renders inert, every run shut in without the directo
 
   assert.ok(run.seen.length >= 5);
   for (const sql of run.seen) {
-    assert.match(sql, /SET allowed_directories = \['.*\/lake\/'\];/);
+    assert.ok(sql.includes(`SET allowed_directories = [${lit(join(lake, "/"))}];`), sql);
     assert.match(sql, /SET enable_external_access = false;/);
     assert.match(sql, /SET lock_configuration = true;/);
     assert.ok(!sql.includes("CREATE OR REPLACE TEMPORARY VIEW"), "no directory views");
@@ -218,9 +220,11 @@ test("files: folders, CSV and refusals", async () => {
   assert.equal(root.status, 200);
   const listing = await root.text();
   inert(listing);
-  assert.ok(listing.includes("Open the 3 Parquet files here as one"));
-  assert.ok(listing.includes(`href="/duckdb/files?t=lake&amp;f=javascript%3Aalert%281%29"`), "a hostile folder name is a path on this app");
-  assert.ok(listing.includes("&lt;img src=x onerror=alert(1)&gt;.parquet"));
+  assert.ok(listing.includes(`Open the ${NAMES ? 3 : 2} Parquet files here as one`));
+  if (NAMES) {
+    assert.ok(listing.includes(`href="/duckdb/files?t=lake&amp;f=javascript%3Aalert%281%29"`), "a hostile folder name is a path on this app");
+    assert.ok(listing.includes("&lt;img src=x onerror=alert(1)&gt;.parquet"));
+  }
   assert.ok(!listing.includes("link.parquet"));
 
   const csv = await get(`/duckdb/files?t=lake&f=${encodeURIComponent("it's.csv")}`);
