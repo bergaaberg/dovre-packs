@@ -12,12 +12,15 @@
  *  - curl in (`fromCurl`) and out (`toCurl`): out, a secret stays a shell variable ("$API_TOKEN").
  */
 
+import { checkLines, MAX_CHECK, MAX_CHECKS } from "./checks.ts";
+
 export const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"] as const;
 export type Method = (typeof METHODS)[number];
 export const MODES = ["none", "raw", "json", "form"] as const;
 export type BodyMode = (typeof MODES)[number];
 
-export type Req = { name: string; method: Method; url: string; headers: [string, string][]; query: string[]; mode: BodyMode; body: string };
+/** `expect`: the request's checks for a run (checks.ts), kept as `# @expect …` lines in its block. */
+export type Req = { name: string; method: Method; url: string; headers: [string, string][]; query: string[]; mode: BodyMode; body: string; expect?: string[] };
 
 /** Longest URL, header block, body and name the editor takes. */
 export const MAX_URL = 8_000;
@@ -58,6 +61,7 @@ export function reqOfForm(f: Record<string, unknown>): Req {
     query: lines(s("query", MAX_URL)),
     mode: (MODES as readonly string[]).includes(mode) ? (mode as BodyMode) : "none",
     body: s("body", MAX_BODY_IN),
+    ...(s("expect", MAX_CHECKS * (MAX_CHECK + 20)).trim() ? { expect: checkLines(s("expect", MAX_CHECKS * (MAX_CHECK + 20))) } : {}),
   };
 }
 
@@ -99,6 +103,7 @@ const SEP = /^###/;
 const VAR_LINE = /^@([A-Za-z_][\w.-]{0,63})\s*=\s*(.*)$/;
 const COMMENT = /^(#|\/\/)/;
 const NAME_COMMENT = /^(?:#|\/\/)\s*@name\s+(.+)$/;
+const EXPECT_COMMENT = /^(?:#|\/\/)\s*@expect\s+(.+)$/;
 const REQUEST_LINE = /^(?:([A-Z]+)\s+)?(\S+)(?:\s+HTTP\/[\d.]+)?\s*$/;
 
 function modeOf(headers: [string, string][], body: string): BodyMode {
@@ -130,6 +135,12 @@ export function parseHttp(text: string): Parsed {
     let name = SEP.test(all[from] ?? "") ? all[from]!.replace(SEP, "").trim() : "";
     let i = SEP.test(all[from] ?? "") ? from + 1 : from;
     let firstContent = -1;
+    const expect: string[] = [];
+    const expected = (l: string) => {
+      const e = EXPECT_COMMENT.exec(l);
+      if (e && expect.length < MAX_CHECKS) expect.push(e[1]!.trim().slice(0, MAX_CHECK));
+      return !!e;
+    };
     // Before the request line: blanks, comments (# @name), file variables.
     for (; i < to; i++) {
       const l = all[i]!.trim();
@@ -145,6 +156,7 @@ export function parseHttp(text: string): Parsed {
         name = n[1]!.trim();
         continue;
       }
+      if (expected(l)) continue;
       if (COMMENT.test(l)) continue;
       break;
     }
@@ -158,7 +170,7 @@ export function parseHttp(text: string): Parsed {
     const headers: [string, string][] = [];
     for (; i < to && all[i]!.trim(); i++) {
       const l = all[i]!.trim();
-      if (COMMENT.test(l)) continue;
+      if (expected(l) || COMMENT.test(l)) continue;
       headers.push(...headerLines(l));
     }
     const bodyLines = all.slice(i + 1, to);
@@ -172,6 +184,7 @@ export function parseHttp(text: string): Parsed {
       headers,
       mode,
       body: mode === "form" ? body.split(/\n|&/).map((x) => x.trim()).filter(Boolean).join("\n") : body,
+      ...(expect.length ? { expect } : {}),
       span: [SEP.test(all[from] ?? "") ? from : Math.max(0, firstContent), to],
     });
   }
@@ -180,7 +193,7 @@ export function parseHttp(text: string): Parsed {
 
 /** One request as a `.http` block (from its `###` line). */
 export function serializeReq(r: Req): string {
-  const out = [`### ${r.name.replace(/[\r\n]/g, " ").trim()}`.trimEnd(), `${r.method} ${fullUrl(r)}`];
+  const out = [`### ${r.name.replace(/[\r\n]/g, " ").trim()}`.trimEnd(), ...(r.expect ?? []).map((e) => `# @expect ${e.replace(/[\r\n]/g, " ").trim()}`), `${r.method} ${fullUrl(r)}`];
   for (const [k, v] of sentHeaders(r)) out.push(`${k}: ${v}`);
   const body = r.mode === "none" ? "" : r.mode === "form" ? lines(r.body).map((l, i) => (i ? `&${l.replace(/^&/, "")}` : l)).join("\n") : r.body.replace(/\s+$/, "");
   // A body line that starts with ### would end the request when it's read back.

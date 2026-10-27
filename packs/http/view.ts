@@ -14,6 +14,8 @@ import { parse } from "../json/tools.ts";
 import { changesList, tree } from "../json/view.ts";
 import { type Imported, MAX_SPEC } from "./openapi.ts";
 import { agentHref, debugPrompt, failing, writePrompt } from "./agent.ts";
+import { MAX_CHECK, MAX_CHECKS } from "./checks.ts";
+import { failedSteps, MAX_RUN, passed, type Run, type Step } from "./run.ts";
 
 /** Where the editor's request is from: the environment, the repo and file it's saved to, and the file it was opened from (`opened`, its request `n`, the file's `hash` then). */
 export type Where = { env: string; repo: string; file: string; opened: string; n: string; hash: string };
@@ -23,6 +25,8 @@ export const homeHref = (q: Partial<Where> & { saved?: string } = {}) => {
   const p = new URLSearchParams(Object.entries(q).filter(([, v]) => v) as [string, string][]).toString();
   return safeUrl(`/http${p ? `?${p}` : ""}`);
 };
+export const runHref = (q: { repo: string; file: string; env?: string }) => safeUrl(`/http/run?${new URLSearchParams(Object.entries(q).filter(([, v]) => v) as [string, string][]).toString()}`);
+export const runPageHref = (id: string) => safeUrl(`/http/run/${encodeURIComponent(id)}`);
 export const sentHref = (id: string, view?: string) => safeUrl(`/http/r/${encodeURIComponent(id)}${view ? `?view=${encodeURIComponent(view)}` : ""}`);
 
 const crumbs = [{ href: "/http", label: "HTTP" }];
@@ -35,7 +39,7 @@ const options = (values: readonly string[], current: string, label: (v: string) 
 
 /** The editor's fields as hidden inputs (a Confirm's second click posts them again). */
 export function formFields(r: Req, w: Where): Record<string, string> {
-  return { name: r.name, method: r.method, url: r.url, headers: headersText(r.headers), query: r.query.join("\n"), mode: r.mode, body: r.body, env: w.env, repo: w.repo, file: w.file, opened: w.opened, n: w.n, hash: w.hash };
+  return { name: r.name, method: r.method, url: r.url, headers: headersText(r.headers), query: r.query.join("\n"), mode: r.mode, body: r.body, expect: (r.expect ?? []).join("\n"), env: w.env, repo: w.repo, file: w.file, opened: w.opened, n: w.n, hash: w.hash };
 }
 
 export type EditorOpts = {
@@ -64,6 +68,7 @@ ${o.target ? html`<p class="notes">${o.target.ok ? html`Goes to <code>${o.target
 <div class="fields"><label class="field"><span class="label">Body</span><select name="mode">${options(MODES, r.mode, (m) => ({ none: "None", raw: "Raw", json: "JSON", form: "Form (urlencoded)" })[m] ?? m)}</select></label>
 <label class="field"><span class="label">Environment</span><select name="env"><option value="">None</option>${options(o.envs, w.env)}</select></label></div>
 <label class="field"><textarea name="body" rows="8" maxlength="${MAX_BODY_IN}" spellcheck="false" class="mono" aria-label="Body" placeholder='{ "name": "{{name}}" }'>${r.body}</textarea><span class="hint">Form: one key=value per line, as it goes on the wire. {{name}} fills in from the environment; {{$guid}}, {{$timestamp}} and {{$isoTimestamp}} too.</span></label>
+<label class="field"><span class="label">Checks</span><textarea name="expect" rows="2" maxlength="${MAX_CHECKS * (MAX_CHECK + 20)}" spellcheck="false" class="mono" placeholder="status 200&#10;json $.items[0].id exists">${(r.expect ?? []).join("\n")}</textarea><span class="hint">For running the file as a smoke test, one per line: status 2xx, time &lt; 800, header content-type contains json, body contains ok, json $.id == 3. Saved as # @expect lines. None: any status below 400 passes.</span></label>
 <div class="buttons"><button type="submit" class="primary" data-busy="Sending">Send</button><button type="submit" formaction="/http/curl">Copy as curl</button></div>
 <div class="fields"><label class="field"><span class="label">Save in repo</span><select name="repo"><option value="">Pick a repo</option>${options(o.repos, w.repo)}</select></label>
 <label class="field"><span class="label">File</span><input name="file" value="${w.file}" maxlength="85" spellcheck="false" placeholder="api.http"></label>
@@ -117,7 +122,7 @@ function savedPanel(o: { repos: string[]; repo: string; files: FileInfo[] | unde
       ? Empty({ title: "No .http files yet", children: html`<p>Save a request to start <code>${o.repo}/.http/</code>.</p>` })
       : html`${o.files.map(
           (f) =>
-            html`<h3 class="sub-h">${f.name}</h3>${f.error ? Notice({ tone: "warn", children: f.error }) : ""}<ul class="list">${f.reqs.map(
+            html`<h3 class="sub-h">${f.name}${f.reqs.length && !f.error ? html` <a class="btn sm ghost" href="${runHref({ repo: o.repo, file: f.name, env: o.env })}" title="Send its requests one after the other and check each response">Run</a>` : ""}</h3>${f.error ? Notice({ tone: "warn", children: f.error }) : ""}<ul class="list">${f.reqs.map(
               (q, i) =>
                 html`<li class="item"><a href="${homeHref({ repo: o.repo, file: f.name, n: String(i), env: o.env })}"><strong>${q.method}</strong> ${q.name || q.url}</a>${q.name ? html` <span class="t3 mono">${q.url}</span>` : ""}</li>`,
             )}</ul>`,
@@ -254,3 +259,61 @@ ${Confirm({ kind: "http.replace", action: "/http/save", fields: { ...formFields(
 export const fileOk = (f: string) => FILE_RE.test(f) && !f.includes("..");
 
 type Html = ReturnType<typeof html>;
+
+// ── Runs ────────────────────────────────────────────────────────────────────────────────────
+
+export type PlanItem = { method: string; name: string; target: { ok: boolean; text: string }; checks: { text: string; error?: string }[] };
+
+/** What a run of the file will send, before anything is: the second step is one click. */
+export function runPlanPage(o: { repo: string; file: string; env: string; envs: string[]; hash: string; items: PlanItem[]; more: number; problem?: string }): Html {
+  const unsure = o.items.flatMap((x) => x.checks.filter((c) => c.error));
+  const writes = o.items.filter((x) => !["GET", "HEAD", "OPTIONS"].includes(x.method)).length;
+  return html`${PageHeader({ title: html`Run ${o.file}`, sub: html`<span class="mono">${o.repo}/.http/${o.file}</span>: ${o.items.length} request${o.items.length === 1 ? "" : "s"}, one after the other`, crumbs })}
+${o.problem ? Notice({ tone: "warn", children: o.problem }) : ""}
+${o.more ? Notice({ tone: "warn", children: `Only the first ${MAX_RUN} requests run: ${o.more} more are left out.` }) : ""}
+${unsure.length ? Notice({ tone: "warn", children: `${unsure.length} check${unsure.length === 1 ? "" : "s"} can't be read and will fail: fix ${unsure.length === 1 ? "it" : "them"} in the file.` }) : ""}
+${Panel({
+  title: "Run",
+  children: html`<form method="get" action="/http/run" class="fields"><input type="hidden" name="repo" value="${o.repo}"><input type="hidden" name="file" value="${o.file}"><label class="field"><span class="label">Environment</span><select name="env"><option value="">None</option>${options(o.envs, o.env)}</select></label><div class="buttons"><button type="submit">Show it with this</button></div></form>
+<form method="post" action="/http/run"><input type="hidden" name="repo" value="${o.repo}"><input type="hidden" name="file" value="${o.file}"><input type="hidden" name="env" value="${o.env}"><input type="hidden" name="hash" value="${o.hash}">
+<div class="buttons"><button type="submit" class="primary" data-busy="Running">Run ${o.items.length} request${o.items.length === 1 ? "" : "s"}</button></div></form>
+<p class="notes">Each goes out from this machine as a send does (no redirects followed, 30 s at most), shows in history and is logged.${writes ? html` <strong>${writes} of them ${writes === 1 ? "isn't a read" : "aren't reads"}</strong> (POST, PUT, PATCH or DELETE): they change things wherever they go.` : ""} A request that can't go (a missing variable, a secret's wrong host) fails without being sent; the rest still run.</p>`,
+})}
+${Panel({
+  title: "Requests",
+  children: html`<ol class="list">${o.items.map(
+    (x) =>
+      html`<li class="item"><strong>${x.method}</strong> ${x.name} ${x.target.ok ? html`<span class="t3 mono">${x.target.text}</span>` : html`<span class="t3">${x.target.text}</span>`}${x.checks.length ? html`<ul class="list">${x.checks.map((c) => html`<li class="item mono">${c.text}${c.error ? html` <span class="t3">(${c.error})</span>` : ""}</li>`)}</ul>` : html` <span class="t3">· any status below 400</span>`}</li>`,
+  )}</ol>`,
+})}
+<p><a href="${homeHref({ repo: o.repo, env: o.env })}">Back</a></p>`;
+}
+
+const stepPill = (s: Step) =>
+  s.state === "passed" ? Pill({ tone: "ok", children: "passed" }) : s.state === "failed" ? Pill({ tone: "bad", children: "failed" }) : Pill({ tone: "neutral", children: s.state === "sending" ? "sending" : "waiting" });
+
+/** A run's results, swapped in place as each request comes back. */
+export function runRegion(r: Run, hasSent: (id: string) => boolean): Html {
+  const ok = passed(r);
+  const bad = failedSteps(r);
+  const summary =
+    r.state === "running"
+      ? html`<p class="notes" data-pending><span class="spinner"></span> Running: ${ok + bad} of ${r.steps.length} done${bad ? `, ${bad} failed` : ""}…</p>`
+      : Notice({ tone: bad ? "bad" : "ok", children: bad ? `${bad} of ${r.steps.length} failed.` : `All ${r.steps.length} passed.` });
+  return html`<div data-live id="http-run-${r.id}">${summary}${Panel({
+    title: "Requests",
+    meta: html`<span class="t3">${r.env ? `environment ${r.env}` : "no environment"}</span>`,
+    children: html`<ol class="list">${r.steps.map(
+      (s) =>
+        html`<li class="item">${stepPill(s)} <strong>${s.method}</strong> ${s.sentId && hasSent(s.sentId) ? html`<a href="${sentHref(s.sentId)}">${s.name || s.url}</a>` : s.name || s.url}${s.name ? html` <span class="t3 mono">${s.url}</span>` : ""}${s.status !== undefined ? html` <span class="t3">· ${s.status} · ${s.ms} ms</span>` : ""}
+${s.error ? html`<p class="notes">${s.error}</p>` : ""}${s.checks.length ? html`<ul class="list">${s.checks.map((c) => html`<li class="item">${Pill({ tone: c.ok ? "ok" : "bad", children: c.ok ? "ok" : "no" })} <span class="mono">${c.text}</span>${c.got !== undefined ? html` <span class="t3">got ${c.got}</span>` : ""}</li>`)}</ul>` : ""}</li>`,
+    )}</ol>`,
+  })}</div>`;
+}
+
+export function runPage(r: Run, hasSent: (id: string) => boolean): Html {
+  return html`${PageHeader({ title: html`Run ${r.file}`, sub: html`<span class="mono">${r.repo}/.http/${r.file}</span> · ${clock(r.at)}`, crumbs })}
+${runRegion(r, hasSent)}
+<div class="buttons"><a class="btn sm" href="${runHref({ repo: r.repo, file: r.file, env: r.env })}">Run it again</a> <a class="btn sm ghost" href="${homeHref({ repo: r.repo, env: r.env })}">Back to the client</a></div>`;
+}
+
