@@ -63,7 +63,53 @@ export type DuckDbTarget = {
   isDir?: boolean;
   /** A single data file listed as a source: read in memory as one view, shut in to that file. */
   file?: FileKind;
+  /** That file is remote (http(s), s3, gs): `path` is its URL, read through httpfs, shut in to that URL. */
+  url?: string;
 };
+
+const REMOTE = ["http:", "https:", "s3:", "gs:", "gcs:"];
+
+/**
+ * A remote data file's URL as DuckDB will be given it, or undefined: http(s), s3 or gs, a host, no
+ * user or password in it, no spaces or control characters, no glob (`*`, `[`, `{`) in its path,
+ * at most 2048 characters. Public files only: no credentials are ever passed.
+ */
+export function cleanUrl(raw: string): string | undefined {
+  const s = raw.trim();
+  if (!s || s.length > 2048 || /[\s\x00-\x1f\x7f]/.test(s)) return undefined;
+  let u: URL;
+  try {
+    u = new URL(s);
+  } catch {
+    return undefined;
+  }
+  if (!REMOTE.includes(u.protocol) || !u.hostname || u.username || u.password) return undefined;
+  if (/[*[\]{}]|%2a|%5b|%7b/i.test(u.pathname)) return undefined;
+  return u.protocol === "http:" || u.protocol === "https:" ? u.href : s;
+}
+
+/** The kind a URL's path says (its query left out), or undefined. */
+export const urlKind = (url: string): FileKind | undefined => {
+  try {
+    return kindOf(new URL(url).pathname);
+  } catch {
+    return undefined;
+  }
+};
+
+/** A remote file as a source of its own (one typed on the Files page): never in the configured list. */
+export function remoteSource(url: string, kind: FileKind): DuckDbTarget {
+  let host = "url";
+  try {
+    host = new URL(url).hostname || host;
+  } catch {}
+  return { id: "url", label: host, path: url, url, file: kind };
+}
+
+/** The system's CA bundle, which httpfs reads for https: public certificates, allowed beside the URL. */
+const CA_FILES = ["/etc/ssl/certs/ca-certificates.crt", "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem", "/etc/pki/tls/certs/ca-bundle.crt", "/etc/ssl/ca-bundle.pem", "/etc/ssl/cert.pem"];
+let ca: string | null | undefined;
+const caBundle = () => (ca === undefined ? (ca = CA_FILES.find((f) => existsSync(f)) ?? null) : ca) ?? undefined;
 
 export type DuckDbRunner = (
   args: string[],
@@ -128,7 +174,14 @@ export function parseSources(raw: string | undefined): DuckDbTarget[] {
         isDir = true;
       }
     } catch {}
-    // A .parquet/.csv/.jsonl path is never a database file, so it is a file source.
+    // A URL to a data file is a remote file source; a .parquet/.csv/.jsonl path is never a
+    // database file, so it is a file source.
+    if (/^[a-z][a-z0-9+.-]*:\/\//i.test(path)) {
+      const url = cleanUrl(path);
+      const kind = url && urlKind(url);
+      if (url && kind) targets.push({ id: cleanId, label: cleanId, path: url, url, file: kind });
+      continue;
+    }
     const file = isDir || path === ":memory:" ? undefined : kindOf(path);
     targets.push({ id: cleanId, label: cleanId, path, isDir, ...(file ? { file } : {}) });
   }
@@ -205,11 +258,12 @@ export const fileViewName = (path: string) => basename(path).replace(/\.[^.]+$/,
  * one file `file` (DuckDB's allowed_paths; checked against the real CLI that a sibling, even through
  * read_text, is refused), or none.
  */
-export function lockdownSql(dir: string | undefined, file?: string): string {
+export function lockdownSql(dir: string | undefined, file?: string | string[]): string {
+  const files = file === undefined ? [] : Array.isArray(file) ? file : [file];
   const allowed = dir
     ? `SET allowed_directories = [${sqlLit(join(dir, "/"))}];\n`
-    : file
-      ? `SET allowed_paths = [${sqlLit(file)}];\n`
+    : files.length
+      ? `SET allowed_paths = [${files.map(sqlLit).join(", ")}];\n`
       : "";
   return `${allowed}SET enable_external_access = false;
 SET autoinstall_known_extensions = false;
@@ -258,7 +312,14 @@ export function createDuckDbData(o: {
     const args = isMemoryOrDir ? ["-json", ":memory:"] : ["-safe", "-readonly", "-json", target.path];
 
     let inputSql = querySql.trim();
-    if (target.file) {
+    if (target.url && target.file) {
+      // Remote: httpfs loaded by name before the lock (nothing autoloads or installs), no stored
+      // secrets read (so no saved S3 keys either), then only this URL and the CA bundle (checked
+      // against the real CLI: another URL or a local file is refused, and the lock holds).
+      const bundle = caBundle();
+      const view = `CREATE OR REPLACE TEMPORARY VIEW "${fileViewName(new URL(target.url).pathname)}" AS SELECT * FROM ${readFn(target.file, sqlLit(target.url))};`;
+      inputSql = `SET allow_persistent_secrets = false;\nLOAD httpfs;\n${lockdownSql(undefined, bundle ? [target.url, bundle] : [target.url])}\n${views ? `${view}\n` : ""}${inputSql}`;
+    } else if (target.file) {
       // The real path, so a symlinked source still names the file DuckDB opens.
       let real: string;
       try {
@@ -274,6 +335,9 @@ export function createDuckDbData(o: {
     }
 
     const res = await runner(args, { input: inputSql, timeoutMs: 30_000 });
+    if (res.code !== 0 && target.url && /httpfs/i.test(res.stderr) && /not found|install/i.test(res.stderr)) {
+      throw new Error("DuckDB's httpfs extension isn't installed. Run duckdb -c 'INSTALL httpfs' once.");
+    }
     if (res.code !== 0 && res.stderr) {
       const cleanError = res.stderr
         .replace(/^Error:\s*/i, "")

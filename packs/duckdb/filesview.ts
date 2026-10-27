@@ -7,14 +7,17 @@
 import { html } from "hono/html";
 import { safeUrl } from "dovre/pages/parts.ts";
 import { Empty, KeyValues, Notice, PageHeader, Panel, Pill, type Child, type Crumb, type Html } from "dovre/ui/kit.ts";
-import { MAX_SQL, type DuckDbTarget, type Row } from "./data.ts";
+import { fileViewName, MAX_SQL, type DuckDbTarget, type FileKind, type Row } from "./data.ts";
 import { DEFAULT_COLS, EXPORT_ROWS, FILTER_LABELS, FILTER_OPS, type Filter, handoffSql, type Look, MAX_ENTRIES, type Opened, PAGE_SIZES, type Slice, type Sort, STATS_ROWS } from "./files.ts";
 import { dbHref, queryForm } from "./view.ts";
 import { KEEP_MS, MAX_UPLOAD, UPLOAD_KINDS } from "./uploads.ts";
 
 export type FileQuery = { cols?: string[]; size: number; page: number; stats?: boolean } & Slice;
 
-type HrefOpts = { t?: string; f?: string; all?: boolean; cols?: string[]; size?: number; page?: number; stats?: boolean; filter?: Filter; sort?: Sort };
+/** A remote file typed on the Files page (not a configured source): its URL, and the kind if picked. */
+export type Remote = { u: string; k?: FileKind };
+
+type HrefOpts = { t?: string; f?: string; u?: string; k?: FileKind; all?: boolean; cols?: string[]; size?: number; page?: number; stats?: boolean; filter?: Filter; sort?: Sort };
 
 /** /duckdb/files with these parameters (columns repeat as `c`; the filter is fc/fo/fv, the sort s/sd). */
 export function filesHref(o: HrefOpts): string {
@@ -38,6 +41,8 @@ function query(o: HrefOpts, as?: string): string {
   const p = new URLSearchParams();
   if (o.t) p.set("t", o.t);
   if (o.f) p.set("f", o.f);
+  if (o.u) p.set("u", o.u);
+  if (o.k) p.set("k", o.k);
   if (o.all) p.set("all", "1");
   for (const c of o.cols ?? []) p.append("c", c);
   if (o.size && o.size !== 50) p.set("n", String(o.size));
@@ -56,6 +61,15 @@ function query(o: HrefOpts, as?: string): string {
   const qs = p.toString();
   return qs ? `?${qs}` : "";
 }
+
+/** A path's or URL's last part, without a query. */
+const lastPart = (p: string) => {
+  try {
+    if (/^[a-z][a-z0-9+.-]*:\/\//i.test(p)) return decodeURIComponent(new URL(p).pathname.split("/").pop() ?? "");
+  } catch {}
+  return p.split("/").pop() ?? "";
+};
+const fileViewNameOf = (abs: string) => fileViewName(lastPart(abs));
 
 export const bytes = (n: number | undefined) => {
   if (n === undefined) return "";
@@ -113,8 +127,15 @@ const uploadForm = (up: DuckDbTarget) =>
     children: html`<form method="post" action="/duckdb/files/upload" enctype="multipart/form-data" class="query"><label class="field"><span class="label">Parquet, CSV/TSV or JSON lines file</span><input type="file" name="file" accept="${UPLOAD_KINDS}" required><span class="hint">Choose a file or drop it here. It is copied into <code>${up.path}</code> (the <strong>${up.label}</strong> source) and opens in the viewer. ${MAX_UPLOAD / 1024 / 1024} MB at most, removed after ${KEEP_MS / 3_600_000} hours; a file of the same name is replaced.</span></label><div class="buttons"><button type="submit" class="primary" data-busy="Adding">Open</button></div></form>`,
   });
 
+/** A public file on the web or in a bucket: a GET form, so the page it opens is a link like any other. */
+const urlForm = (u = "") =>
+  Panel({
+    title: "Open a file by URL",
+    children: html`<form method="get" action="/duckdb/files" class="query"><label class="field"><span class="label">URL</span><input type="text" name="u" value="${u}" maxlength="2048" required spellcheck="false" autocomplete="off" class="mono" placeholder="https://example.com/data/orders.parquet"><span class="hint">A public <code>https://</code>, <code>s3://</code> or <code>gs://</code> Parquet, CSV or JSON lines file. No credentials are sent, so private buckets won't open. DuckDB reads only that URL, through its httpfs extension (<code>duckdb -c 'INSTALL httpfs'</code> once).</span></label><label class="field"><span class="label">Kind</span><select name="k"><option value="">From the URL's ending</option><option value="parquet">Parquet</option><option value="csv">CSV</option><option value="json">JSON lines</option></select></label><div class="buttons"><button type="submit" class="primary" data-busy="Opening">Open</button></div></form>`,
+  });
+
 /** /duckdb/files: the folder and file sources to open, and a file to add. */
-export function filesHome(o: { sources: DuckDbTarget[]; uploads?: DuckDbTarget; error?: Child }): Html {
+export function filesHome(o: { sources: DuckDbTarget[]; uploads?: DuckDbTarget; error?: Child; u?: string }): Html {
   const dirs = o.sources.filter(viewable);
   return html`${PageHeader({
     title: "Files",
@@ -124,6 +145,7 @@ export function filesHome(o: { sources: DuckDbTarget[]; uploads?: DuckDbTarget; 
 <div data-live id="duckdb-files">
 ${o.error ? Notice({ tone: "bad", children: o.error }) : ""}
 ${o.uploads ? uploadForm(o.uploads) : ""}
+${urlForm(o.u)}
 ${notice({ sources: o.sources.filter((s) => s !== o.uploads) })}
 ${Panel({
   title: "Sources",
@@ -164,9 +186,12 @@ ${Panel({
 </div>`;
 }
 
-function picker(o: { target: DuckDbTarget; file: Extract<Opened, { type: "file" }>; look: Look; q: FileQuery }): Child {
+function picker(o: { target: DuckDbTarget; file: Extract<Opened, { type: "file" }>; look: Look; q: FileQuery; remote?: Remote }): Child {
   const picked = new Set(o.look.picked);
-  return html`<form method="get" action="/duckdb/files" class="query"><input type="hidden" name="t" value="${o.target.id}"><input type="hidden" name="f" value="${o.file.rel}">${
+  const where = o.remote
+    ? html`<input type="hidden" name="u" value="${o.remote.u}">${o.remote.k ? html`<input type="hidden" name="k" value="${o.remote.k}">` : ""}`
+    : html`<input type="hidden" name="t" value="${o.target.id}"><input type="hidden" name="f" value="${o.file.rel}">`;
+  return html`<form method="get" action="/duckdb/files" class="query">${where}${
     o.file.all ? html`<input type="hidden" name="all" value="1">` : ""
   }${o.q.stats ? html`<input type="hidden" name="stats" value="1">` : ""}<fieldset class="pq-cols"><legend class="label">Columns${
     o.look.columns.length > DEFAULT_COLS ? html` <span class="hint">(the first ${DEFAULT_COLS} unless you pick)</span>` : ""
@@ -199,15 +224,16 @@ function rowsSheet(cols: string[], rows: Row[]): Child {
 const nullCell = (v: string | number | undefined) => (v === undefined || v === "" ? html`<span class="t3">—</span>` : String(v));
 
 /** A file (or a folder's Parquet files as one): facts, schema, column stats, rows, and DuckDB for real queries. */
-export function filePage(o: { target: DuckDbTarget; file: Extract<Opened, { type: "file" }>; look: Look; q: FileQuery }): Html {
-  const { target, file, look, q } = o;
-  const name = file.all ? `${file.rel ? file.rel.split("/").pop() : target.label}/*.parquet` : file.rel ? file.rel.split("/").pop()! : file.abs.split("/").pop() || target.label;
-  const here = { t: target.id, f: file.rel, all: file.all, cols: q.cols, size: q.size, page: q.page, stats: q.stats, ...look.slice };
+export function filePage(o: { target: DuckDbTarget; file: Extract<Opened, { type: "file" }>; look: Look; q: FileQuery; remote?: Remote }): Html {
+  const { target, file, look, q, remote } = o;
+  const name = file.all ? `${file.rel ? file.rel.split("/").pop() : target.label}/*.parquet` : file.rel ? file.rel.split("/").pop()! : lastPart(file.abs) || target.label;
+  const at = remote ? { u: remote.u, k: remote.k } : { t: target.id, f: file.rel, all: file.all };
+  const here = { ...at, cols: q.cols, size: q.size, page: q.page, stats: q.stats, ...look.slice };
   const link = (over: Partial<FileQuery>) => filesHref({ ...here, ...over });
 
   const facts: [Child, Child][] = [
     ["Kind", file.kind === "parquet" ? "Parquet" : file.kind === "csv" ? "CSV" : "JSON lines"],
-    ["Size", bytes(file.size)],
+    ...(file.size !== undefined ? [["Size", bytes(file.size)] as [Child, Child]] : []),
     ...(file.all ? [["Files", String(file.files.length)] as [Child, Child]] : []),
     ...(look.facts?.rows !== undefined ? [["Rows", count(look.facts.rows)] as [Child, Child]] : []),
     ...(look.facts?.rowGroups !== undefined ? [["Row groups", count(look.facts.rowGroups)] as [Child, Child]] : []),
@@ -268,8 +294,10 @@ export function filePage(o: { target: DuckDbTarget; file: Extract<Opened, { type
 
   return html`${PageHeader({
     title: name,
-    crumbs: crumbs(target, file.all && file.rel ? `${file.rel}/x` : file.rel),
-    sub: html`<code>${file.abs}</code> · Read-only, through DuckDB shut in to ${target.label}.`,
+    crumbs: remote ? [{ href: "/duckdb", label: "DuckDB" }, { href: filesHref({}), label: "Files" }] : crumbs(target, file.all && file.rel ? `${file.rel}/x` : file.rel),
+    sub: target.url
+      ? html`<code>${file.abs}</code> · Read-only, over the network through DuckDB shut in to this one URL. No credentials are sent.`
+      : html`<code>${file.abs}</code> · Read-only, through DuckDB shut in to ${target.label}.`,
   })}
 <div data-live id="duckdb-file">
 ${look.error ? Notice({ tone: "bad", children: html`<strong>DuckDB said:</strong> ${look.error}` }) : ""}
@@ -280,7 +308,9 @@ ${stats}
 ${look.columns.length ? Panel({ title: "Rows", meta: paging, children: html`${picker(o)}${rowsSheet(look.page.columns, look.page.rows)}${exports}` }) : ""}
 ${Panel({
   title: "Open in DuckDB",
-  children: html`<p class="t2">For filters, joins and sums: the same file in a query on ${target.label}.</p>${queryForm(target.id, handoffSql(file, MAX_SQL))}`,
+  children: remote
+    ? html`<p class="t2">To query it in SQL, add it to <code>DUCKDB_SOURCES</code> as a source of its own, e.g. <code>${fileViewNameOf(file.abs)}=${file.abs}</code>.</p>`
+    : html`<p class="t2">For filters, joins and sums: the same file in a query on ${target.label}.</p>${queryForm(target.id, target.url ? `SELECT *\nFROM "${fileViewNameOf(file.abs)}"\nLIMIT 100;` : handoffSql(file, MAX_SQL))}`,
 })}
 </div>`;
 }

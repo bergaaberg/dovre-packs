@@ -128,7 +128,7 @@ ${Panel({
         o.sources.map((s) => ({
           href: dbHref(s.id),
           name: s.label,
-          n: s.path === ":memory:" ? ":memory:" : s.isDir ? "directory" : s.file ? `${s.file} file` : "duckdb",
+          n: s.path === ":memory:" ? ":memory:" : s.isDir ? "directory" : s.url ? `remote ${s.file}` : s.file ? `${s.file} file` : "duckdb",
         }))
       )
     : Empty({ title: "No sources configured" }),

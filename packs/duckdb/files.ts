@@ -46,7 +46,7 @@ export type Entry = { name: string; rel: string; isDir: boolean; kind?: FileKind
 
 export type Opened =
   | { type: "dir"; rel: string; abs: string; entries: Entry[]; parquet: string[]; capped: boolean }
-  | { type: "file"; rel: string; abs: string; kind: FileKind; files: string[]; size: number; all: boolean };
+  | { type: "file"; rel: string; abs: string; kind: FileKind; files: string[]; size?: number; all: boolean };
 
 /**
  * What `f` is under `root`: a folder (its entries, and its own .parquet files), or a file to view,
@@ -54,6 +54,11 @@ export type Opened =
  * source (`..`, a symlink out, a missing file) or isn't a kind it reads.
  */
 export function open(root: DuckDbTarget, f: string, all = false): Opened | undefined {
+  if (root.url && root.file) {
+    // A remote file: only itself; its size isn't known without asking.
+    if (all || cleanRel(f) !== "") return undefined;
+    return { type: "file", rel: "", abs: root.url, kind: root.file, files: [root.url], all: false };
+  }
   if (root.file) {
     // A file source is the file itself: nothing under it, nothing beside it.
     if (all || cleanRel(f) !== "") return undefined;
