@@ -12,7 +12,8 @@
  *  - Responses stay in memory (MAX_HISTORY sends, MAX_RESPONSE bytes each), never stored.
  *  - Saving writes `.http/<name>.http` in a checkout directly under CODE_DIR (`http.save`, logged):
  *    a new file or a request added to the end is one click (nothing that was there changes);
- *    replacing a request in a file is a two-click Confirm. Both re-check the file first.
+ *    replacing a request in a file is a two-click Confirm (`http.replace`, one click if I set it so on
+ *    Settings → Writes). Both re-check the file first.
  */
 import { html } from "hono/html";
 import type { Context } from "hono";
@@ -130,6 +131,8 @@ export function createHttpPack(opts: CreateHttpPackOpts = {}): Pack & { history(
         { key: "HTTP_ENVS", label: "Environments", help: 'Your own environments, as JSON: {"local": {"baseUrl": "http://localhost:3000"}}. Public values only; a repo adds its own in .http/http-client.env.json.' },
       ],
     },
+
+    writes: [{ kind: "replace", label: "Replace a saved request in a .http file" }],
 
     available: (ctx) => !ctx.hosted,
 

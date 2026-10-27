@@ -281,6 +281,7 @@ test("save: replacing a request is a Confirm, re-checked against the file as it 
   const q = await first.text();
   assert.match(q, /This replaces <strong>GET two<\/strong>/);
   assert.match(q, /<details class="confirm">/);
+  assert.deepEqual(httpPack.writes, [{ kind: "replace", label: "Replace a saved request in a .http file" }], "Settings → Writes can make it one click (dovre#104)");
   assert.match(q, /name="confirm" value="1"/);
   assert.ok(readFileSync(file, "utf8").includes("GET {{baseUrl}}/2"));
   assert.equal((await m.actions()).length, 0);

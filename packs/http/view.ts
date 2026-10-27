@@ -169,7 +169,7 @@ ${o.problem ? Notice({ tone: "warn", children: o.problem }) : ""}
 ${Panel({
   title: html`${w.repo}/.http/${w.file}`,
   children: html`<p>${o.replacing ? html`This replaces <strong>${o.replacing}</strong> in <code>${w.file}</code> with the request below.` : html`This adds the request below to <code>${w.file}</code>.`} It's checked again before it's written: if the file changed meanwhile, nothing is.</p>
-${Confirm({ action: "/http/save", fields: { ...formFields(o.req, w), confirm: "1" }, label: "Save", question: html`Write <code>${w.repo}/.http/${w.file}</code>?` })}
+${Confirm({ kind: "http.replace", action: "/http/save", fields: { ...formFields(o.req, w), confirm: "1" }, label: "Save", question: html`Write <code>${w.repo}/.http/${w.file}</code>?` })}
 <p><a href="${homeHref({ repo: w.repo, file: w.opened, n: w.n, env: w.env })}">Back without saving</a></p>`,
 })}`;
 }
