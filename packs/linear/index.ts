@@ -66,7 +66,7 @@ export function createLinearPack(
     glance: () => (kept?.ok ? [{ label: "Linear", value: kept.mine.length }] : []),
     brief() {
       const n = kept?.ok ? kept.mine.filter((i) => i.priority === 1).length : 0;
-      return n ? [{ text: `${n} urgent Linear ${n === 1 ? "issue" : "issues"}`, href: "/linear", tone: "warn" }] : [];
+      return n ? [{ text: `${n} urgent Linear ${n === 1 ? "issue is" : "issues are"} yours.`, href: "/linear", tone: "warn" }] : [];
     },
     refs(ctx): RefRule[] {
       // Links need the workspace, which the first refresh learns.

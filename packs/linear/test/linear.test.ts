@@ -139,7 +139,7 @@ test("linear: bino says counts and states, never a title's raw markup", async ()
 
 test("linear: glance counts my issues; the opening line speaks only for urgent ones", async () => {
   const urgent = { ...READ, issues: { nodes: [ISSUE("ENG-7", "Ship the pack", { priority: 1 }), ISSUE("ENG-8", "Tidy up")] } };
-  for (const [body, line] of [[READ, undefined], [urgent, "1 urgent Linear issue"]] as const) {
+  for (const [body, line] of [[READ, undefined], [urgent, "1 urgent Linear issue is yours."]] as const) {
     const { fetchFn } = fakeLinear([{ match: /viewer/, body }]);
     const pack = createLinearPack({ fetchFn });
     const ctx = testContext({ env: { LINEAR_API_KEY: "k" } });
