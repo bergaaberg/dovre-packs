@@ -14,6 +14,8 @@
  *    a new file or a request added to the end is one click (nothing that was there changes);
  *    replacing a request in a file is a two-click Confirm (`http.replace`, one click if I set it so on
  *    Settings → Writes). Both re-check the file first.
+ *  - Importing curl or an OpenAPI spec (openapi.ts) only reads the text: nothing is fetched or sent.
+ *    Saving a spec's requests adds them to a new file or the end of one (`http.save`, one click).
  */
 import { html } from "hono/html";
 import type { Context } from "hono";
@@ -26,7 +28,8 @@ import { blankReq, CREDENTIAL_HEADERS, envNames, fromCurl, masker, parseEnvs, pa
 import { createHistory, failure, type History, type Sent, sendOnce } from "./send.ts";
 import { previous } from "./compare.ts";
 import { styles as jsonStyles } from "../json/view.ts";
-import { confirmSavePage, fileOk, homeHref, type HomeOpts, homePage, noWhere, sentHref, sentPage, type Where } from "./view.ts";
+import { confirmSavePage, fileOk, homeHref, type HomeOpts, homePage, noWhere, openapiPage, sentHref, sentPage, type Where } from "./view.ts";
+import { fileNameOf, fromOpenApi, MAX_SPEC } from "./openapi.ts";
 
 /** How a response's body is shown, or `diff` against the send before it. */
 const VIEWS = ["pretty", "tree", "raw", "diff"] as const;
@@ -227,6 +230,55 @@ export function createHttpPack(opts: CreateHttpPackOpts = {}): Pack & { history(
         if (!got.ok) return draw(ctx, c, blankReq(), noWhere(), { flash: { tone: "warn", text: got.error }, curl: masker(secretsOf(ctx))(text) }, 400);
         const r = placeholdSecrets(got.req, secretsOf(ctx));
         return draw(ctx, c, r, noWhere(), { flash: { tone: "neutral", text: got.notes.length ? `Imported. ${got.notes.join(" ")}` : "Imported: nothing was sent." } });
+      });
+
+      // A request from an imported spec, into the editor: nothing is sent.
+      app.post("/http/open", async (c) => {
+        const r = placeholdSecrets(reqOfForm(await c.req.parseBody()), secretsOf(ctx));
+        return draw(ctx, c, r, noWhere(), { flash: { tone: "neutral", text: "Opened: nothing was sent." } });
+      });
+
+      app.post("/http/openapi", async (c) => {
+        const f = await c.req.parseBody();
+        const spec = str(f.spec, MAX_SPEC);
+        const got = fromOpenApi(spec);
+        if (!got.ok) return draw(ctx, c, blankReq(), noWhere(), { flash: { tone: "warn", text: got.error }, spec }, 400);
+        return ctx.page(c, { title: got.title, current: "/http", body: openapiPage({ got, spec, repos: listRepos(codeDirOf(ctx.env)), repo: str(f.repo, 100), file: fileNameOf(got.title) }) });
+      });
+
+      // Every operation added to a repo's .http file: a new file, or at the end of one (nothing there changes).
+      app.post("/http/openapi/save", async (c) => {
+        const f = await c.req.parseBody();
+        const spec = str(f.spec, MAX_SPEC);
+        const repo = str(f.repo, 100);
+        const file = str(f.file, 85).trim();
+        const got = fromOpenApi(spec);
+        if (!got.ok) return draw(ctx, c, blankReq(), noWhere(), { flash: { tone: "warn", text: got.error }, spec }, 400);
+        const fail = async (problem: string) => {
+          const res = await ctx.page(c, { title: got.title, current: "/http", body: openapiPage({ got, spec, repos: listRepos(codeDirOf(ctx.env)), repo, file, problem }) });
+          return new Response(res.body, { status: 400, headers: res.headers });
+        };
+        const root = repoRoot(codeDirOf(ctx.env), repo);
+        if (!root) return fail("Pick a repo (a checkout directly in your code folder) to save in.");
+        if (!fileOk(file)) return fail("The file is a plain name ending in .http (api.http).");
+        let current: { text: string; hash: string } | undefined;
+        try {
+          current = readFile(root, file);
+        } catch (e) {
+          const m = (e as Error).message;
+          if (!m.endsWith("isn't there.")) return fail(m);
+        }
+        const blocks = got.reqs.map(serializeReq).join("\n");
+        const head = `# ${got.title}: imported from an OpenAPI spec.${got.server ? ` Its server: ${got.server}` : ""}\n# Set {{baseUrl}} in an environment.\n\n`;
+        const text = current ? `${current.text.replace(/\s+$/, "")}\n\n${blocks}` : head + blocks;
+        const leak = secretIn(text, secretsOf(ctx));
+        if (leak) return fail(`The spec has ${leak.name}'s value in it: nothing was saved.`);
+        const target = `${repo}/.http/${file}`;
+        const done = writeFile(root, file, text, current ? current.hash : "");
+        await logAction(ctx.db, { kind: "http.save", target, detail: `${current ? "added" : "created"} · ${got.reqs.length} from OpenAPI (${got.title})`.slice(0, 200), ok: done.ok, error: done.ok ? undefined : done.error });
+        if (!done.ok) return fail(`${done.error} Nothing was saved.`);
+        const n = current ? parseHttp(current.text).reqs.length : 0;
+        return c.redirect(homeHref({ repo, file, n: String(n), saved: "1" }), 303);
       });
 
       app.post("/http/save", async (c) => {
