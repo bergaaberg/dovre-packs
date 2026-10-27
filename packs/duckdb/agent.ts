@@ -71,7 +71,7 @@ export type Across = {
 };
 
 const FORBIDDEN =
-  /\b(copy|attach|install|load|export|pragma|call|insert|update|delete|merge|drop|alter|create|truncate|replace|grant|revoke|into|checkpoint|vacuum)\b/i;
+  /\b(copy|attach|install|load|export|pragma|call|insert|update|delete|merge|drop|alter|create|truncate|replace|grant|revoke|into|checkpoint|vacuum|duckdb_secrets|which_secret)\b/i;
 
 /**
  * Validates that an SQL query is strictly read-only for DuckDB.

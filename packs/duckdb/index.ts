@@ -18,6 +18,7 @@ import {
   MAX_ROWS,
   parseSources,
   readDuckDb,
+  remoteKeys,
   remoteSource,
   urlKind,
 } from "./data.ts";
@@ -71,7 +72,7 @@ export function createDuckDbPack(opts: CreateDuckDbPackOpts = {}): Pack & {
     const up = uploadsSource(opts.uploadsDir ?? uploadsDir(env), configured);
     // Listed once something was added, so an unused uploads folder never shows as a source.
     const sources = existsSync(up.path) ? [...configured, up] : configured;
-    const data = createDuckDbData({ sources, run: opts.run, now: opts.now });
+    const data = createDuckDbData({ sources, run: opts.run, now: opts.now, keys: remoteKeys(env) });
     const schemas = createDuckDbSchemas({ data, dir: opts.schemaDir, now: opts.now });
     const defaultMode = (env.DUCKDB_EXECUTION?.trim().toLowerCase() === "agentic" ? "agentic" : "manual") as "manual" | "agentic";
     const agent = createDuckDbAgent({
@@ -114,8 +115,14 @@ export function createDuckDbPack(opts: CreateDuckDbPackOpts = {}): Pack & {
           key: "DUCKDB_SOURCES",
           label: "DuckDB sources",
           required: true,
-          help: "Comma-separated targets: name=/path/to/db.duckdb, a directory of .parquet/.csv/.jsonl files, a single .parquet/.csv/.jsonl file or a public https:// / s3:// / gs:// URL to one (read through httpfs, no credentials), or :memory:",
+          help: "Comma-separated targets: name=/path/to/db.duckdb, a directory of .parquet/.csv/.jsonl files, a single .parquet/.csv/.jsonl file or a https:// / s3:// / gs:// URL to one (read through httpfs; private buckets use the keys below), or :memory:",
         },
+        { key: "DUCKDB_S3_KEY_ID", label: "S3 access key ID", secret: true, help: "For private s3:// files. Sent only to S3 (or the endpoint below), scoped to the one bucket being read." },
+        { key: "DUCKDB_S3_SECRET", label: "S3 secret access key", secret: true },
+        { key: "DUCKDB_S3_REGION", label: "S3 region", help: "e.g. eu-north-1" },
+        { key: "DUCKDB_S3_ENDPOINT", label: "S3 endpoint", help: "Optional, for MinIO, R2 and the like: host[:port] (http://host:port for one without TLS). Empty means AWS." },
+        { key: "DUCKDB_GCS_KEY_ID", label: "GCS HMAC key ID", secret: true, help: "For private gs:// files: an HMAC key (Cloud Storage → Settings → Interoperability)." },
+        { key: "DUCKDB_GCS_SECRET", label: "GCS HMAC secret", secret: true },
         {
           key: "DUCKDB_EXECUTION",
           label: "Execution mode",
@@ -318,13 +325,13 @@ export function createDuckDbPack(opts: CreateDuckDbPackOpts = {}): Pack & {
       type RemoteOpened = { url: string; target: DuckDbTarget; opened: Extract<ReturnType<typeof open>, { type: "file" }>; name: string; data: DuckDbData; remote: Remote };
       const remoteOf = (raw: string, k: string | undefined): RemoteOpened | { error: string } => {
         const url = cleanUrl(raw);
-        if (!url) return { error: "That isn't a URL to open: a public https://, s3:// or gs:// file, with no user or password in it and no wildcards." };
+        if (!url) return { error: "That isn't a URL to open: an https://, s3:// or gs:// file, with no user or password in it and no wildcards." };
         const kind = KINDS.includes(k as FileKind) ? (k as FileKind) : urlKind(url);
         if (!kind) return { error: "The URL doesn't end in .parquet, .csv or .jsonl: pick its kind." };
         const target = remoteSource(url, kind);
         const opened = open(target, "") as RemoteOpened["opened"];
         const name = decodeURIComponent(new URL(url).pathname.split("/").pop() || "") || target.label;
-        return { url, target, opened, name, data: createDuckDbData({ sources: [target], run: opts.run, now: opts.now }), remote: { u: url, ...(KINDS.includes(k as FileKind) ? { k: k as FileKind } : {}) } };
+        return { url, target, opened, name, data: createDuckDbData({ sources: [target], run: opts.run, now: opts.now, keys: remoteKeys(ctx.env) }), remote: { u: url, ...(KINDS.includes(k as FileKind) ? { k: k as FileKind } : {}) } };
       };
       const fileQuery = (c: { req: { query(k: string): string | undefined; queries(k: string): string[] | undefined } }) => {
         const n = Number(c.req.query("n"));
