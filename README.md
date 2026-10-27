@@ -2,7 +2,7 @@
 
 Official pre-built **Pluggable Packs** for [Dovre](https://dovre.dev) (`bergaaberg/dovre`).
 
-Core (`bergaaberg/dovre`) ships with the built-in cockpit packs (`agents`, `assistant` / `atlas` + `bino`, `terminal`). Optional operations, infrastructure, and app packs live here so you can cherry-pick only what your instance uses.
+Core (`bergaaberg/dovre`) ships with the built-in cockpit packs (`agents`, `assistant` / `topo` + `bino`, `terminal`). Optional operations, infrastructure, and app packs live here so you can cherry-pick only what your instance uses.
 
 ## Available Pre-Built Packs
 
