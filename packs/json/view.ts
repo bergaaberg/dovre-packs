@@ -63,7 +63,8 @@ export function parseError(text: string, r: Extract<Parsed, { ok: false }>, what
 
 // ── Tree ─────────────────────────────────────────────────────────────────────
 
-function tree(root: Json): Html {
+/** A document as a tree: each node's JSONPath and value copyable, MAX_NODES drawn at most. */
+export function tree(root: Json): Html {
   let drawn = 0;
   const node = (key: string | undefined, v: Json, path: string, depth: number): Html => {
     drawn++;
@@ -159,6 +160,17 @@ export type DiffState = { a: string; b: string; result?: { pa: Parsed; pb: Parse
 
 const TONE = { added: "ok", removed: "bad", changed: "warn" } as const;
 
+/** A structural diff's changes, each with its path and the value before and after. */
+export function changesList(changes: Change[], more: boolean): Html {
+  return changes.length
+    ? html`<ul class="json-tree json-matches">${changes.map(
+        (c) => html`<li class="json-node json-change">${Pill({ tone: TONE[c.kind], children: c.kind })} <code class="json-path" data-copy="${c.path}">${c.path}</code>${
+          c.kind !== "added" ? html`<div class="json-side"><span class="t3">before</span> <code>${preview(c.before!, 300)}</code></div>` : ""
+        }${c.kind !== "removed" ? html`<div class="json-side"><span class="t3">after</span> <code>${preview(c.after!, 300)}</code></div>` : ""}</li>`,
+      )}</ul>${more ? html`<p class="t3">Only the first ${changes.length} are shown.</p>` : ""}`
+    : Empty({ title: "The same", children: html`<p class="t3">Both documents hold the same data (key order aside).</p>` });
+}
+
 export function diffPage(s: DiffState): Html {
   const form = html`<form method="post" action="/json/diff" class="query" data-ctrl-enter>
 <div class="grid-2">${textarea("a", "Before", s.a, { min: 10 })}${textarea("b", "After", s.b, { min: 10 })}</div>
@@ -172,13 +184,7 @@ export function diffPage(s: DiffState): Html {
     out = Panel({
       title: "Differences",
       meta: `${r.changes.length}${r.more ? "+" : ""}`,
-      children: r.changes.length
-        ? html`<ul class="json-tree json-matches">${r.changes.map(
-            (c) => html`<li class="json-node json-change">${Pill({ tone: TONE[c.kind], children: c.kind })} <code class="json-path" data-copy="${c.path}">${c.path}</code>${
-              c.kind !== "added" ? html`<div class="json-side"><span class="t3">before</span> <code>${preview(c.before!, 300)}</code></div>` : ""
-            }${c.kind !== "removed" ? html`<div class="json-side"><span class="t3">after</span> <code>${preview(c.after!, 300)}</code></div>` : ""}</li>`,
-          )}</ul>${r.more ? html`<p class="t3">Only the first ${r.changes.length} are shown.</p>` : ""}`
-        : Empty({ title: "The same", children: html`<p class="t3">Both documents hold the same data (key order aside).</p>` }),
+      children: changesList(r.changes, !!r.more),
     });
   }
   return html`${header("diff", "Compare two documents, key order ignored.")}${Panel({ children: form })}${out}`;

@@ -24,7 +24,12 @@ import { strictOrigin } from "dovre/strict.ts";
 import { codeDirOf, listFiles, listRepos, readFile, repoEnvs, repoRoot, writeFile } from "./files.ts";
 import { blankReq, CREDENTIAL_HEADERS, envNames, fromCurl, masker, parseEnvs, parseHttp, parseSecrets, placeholdSecrets, prepare, type Req, reqOfForm, secretIn, serializeReq, toCurl, varsOf, withReq } from "./model.ts";
 import { createHistory, failure, type History, type Sent, sendOnce } from "./send.ts";
+import { previous } from "./compare.ts";
+import { styles as jsonStyles } from "../json/view.ts";
 import { confirmSavePage, fileOk, homeHref, type HomeOpts, homePage, noWhere, sentHref, sentPage, type Where } from "./view.ts";
+
+/** How a response's body is shown, or `diff` against the send before it. */
+const VIEWS = ["pretty", "tree", "raw", "diff"] as const;
 
 export type CreateHttpPackOpts = { fetchFn?: typeof fetch; now?: () => number; timeoutMs?: number };
 
@@ -118,6 +123,8 @@ export function createHttpPack(opts: CreateHttpPackOpts = {}): Pack & { history(
 
   return {
     history: () => history,
+    // The JSON tools' tree and diff classes, for a response body shown as a tree or compared.
+    styles: jsonStyles,
     manifest: {
       api: PACK_API,
       id: "http",
@@ -202,7 +209,7 @@ export function createHttpPack(opts: CreateHttpPackOpts = {}): Pack & { history(
           title: s.req.name || "HTTP response",
           current: "/http",
           head: html`<meta name="u-topics" content="http http-sent:${s.id}">`,
-          body: sentPage({ sent: s, view: c.req.query("view") === "raw" ? "raw" : "pretty", req: s.req, where: w, envs: varsFor(ctx, w).envs, repos: listRepos(codeDir), secrets: secretsOf(ctx), history: history.list() }),
+          body: sentPage({ sent: s, view: VIEWS.find((v) => v === c.req.query("view")) ?? "pretty", prev: previous(history.list(), s), req: s.req, where: w, envs: varsFor(ctx, w).envs, repos: listRepos(codeDir), secrets: secretsOf(ctx), history: history.list() }),
         });
       });
 

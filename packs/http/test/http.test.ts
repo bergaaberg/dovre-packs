@@ -402,3 +402,55 @@ test("a secret's value typed into the editor is drawn back as its {{NAME}}, neve
   assert.ok(!text.includes(SECRET));
   assert.equal(m.calls.length, 1);
 });
+
+test("a JSON body as a tree; the send before to the same request, compared", async () => {
+  let n = 0;
+  const fake = fakeFetch(() => {
+    n++;
+    const body = n === 1 ? { id: 1, items: [{ name: "a" }], gone: true } : { id: 1, items: [{ name: "b" }], extra: H };
+    return new Response(JSON.stringify(body), { status: n === 1 ? 200 : 500, headers: { "content-type": "application/json", "x-run": String(n), ...(n === 1 ? { "x-old": "1" } : { "x-new": H }) } });
+  });
+  const m = mounted({ fetchFn: fake.fetchFn });
+  const first = sentPath(await m.post("/http/send", send({ url: "https://h.example/items" })));
+  const one = await landed(m.get, first);
+  assert.ok(!one.includes("compare with it"), "nothing before the first send");
+  sentPath(await m.post("/http/send", send({ url: "https://h.example/other" })));
+  const second = sentPath(await m.post("/http/send", send({ url: "https://h.example/items" })));
+  const two = await landed(m.get, second);
+  assert.ok(two.includes(`href="${second}?view=diff"`), "a link to compare");
+  assert.match(two, /\(then 200\)/);
+
+  const tree = await (await m.get(`${second}?view=tree`)).text();
+  inert(tree);
+  assert.match(tree, /class="json-tree json-root"/);
+  assert.match(tree, /data-copy="\$\.items\[0\]\.name"/);
+  assert.match(tree, /<strong>tree<\/strong>/);
+
+  const diff = await (await m.get(`${second}?view=diff`)).text();
+  inert(diff);
+  assert.match(diff, /Compared with the send before/);
+  assert.ok(diff.includes(`href="${first}"`), "links the response it's compared with, not the other URL's");
+  for (const path of ["$.items[0].name", "$.gone", "$.extra"]) assert.ok(diff.includes(`data-copy="${path}"`), path);
+  assert.match(diff, /x-run<\/th><td>.*changed/);
+  assert.match(diff, /x-old<\/th><td>.*removed/);
+  assert.match(diff, /x-new<\/th><td>.*added/);
+  assert.ok(diff.includes("&lt;script&gt;"), "a hostile header value is shown escaped");
+  // An unknown view is the pretty one.
+  assert.ok((await (await m.get(`${second}?view=${encodeURIComponent(H)}`)).text()).includes("<strong>pretty</strong>"));
+});
+
+test("compare: only an earlier send of the same method and URL that came back; text and binary bodies", async () => {
+  const { compare, previous } = await import("../compare.ts");
+  const resp = (o: Partial<import("../send.ts").Resp>) => ({ status: 200, statusText: "", ms: 1, size: 2, truncated: false, headers: [], body: "", binary: false, ...o });
+  const sent = (id: string, method: string, url: string, state: "done" | "failed" = "done") => ({ id, at: 0, req: {} as never, from: {} as never, out: { method, url, headers: [] }, state, resp: state === "done" ? resp({}) : undefined });
+  const list = [sent("4", "GET", "u"), sent("3", "GET", "u", "failed"), sent("2", "POST", "u"), sent("1", "GET", "u"), sent("0", "GET", "u")];
+  assert.equal(previous(list, list[0]!)?.id, "1");
+  assert.equal(previous(list, list[3]!)?.id, "0");
+  assert.equal(previous(list, list[4]!), undefined);
+  assert.equal(previous(list, list[2]!), undefined);
+  assert.deepEqual(compare(resp({ body: "abc" }), resp({ body: "abd", size: 3 })).body, { kind: "text", same: false, before: 2, after: 3 });
+  assert.deepEqual(compare(resp({ body: "{}", truncated: true }), resp({ body: "{}" })).body, { kind: "text", same: true, before: 2, after: 2 });
+  assert.equal(compare(resp({ binary: true }), resp({ binary: true })).body.kind, "binary");
+  const h = compare(resp({ headers: [["Set-Cookie", "a"], ["set-cookie", "b"]] }), resp({ headers: [["set-cookie", "a, b"]] }));
+  assert.deepEqual(h.headers, [], "repeated headers joined, names case-insensitive");
+});
