@@ -1,5 +1,6 @@
 /** OTel sink tests: OTLP requests go through the ingest handler (and once through a worker) into an in-memory database. */
 import assert from "node:assert/strict";
+import { html } from "hono/html";
 import { test } from "node:test";
 import { Hono } from "hono";
 import { openDb } from "dovre/db.ts";
@@ -10,7 +11,7 @@ import { createWorker } from "dovre/worker.ts";
 import { createOtelSinkPack, repoMap } from "../index.ts";
 import { extraKeys, hexId, scrub } from "../otlp.ts";
 import { MAX_SPANS, readLogs, readTrace } from "../store.ts";
-import { logsPage, servicePage, sinkCard, sinkPage, sinkProd, tracePage, treeOrder } from "../view.ts";
+import { logsPage, servicePage, sinkCard, sinkPage, sinkProd, spanArg, tracePage, treeOrder } from "../view.ts";
 
 const H = `<script>alert(1)</script>`;
 const J = "javascript:alert(1)";
@@ -323,4 +324,20 @@ test("otel-sink: small helpers", () => {
   assert.equal(scrub("see https://a.example/p?q=1#f and a@b.co"), "see https://a.example/p and [email]");
   const node = (id: string, parent: string, at: number) => ({ span_id: id, parent_id: parent, start_us: at }) as never;
   assert.deepEqual(treeOrder([node("c", "b", 3), node("b", "a", 2), node("a", "", 1), node("x", "x", 0)]).map((n) => [n.s.span_id, n.depth]), [["x", 0], ["a", 0], ["b", 1], ["c", 2]]);
+});
+
+test("otel-sink: an HTTP span on the trace page carries what other packs put there (span.actions), from what was kept", async () => {
+  const { db, ctx, pack, send } = setup({ OTEL_SINK_ATTRIBUTES: "url.full" });
+  await send("v1/traces", traces("api", [
+    span({ id: 1, name: "GET /orders", kind: 2, attrs: [["http.request.method", "GET"], ["http.route", "/orders/:id"], ["url.full", "https://shop.example/orders/7?card=4242"], ["http.request.header.authorization", "Bearer s3cret"]] }),
+    span({ id: 2, parent: 1, name: "db query" }),
+  ]));
+  await pack.refresh!(ctx);
+  const spans = await readTrace(db, TRACE);
+  const seen: unknown[] = [];
+  const page = String(tracePage(TRACE, spans, [], (a) => (seen.push(a), [html`<button>Open ${a.method}</button>`, ""])));
+  assert.deepEqual(seen, [{ service: "api", kind: "server", method: "GET", route: "/orders/:id", attrs: { "url.full": "https://shop.example/orders/7" } }], "only the HTTP span, its URL without the query, no header");
+  assert.equal((page.match(/<button>Open GET<\/button>/g) ?? []).length, 1);
+  assert.equal(spanArg({ ...spans[0]!, attrs: "not json" })!.attrs["url.full"], undefined, "unreadable attrs: none");
+  assert.doesNotMatch(String(tracePage(TRACE, spans, [])), /<button>/, "no pack answers: no button");
 });

@@ -124,7 +124,7 @@ export function createOtelSinkPack(opts: { now?: () => number } = {}): Pack & { 
         try {
           await ensureSchema(ctx.db);
           const [spans, logs] = await Promise.all([readTrace(ctx.db, id), readLogs(ctx.db, { trace: id }, 100)]);
-          return ctx.page(c, { title: `Trace ${id.slice(0, 12)}`, current: `/${ID}`, body: tracePage(id, spans, logs) });
+          return ctx.page(c, { title: `Trace ${id.slice(0, 12)}`, current: `/${ID}`, body: tracePage(id, spans, logs, (a) => ctx.fill("span.actions", a)) });
         } catch (e) {
           return ctx.page(c, { title: "Trace", current: `/${ID}`, body: Notice({ tone: "bad", children: html`Reading the trace failed: ${e instanceof Error ? e.message : "unknown"}` }) });
         }
