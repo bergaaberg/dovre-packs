@@ -14,8 +14,8 @@ import { html } from "hono/html";
 import { testContext } from "dovre/packs/testing.ts";
 import { createDuckDbPack } from "../index.ts";
 import { createDuckDbData, type DuckDbRunner, parseSources } from "../data.ts";
-import { cleanRel, columnsOf, columnMetaSql, fromSql, handoffSql, ident, lit, look, open, previewSql } from "../files.ts";
-import { fileCell, filesHref } from "../filesview.ts";
+import { cleanRel, columnsOf, columnMetaSql, exportName, fromSql, handoffSql, ident, lit, look, open, orderSql, previewSql, slice, sliceOf, toCsv, whereSql } from "../files.ts";
+import { exportHref, fileCell, filesHref, sliceParams } from "../filesview.ts";
 
 const H = `<script>alert(1)</script>`;
 const IMG = `<img src=x onerror=alert(1)>`;
@@ -257,6 +257,84 @@ test("files: cells and links", () => {
   assert.ok(filesHref({ t: JS_URL }).startsWith("/duckdb/files?"));
 });
 
+test("files: a filter's value only reaches SQL as a literal, on the file's own columns", () => {
+  const evil = `x'); COPY (SELECT 1) TO '/tmp/pwn' --`;
+  assert.equal(whereSql({ col: `a"b`, op: "eq", val: evil }), ` WHERE "a""b" = 'x''); COPY (SELECT 1) TO ''/tmp/pwn'' --'`);
+  assert.equal(whereSql({ col: "n", op: "ge", val: "3" }), ` WHERE "n" >= '3'`);
+  assert.equal(whereSql({ col: "n", op: "null", val: evil }), ` WHERE "n" IS NULL`);
+  assert.equal(whereSql({ col: "s", op: "contains", val: "50%_" }), ` WHERE contains(lower(CAST("s" AS VARCHAR)), lower('50%_'))`);
+  assert.equal(orderSql({ col: `x"`, desc: true }), ` ORDER BY "x""" DESC NULLS LAST`);
+  const known = new Set(["a", "n"]);
+  assert.deepEqual(sliceOf(known, { filter: { col: "zz", op: "eq", val: "1" }, sort: { col: "zz", desc: false } }), { filter: undefined, sort: undefined });
+  assert.equal(sliceOf(known, { filter: { col: "a", op: "eq", val: "" } }).filter, undefined, "a comparison needs a value");
+  assert.equal(sliceOf(known, { filter: { col: "a", op: "drop" as any, val: "1" } }).filter, undefined);
+  assert.deepEqual(sliceOf(known, { filter: { col: "a", op: "notnull", val: "" } }).filter, { col: "a", op: "notnull", val: "" });
+  const p = new URLSearchParams("fc=a&fo=lt&fv=5&s=n&sd=1");
+  assert.deepEqual(sliceParams((k) => p.get(k) ?? undefined), { filter: { col: "a", op: "lt", val: "5" }, sort: { col: "n", desc: true } });
+  assert.deepEqual(sliceParams(() => undefined), { filter: undefined, sort: undefined });
+  assert.equal(
+    exportHref({ t: "lake", f: "t.parquet", cols: ["a"], page: 3, filter: { col: "a", op: "null", val: "x" }, sort: { col: "a", desc: false } }, "csv"),
+    "/duckdb/files/export?t=lake&f=t.parquet&c=a&fc=a&fo=null&s=a&as=csv",
+  );
+});
+
+test("files: CSV defuses formulas and quotes what needs it; export names are safe", () => {
+  const csv = toCsv(["a", `b,"c"`], [{ a: "=HYPERLINK(1)", [`b,"c"`]: "line\nbreak" }, { a: -5, [`b,"c"`]: { n: [1] } }, { a: null, [`b,"c"`]: "@x" }]);
+  assert.equal(csv, `a,"b,""c"""\r\n'=HYPERLINK(1),"line\nbreak"\r\n-5,"{""n"":[1]}"\r\n,'@x\r\n`);
+  assert.equal(exportName("sub/my data.parquet", false, "csv"), "my_data-slice.csv");
+  assert.equal(exportName(`${IMG}.parquet`, false, "json"), "_img_src_x_onerror_alert_1_-slice.json");
+  assert.equal(exportName("", true, "csv"), "dataset-all-slice.csv");
+});
+
+test("files: filter and sort reach the preview; unknown columns never do", async () => {
+  const run = fakeRunner({ cols: ["a", "n", H] });
+  const get = mount(run);
+  const r = await get(`/duckdb/files?t=lake&f=t.parquet&fc=n&fo=gt&fv=${encodeURIComponent("3' OR 1=1 --")}&s=a&sd=1`);
+  assert.equal(r.status, 200);
+  const body = await r.text();
+  inert(body);
+  const preview = run.seen.find((s) => s.includes("OFFSET"))!;
+  assert.ok(preview.includes(`WHERE "n" > '3'' OR 1=1 --' ORDER BY "a" DESC NULLS LAST LIMIT 51 OFFSET 0;`), preview);
+  assert.ok(run.seen.some((s) => s.includes("SELECT count(*) AS n FROM")), "counts what matches");
+  assert.ok(body.includes("fc=n&amp;fo=gt"), "paging and export keep the filter");
+  assert.ok(body.includes(`href="/duckdb/files/export?t=lake&amp;f=t.parquet&amp;fc=n`));
+  assert.ok(body.includes(`<option value="n" selected>`));
+
+  const run2 = fakeRunner({ cols: ["a"] });
+  await mount(run2)(`/duckdb/files?t=lake&f=t.parquet&fc=${encodeURIComponent(`a" OR 1=1 --`)}&fo=eq&fv=1&s=${encodeURIComponent("/etc/passwd")}`);
+  const p2 = run2.seen.find((s) => s.includes("OFFSET"))!;
+  assert.ok(!p2.includes("WHERE") && !p2.includes("ORDER BY") && !p2.includes("passwd"), "a filter or sort on an unknown column is dropped");
+});
+
+test("files: export downloads the slice, inside the source only", async () => {
+  const run = fakeRunner();
+  const get = mount(run);
+  const r = await get(`/duckdb/files/export?t=lake&f=t.parquet&c=x&c=${encodeURIComponent(H)}&fc=x&fo=notnull&as=csv`);
+  assert.equal(r.status, 200);
+  assert.equal(r.headers.get("content-type"), "text/csv; charset=utf-8");
+  assert.equal(r.headers.get("content-disposition"), `attachment; filename="t-slice.csv"`);
+  assert.equal(r.headers.get("x-content-type-options"), "nosniff");
+  const text = await r.text();
+  assert.ok(text.startsWith(`x,${H}\r\njavascript:alert(1),${H}\r\n`), text);
+  const sql = run.seen.find((s) => s.includes("LIMIT 10001"))!;
+  assert.ok(sql.includes(`SELECT "x", "${H}" FROM read_parquet(`) && sql.includes(`WHERE "x" IS NOT NULL`));
+  for (const s of run.seen) assert.match(s, /SET enable_external_access = false;/);
+
+  const j = await get(`/duckdb/files/export?t=lake&f=t.parquet&c=x&as=json`);
+  assert.equal(j.headers.get("content-type"), "application/json; charset=utf-8");
+  assert.deepEqual(JSON.parse(await j.text()), [{ x: JS_URL }, { x: null }]);
+
+  for (const bad of ["../outside/secret.parquet", "link.parquet", "", "sub"]) {
+    const n = run.seen.length;
+    const b = await get(`/duckdb/files/export?t=lake&f=${encodeURIComponent(bad)}`);
+    assert.equal(b.status, 404, bad);
+    assert.equal(run.seen.length, n, `duckdb never runs for ${bad}`);
+  }
+  assert.equal((await get(`/duckdb/files/export?t=nope&f=t.parquet`)).status, 404);
+  const failing = await mount(fakeRunner({ fail: /DESCRIBE/ }))(`/duckdb/files/export?t=lake&f=t.parquet`);
+  assert.equal(failing.status, 502);
+});
+
 // ── Against the real duckdb CLI (skipped where it isn't installed) ──
 
 const hasDuckDb = (() => {
@@ -292,6 +370,18 @@ test("real duckdb: the viewer reads a Parquet file's schema, metadata, rows and 
   assert.equal(seen.page.more, true);
   assert.deepEqual(seen.page.columns, ["id", "s"]);
   assert.equal(seen.stats?.length, 2);
+  // Filter, sort, the count of what matches, and the export of that slice.
+  const filtered = await look(data, "real", opened, { size: 5, page: 0, cols: ["id", "name"], filter: { col: "name", op: "contains", val: "N2" }, sort: { col: "id", desc: true } });
+  assert.equal(filtered.error, undefined);
+  assert.deepEqual(filtered.page.rows.map((r) => Number(r.id)), [29, 27, 25, 23, 21]);
+  assert.equal(filtered.matching, 5, "n21, n23, n25, n27, n29 (even ids have no name)");
+  const gt = await look(data, "real", opened, { size: 50, page: 0, cols: ["id"], filter: { col: "id", op: "ge", val: "27" } });
+  assert.deepEqual(gt.page.rows.map((r) => Number(r.id)), [27, 28, 29]);
+  const nulls = await look(data, "real", opened, { size: 50, page: 0, cols: ["id"], filter: { col: "name", op: "null", val: "" } });
+  assert.equal(nulls.matching, 15);
+  const out = await slice(data, "real", opened, { cols: ["id", "s"], filter: { col: "id", op: "lt", val: "2" } });
+  assert.equal(out.capped, false);
+  assert.equal(toCsv(out.columns, out.rows), `id,s\r\n0,"{""a"":0,""b"":[0]}"\r\n1,"{""a"":1,""b"":[1]}"\r\n`);
   // Even if a symlink out got past the viewer's own check, DuckDB is shut in to the source.
   await assert.rejects(data.scan("real", `SELECT * FROM read_parquet(${lit(join(outside, "secret.parquet"))})`), /disabled|Permission/i);
 });

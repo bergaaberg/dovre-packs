@@ -13,8 +13,8 @@ import {
   parseSources,
   readDuckDb,
 } from "./data.ts";
-import { look, open, PAGE_SIZES } from "./files.ts";
-import { FILES_STYLES, filePage, filesHome, folderPage, notOpenPage } from "./filesview.ts";
+import { exportName, look, open, PAGE_SIZES, slice, toCsv } from "./files.ts";
+import { FILES_STYLES, filePage, filesHome, folderPage, notOpenPage, sliceParams } from "./filesview.ts";
 import { createDuckDbSchemas, type DuckDbSchemas, toAutocomplete } from "./schema.ts";
 import {
   type Asker,
@@ -253,9 +253,33 @@ export function createDuckDbPack(opts: CreateDuckDbPackOpts = {}): Pack & {
         const size = (PAGE_SIZES as readonly number[]).includes(n) ? n : 50;
         const page = Math.min(100_000, Math.max(0, Math.floor(Number(c.req.query("p")) || 0)));
         const cols = c.req.queries("c")?.slice(0, 1000);
-        const q = { cols, size, page, stats: c.req.query("stats") === "1" };
+        const q = { cols, size, page, stats: c.req.query("stats") === "1", ...sliceParams((k) => c.req.query(k)) };
         const seen = await look(data, t, opened, q);
         return ctx.page(c, { title: opened.rel.split("/").pop() || target.label, body: filePage({ target, file: opened, look: seen, q }) });
+      });
+
+      // The same slice as a download: a GET too (it only reads), the same path checks, capped rows.
+      app.get("/duckdb/files/export", async (c) => {
+        const { data } = initServices(ctx.env, ctx);
+        const t = c.req.query("t") ?? "";
+        const target = data.source(t);
+        const opened = target ? open(target, c.req.query("f") ?? "", c.req.query("all") === "1") : undefined;
+        if (!target || !opened || opened.type !== "file") return c.text("Not a file to export.", 404);
+        const as = c.req.query("as") === "json" ? "json" : "csv";
+        let out;
+        try {
+          out = await slice(data, t, opened, { cols: c.req.queries("c")?.slice(0, 1000), ...sliceParams((k) => c.req.query(k)) });
+        } catch (e) {
+          return c.text(`DuckDB said: ${String((e as Error)?.message ?? e).slice(0, 300)}`, 502);
+        }
+        const body = as === "csv" ? toCsv(out.columns, out.rows) : JSON.stringify(out.rows.map((r) => Object.fromEntries(out.columns.map((k) => [k, r[k] ?? null]))), null, 2);
+        return c.body(body, 200, {
+          "content-type": as === "csv" ? "text/csv; charset=utf-8" : "application/json; charset=utf-8",
+          "content-disposition": `attachment; filename="${exportName(opened.rel, opened.all, as)}"`,
+          "x-content-type-options": "nosniff",
+          "cache-control": "no-store",
+          ...(out.capped ? { "x-dovre-capped": String(out.rows.length) } : {}),
+        });
       });
 
       app.post("/duckdb/q", async (c) => {
