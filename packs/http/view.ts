@@ -88,17 +88,23 @@ function importPanel(curl = ""): Html {
 
 function openapiPanel(spec = ""): Html {
   return Panel({
-    title: "Import an OpenAPI spec",
-    children: html`<form method="post" action="/http/openapi"><label class="field"><textarea name="spec" rows="3" maxlength="${MAX_SPEC}" spellcheck="false" class="mono" aria-label="OpenAPI spec" placeholder="openapi: 3.0.3&#10;paths:&#10;  /items: …">${spec}</textarea><span class="hint">OpenAPI 3 or Swagger 2, JSON or YAML: a request per operation. Read here, nothing is fetched or sent.</span></label><div class="buttons"><button type="submit">Preview</button></div></form>`,
+    title: "Import a spec or collection",
+    children: html`<form method="post" action="/http/openapi"><label class="field"><textarea name="spec" rows="3" maxlength="${MAX_SPEC}" spellcheck="false" class="mono" aria-label="OpenAPI spec or collection" placeholder="openapi: 3.0.3&#10;paths:&#10;  /items: …">${spec}</textarea><span class="hint">OpenAPI 3 or Swagger 2 (JSON or YAML), a Postman collection (exported JSON), or Bruno (.bru files pasted one after another, or its JSON export). Read here, nothing is fetched or sent; credential values become {{placeholders}}.</span></label><div class="buttons"><button type="submit">Preview</button></div></form>`,
   });
 }
 
 /** An imported spec's requests: open one in the editor, or save them all to a repo's .http file. */
 export function openapiPage(o: { got: Extract<Imported, { ok: true }>; spec: string; repos: string[]; repo: string; file: string; problem?: string }): Html {
   const g = o.got;
-  return html`${PageHeader({ title: g.title, sub: `${g.reqs.length} request${g.reqs.length === 1 ? "" : "s"} from an OpenAPI spec, nothing sent`, crumbs })}
+  return html`${PageHeader({ title: g.title, sub: `${g.reqs.length} request${g.reqs.length === 1 ? "" : "s"} from ${g.from}, nothing sent`, crumbs })}
 ${o.problem ? Notice({ tone: "warn", children: o.problem }) : ""}
-${Notice({ tone: "neutral", children: html`Each URL starts with <code>{{baseUrl}}</code>: set it in an environment${g.server ? html` (the spec's server is <code>${g.server}</code>)` : ""}. {{Placeholders}} for parameters and auth stay to fill in.${g.notes.length ? ` ${g.notes.join(" ")}` : ""}` })}
+${Notice({
+  tone: "neutral",
+  children:
+    g.from === "an OpenAPI spec"
+      ? html`Each URL starts with <code>{{baseUrl}}</code>: set it in an environment${g.server ? html` (the spec's server is <code>${g.server}</code>)` : ""}. {{Placeholders}} for parameters and auth stay to fill in.${g.notes.length ? ` ${g.notes.join(" ")}` : ""}`
+      : html`{{Variables}} stay as written: set them in an environment${g.vars?.length ? html` (the collection's own ${g.vars.length} go at the top of a new file)` : ""}.${g.notes.length ? ` ${g.notes.join(" ")}` : ""}`,
+})}
 ${Panel({
   title: "Save them all",
   children: html`<form method="post" action="/http/openapi/save"><input type="hidden" name="spec" value="${o.spec}"><div class="fields"><label class="field"><span class="label">Repo</span><select name="repo"><option value="">Pick a repo</option>${options(o.repos, o.repo)}</select></label>

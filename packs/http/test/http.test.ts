@@ -500,6 +500,28 @@ test("OpenAPI import: preview and open send nothing; save adds every operation t
   assert.match(log[0]!.detail!, /^added · 2 from OpenAPI/);
 });
 
+test("Postman / Bruno import: the same preview and save; credentials become placeholders; variables at the top of a new file", async () => {
+  const m = mounted();
+  const spec = JSON.stringify({ info: { _postman_id: "x", name: `Coll ${H}` }, auth: { type: "bearer", bearer: [{ key: "token", value: "sk_live_zzzz9999" }] }, variable: [{ key: "baseUrl", value: "https://api.example.com" }], item: [{ name: `F ${H}`, item: [{ name: "one", request: { method: "GET", url: "{{baseUrl}}/a/:id" } }] }] });
+  const prev = await m.post("/http/openapi", { spec });
+  assert.equal(prev.status, 200);
+  const page = await prev.text();
+  inert(page);
+  assert.match(page, /1 request from a Postman collection/);
+  assert.match(page, /1 credential value replaced/);
+  assert.ok(!page.replace(/<input type="hidden" name="spec" value="[^"]*">/, "").includes("sk_live_zzzz9999"), "only in the pasted text carried to Save");
+
+  mkdirSync(join(m.code, "shop", ".http"), { recursive: true });
+  assert.equal((await m.post("/http/openapi/save", { spec, repo: "shop", file: "coll.http" })).status, 303);
+  const text = readFileSync(join(m.code, "shop", ".http", "coll.http"), "utf8");
+  assert.match(text, /^# Coll .*: imported from a Postman collection\.\n@baseUrl = https:\/\/api\.example\.com\n\n### F .* \/ one\nGET \{\{baseUrl\}\}\/a\/\{\{id\}\}\nAuthorization: Bearer \{\{TOKEN\}\}\n/);
+
+  const bru = "meta {\n  name: b\n}\n\nget {\n  url: https://api.example.com/b\n}\n";
+  assert.match(await (await m.post("/http/openapi", { spec: bru })).text(), /1 request from a Bruno collection/);
+  assert.equal(m.calls.length, 0, "nothing was sent");
+  assert.match((await m.actions()).find((a) => a.kind === "http.save")!.detail!, /^created · 1 from Postman collection/);
+});
+
 /** The drafted agent link on a page, decoded: its repo and prompt. */
 function agentLink(page: string, label: string): { repo: string | null; prompt: string } | undefined {
   const m = new RegExp(`href="(/agents/new\\?[^"]+)"[^>]*>${label}<`).exec(page);
