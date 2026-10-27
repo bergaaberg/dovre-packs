@@ -72,7 +72,7 @@ const REMOTE = ["http:", "https:", "s3:", "gs:", "gcs:"];
 /**
  * A remote data file's URL as DuckDB will be given it, or undefined: http(s), s3 or gs, a host, no
  * user or password in it, no spaces or control characters, no glob (`*`, `[`, `{`) in its path,
- * at most 2048 characters. Public files only: no credentials are ever passed.
+ * at most 2048 characters. Keys go only to s3/gs URLs, and only when set in Settings (`remoteKeys`).
  */
 export function cleanUrl(raw: string): string | undefined {
   const s = raw.trim();
@@ -104,6 +104,70 @@ export function remoteSource(url: string, kind: FileKind): DuckDbTarget {
     host = new URL(url).hostname || host;
   } catch {}
   return { id: "url", label: host, path: url, url, file: kind };
+}
+
+/** Keys for private buckets, from Settings. Never shown, logged, or put on a command line. */
+export type RemoteKeys = {
+  s3?: { keyId: string; secret: string; region?: string; endpoint?: string; ssl: boolean };
+  gcs?: { keyId: string; secret: string };
+};
+
+const keyOk = (v: string | undefined) => (v && v.length <= 512 && !/[\x00-\x1f\x7f]/.test(v) ? v : undefined);
+
+/**
+ * The bucket keys set in Settings: an S3 access key (with an optional region, and an optional
+ * endpoint `host[:port]` for MinIO/R2, `http://` for one without TLS) and a GCS HMAC key. A half-set
+ * pair or a malformed region/endpoint is left out, so those URLs are read anonymously.
+ */
+export function remoteKeys(env: Record<string, string | undefined>): RemoteKeys {
+  const out: RemoteKeys = {};
+  const s3Id = keyOk(env.DUCKDB_S3_KEY_ID?.trim());
+  const s3Secret = keyOk(env.DUCKDB_S3_SECRET?.trim());
+  const region = env.DUCKDB_S3_REGION?.trim();
+  const ep = env.DUCKDB_S3_ENDPOINT?.trim().match(/^(https?:\/\/)?([a-z0-9.-]{1,253}(?::\d{1,5})?)\/?$/i);
+  if (s3Id && s3Secret && (!region || /^[a-z0-9-]{1,40}$/.test(region)) && (ep || !env.DUCKDB_S3_ENDPOINT?.trim())) {
+    out.s3 = { keyId: s3Id, secret: s3Secret, ssl: ep?.[1]?.toLowerCase() !== "http://", ...(region ? { region } : {}), ...(ep ? { endpoint: ep[2] } : {}) };
+  }
+  const gcsId = keyOk(env.DUCKDB_GCS_KEY_ID?.trim());
+  const gcsSecret = keyOk(env.DUCKDB_GCS_SECRET?.trim());
+  if (gcsId && gcsSecret) out.gcs = { keyId: gcsId, secret: gcsSecret };
+  return out;
+}
+
+/**
+ * A temporary secret for this one URL's bucket, created before the lock with its output thrown away
+ * (`.mode trash`), or "" for a public read: https, no keys for that scheme, or a URL without a bucket.
+ * DuckDB keeps the secret redacted and the lock stops a query un-redacting it (checked against the
+ * real CLI), and sqlOk refuses duckdb_secrets() so the key id isn't listed either.
+ */
+export function secretSql(url: string, keys: RemoteKeys | undefined): string {
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return "";
+  }
+  if (!u.hostname) return "";
+  const scope = sqlLit(`${u.protocol}//${u.hostname}`);
+  let body: string;
+  if (u.protocol === "s3:" && keys?.s3) {
+    const k = keys.s3;
+    body = `TYPE s3, KEY_ID ${sqlLit(k.keyId)}, SECRET ${sqlLit(k.secret)}`;
+    if (k.region) body += `, REGION ${sqlLit(k.region)}`;
+    if (k.endpoint) body += `, ENDPOINT ${sqlLit(k.endpoint)}, URL_STYLE 'path', USE_SSL ${k.ssl}`;
+  } else if ((u.protocol === "gs:" || u.protocol === "gcs:") && keys?.gcs) {
+    body = `TYPE gcs, KEY_ID ${sqlLit(keys.gcs.keyId)}, SECRET ${sqlLit(keys.gcs.secret)}`;
+  } else return "";
+  return `.mode trash\nCREATE TEMPORARY SECRET dovre_bucket (${body}, SCOPE ${scope});\n.mode json\n`;
+}
+
+/** Every key value in a DuckDB message replaced, so an error never carries one. */
+export function scrub(text: string, keys: RemoteKeys | undefined): string {
+  let out = text;
+  for (const v of [keys?.s3?.keyId, keys?.s3?.secret, keys?.gcs?.keyId, keys?.gcs?.secret]) {
+    if (v && v.length >= 4) out = out.split(v).join("…");
+  }
+  return out;
 }
 
 /** The system's CA bundle, which httpfs reads for https: public certificates, allowed beside the URL. */
@@ -291,6 +355,8 @@ export function createDuckDbData(o: {
   sources: DuckDbTarget[];
   run?: DuckDbRunner;
   now?: () => number;
+  /** Keys for private s3/gs buckets (Settings); without them remote files are read anonymously. */
+  keys?: RemoteKeys;
 }): DuckDbData {
   const runner = o.run ?? defaultRunner;
   const now = o.now ?? Date.now;
@@ -314,11 +380,12 @@ export function createDuckDbData(o: {
     let inputSql = querySql.trim();
     if (target.url && target.file) {
       // Remote: httpfs loaded by name before the lock (nothing autoloads or installs), no stored
-      // secrets read (so no saved S3 keys either), then only this URL and the CA bundle (checked
-      // against the real CLI: another URL or a local file is refused, and the lock holds).
+      // secrets read (so no saved S3 keys either), a temporary secret for this bucket when Settings
+      // has keys, then only this URL and the CA bundle (checked against the real CLI: another URL or
+      // a local file is refused, and the lock holds).
       const bundle = caBundle();
       const view = `CREATE OR REPLACE TEMPORARY VIEW "${fileViewName(new URL(target.url).pathname)}" AS SELECT * FROM ${readFn(target.file, sqlLit(target.url))};`;
-      inputSql = `SET allow_persistent_secrets = false;\nLOAD httpfs;\n${lockdownSql(undefined, bundle ? [target.url, bundle] : [target.url])}\n${views ? `${view}\n` : ""}${inputSql}`;
+      inputSql = `SET allow_persistent_secrets = false;\nLOAD httpfs;\n${secretSql(target.url, o.keys)}${lockdownSql(undefined, bundle ? [target.url, bundle] : [target.url])}\n${views ? `${view}\n` : ""}${inputSql}`;
     } else if (target.file) {
       // The real path, so a symlinked source still names the file DuckDB opens.
       let real: string;
@@ -339,7 +406,7 @@ export function createDuckDbData(o: {
       throw new Error("DuckDB's httpfs extension isn't installed. Run duckdb -c 'INSTALL httpfs' once.");
     }
     if (res.code !== 0 && res.stderr) {
-      const cleanError = res.stderr
+      const cleanError = scrub(res.stderr, o.keys)
         .replace(/^Error:\s*/i, "")
         .split(/\r?\n/)[0]
         .slice(0, 300);
