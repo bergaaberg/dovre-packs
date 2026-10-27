@@ -246,25 +246,27 @@ test("topoPage: repo panels, components, docs, focus links, bare checkouts and t
         ],
         docs: { plan: "docs/PLAN.md", rules: "CLAUDE.md" },
         health: { workers: ["quill-web"] },
+        uses: [],
+        environments: {},
       },
     },
-    { repo: "harbor", dir: "/x/harbor", file: "peak.yaml", peak: { version: 1, name: "Harbor", description: "Laid-back Roman city builder", tier: "utility", components: [], docs: { design: "docs/DESIGN.md" } } },
+    { repo: "harbor", dir: "/x/harbor", file: "peak.yaml", peak: { version: 1, name: "Harbor", description: "Laid-back Roman city builder", tier: "utility", components: [], docs: { design: "docs/DESIGN.md" }, uses: [], environments: {} } },
   ];
-  const out = String(topoPage({ entries, bare: ["plain-repo"] }));
-  for (const re of [/Topo/, /Quill/, /active/, /quill\.example/, /Focus%20on%20component/, /\.claude\/rules\/db\.md/, /docs%2FPLAN\.md/, /Uncataloged Checkouts/, /plain-repo/]) assert.match(out, re);
+  const out = String(topoPage({ entries, coverage: [{ repo: "plain-repo", dir: "/x/plain-repo", kind: "uncataloged", lines: [] }] }));
+  for (const re of [/Topo/, /Quill/, /active/, /quill\.example/, /Focus%20on%20component/, /\.claude\/rules\/db\.md/, /docs%2FPLAN\.md/, /Without a peak\.yaml/, /plain-repo/, /1 without a peak\.yaml/]) assert.match(out, re);
   assert.doesNotMatch(out, /range\.yaml/);
   assert.doesNotMatch(out, /Files with problems/);
 
-  const broken = String(topoPage({ entries, problems: [{ repo: "bad", file: "peak.yaml", problems: ["name is required.", "url must be an http(s) URL."] }] }));
+  const broken = String(topoPage({ entries, coverage: [{ repo: "bad", dir: "/x/bad", kind: "problems", file: "peak.yaml", lines: ["name is required.", "url must be an http(s) URL."] }] }));
   assert.match(broken, /Files with problems/);
   assert.match(broken, /name is required\. url must be an http\(s\) URL\./);
   assert.match(broken, /href="\/code\/bad\?path=peak\.yaml"/);
   assert.match(broken, /github\.com\/bergaaberg\/peak\/blob\/main\/SPEC\.md/);
-  assert.match(broken, /href="\/agents\/new\?repo=bad&prompt=peak\.yaml%20in%20this%20repo%20has%20problems/);
-  assertInert("topo problems", String(topoPage({ entries: [{ ...entries[1]!, repo: H }], problems: [{ repo: H, file: "peak.yaml", problems: [H] }] })));
+  assert.match(broken, /href="\/agents\/new\?repo=bad&(amp;)?prompt=peak\.yaml%20in%20this%20repo%20has%20problems/);
+  assertInert("topo problems", String(topoPage({ entries: [{ ...entries[1]!, repo: H }], coverage: [{ repo: H, dir: "/x", kind: "problems", file: "peak.yaml", lines: [H] }, { repo: H, full: `o/${H}`, web: `https://github.com/o/${H}`, blob: `https://github.com/o/${H}/blob/HEAD/`, kind: "warnings", file: "peak.yaml", lines: [H] }, { repo: H, kind: "uncataloged", lines: [] }] })));
 
   // #140: an uncataloged checkout offers an agent session that drafts its peak.yaml.
-  assert.match(out, /href="\/agents\/new\?repo=plain-repo&prompt=Write%20a%20peak\.yaml[^"]*peak%20check[^"]*"[^>]*>Write peak\.yaml<\/a>/);
+  assert.match(out, /href="\/agents\/new\?repo=plain-repo&(amp;)?prompt=Write%20a%20peak\.yaml[^"]*peak%20check[^"]*"[^>]*>Write peak\.yaml<\/a>/);
 
   const filtered = String(topoPage({ entries, filter: "active" }));
   assert.match(filtered, /Quill/);
@@ -276,7 +278,7 @@ test("the topo pack: in the menu's Code group and in search; /topo served, /atla
   const nav = pack.nav!(testContext());
   assert.deepEqual(nav.map((n) => [n.href, n.title, n.icon, n.group]), [["/topo", "Topo", "contours", "Code"]]);
   assert.ok(pack.pages!(testContext()).some((p) => p.href === "/topo"));
-  assert.equal(pack.manifest.execution, "local-only");
+  assert.equal(pack.manifest.execution, "any", "hosted it reads the forge");
 
   const { get } = packApp([pack], { codeDir: codeDir({ quill: QUILL }) });
   const res = await get("/topo");
@@ -293,7 +295,7 @@ test("the topo pack: in the menu's Code group and in search; /topo served, /atla
   const off = packApp([createTopoPack()], { codeDir: codeDir({ quill: QUILL }), env: { PACK_TOPO: "off" } });
   assert.equal((await off.get("/topo")).status, 404);
   assert.equal((await off.get("/atlas")).status, 404);
-  await assert.rejects(async () => createTopoPack().init!(testContext()), /no code folder/, "hosted, or no CODE_DIR: it doesn't start");
+  await createTopoPack().init!(testContext({ hosted: true }));
 });
 
 test("a hostile manifest stays inert on /topo and in every slot", async () => {
@@ -331,7 +333,7 @@ test("Bino: a line per cataloged repo with its components and docs, capped", () 
   assert.match(text, /web \(apps\/web\)/);
   assert.match(text, /plan: docs\/PLAN\.md/);
 
-  const many: TopoEntry[] = Array.from({ length: 40 }, (_, i) => ({ repo: `r${i}`, dir: "", file: "peak.yaml", peak: { version: 1, name: `R${i}`, tier: "active", description: "x".repeat(90), components: [], docs: {} } }));
+  const many: TopoEntry[] = Array.from({ length: 40 }, (_, i) => ({ repo: `r${i}`, dir: "", file: "peak.yaml", peak: { version: 1, name: `R${i}`, tier: "active", description: "x".repeat(90), components: [], docs: {}, uses: [], environments: {} } }));
   const capped = binoLines(many);
   assert.ok(capped.length <= 1500, `capped at what a pack may say (${capped.length})`);
   assert.match(capped, /and \d+ more cataloged repositories/);
@@ -341,7 +343,8 @@ test("Bino: a line per cataloged repo with its components and docs, capped", () 
 
 test("the peak.yaml prompts: draft one from the repo, fix one with every problem and the check", () => {
   assert.match(draftPrompt(), /README.*AGENTS\.md \/ CLAUDE\.md.*`npx github:bergaaberg\/peak check`/s);
-  const fix = fixPrompt({ repo: "x", file: "peak.yaml", problems: ["name is required.", "tier must be a word."] });
+  const fix = fixPrompt({ file: "peak.yaml", problems: ["name is required.", "tier must be a word."] });
   assert.match(fix, /^peak\.yaml in this repo has problems .*name is required\. tier must be a word\. Fix them, then run `npx github:bergaaberg\/peak check`/);
   assert.doesNotMatch(fix, /rename/);
+  assert.match(fixPrompt({ file: "peak.yml", problems: ['Unknown key "x" (ignored).'], warnings: true }), /^peak\.yml in this repo has warnings .* until it passes with no warnings\.$/);
 });

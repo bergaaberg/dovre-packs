@@ -18,7 +18,7 @@
     "check": "pnpm typecheck && pnpm test"
   },
   "dependencies": {
-    "@bergaaberg/peak": "github:bergaaberg/peak#v0.1.0",
+    "@bergaaberg/peak": "github:bergaaberg/peak#v0.2.0",
     "dovre": "link:../dovre",
     "hono": "^4.13.13",
     "yaml": "^2.9.1"
