@@ -133,7 +133,7 @@ function historyPanel(list: Sent[]): Html {
     children: list.length
       ? html`<ul class="list">${list.map(
           (s) =>
-            html`<li class="item"><a href="${sentHref(s.id)}">${s.state === "done" && s.resp ? Pill({ tone: statusTone(s.resp.status), children: String(s.resp.status) }) : Pill({ tone: s.state === "failed" ? "bad" : "neutral", children: s.state === "failed" ? "failed" : "…" })} <strong>${s.out.method}</strong> <span class="mono">${s.out.url}</span></a></li>`,
+            html`<li class="item"><a href="${sentHref(s.id)}">${s.state === "done" && s.resp ? Pill({ tone: statusTone(s.resp.status), children: String(s.resp.status) }) : Pill({ tone: s.state === "failed" ? "bad" : "neutral", children: s.state === "failed" ? "failed" : "…" })} <strong>${s.out.method}</strong> <span class="mono">${s.out.url}</span>${s.by === "agent" ? html` <span class="t3">by an agent</span>` : ""}</a></li>`,
         )}</ul>`
       : Empty({ title: "Nothing sent yet" }),
   });

@@ -39,6 +39,8 @@ export type Sent = {
   /** What went out, masked: method, URL, headers. */
   out: { method: string; url: string; headers: [string, string][] };
   state: "sending" | "done" | "failed";
+  /** Sent by an agent through the `send` tool (Dovre's MCP server), not from the editor. */
+  by?: "agent";
   resp?: Resp;
   error?: string;
 };
