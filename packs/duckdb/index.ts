@@ -8,16 +8,21 @@ import { bodyLimit } from "hono/body-limit";
 import { type Pack, PACK_API } from "dovre/packs/types.ts";
 import { strictOrigin } from "dovre/strict.ts";
 import {
+  cleanUrl,
   createDuckDbData,
   type DuckDbData,
   type DuckDbKept,
   type DuckDbRunner,
+  type DuckDbTarget,
+  type FileKind,
   MAX_ROWS,
   parseSources,
   readDuckDb,
+  remoteSource,
+  urlKind,
 } from "./data.ts";
 import { exportName, look, open, PAGE_SIZES, slice, toCsv } from "./files.ts";
-import { FILES_STYLES, filePage, filesHome, folderPage, notOpenPage, sliceParams, viewable } from "./filesview.ts";
+import { FILES_STYLES, filePage, filesHome, folderPage, notOpenPage, type Remote, sliceParams, viewable } from "./filesview.ts";
 import { createDuckDbSchemas, type DuckDbSchemas, toAutocomplete } from "./schema.ts";
 import { cleanName, MAX_UPLOAD, save, uploadsDir, uploadsSource } from "./uploads.ts";
 import {
@@ -109,7 +114,7 @@ export function createDuckDbPack(opts: CreateDuckDbPackOpts = {}): Pack & {
           key: "DUCKDB_SOURCES",
           label: "DuckDB sources",
           required: true,
-          help: "Comma-separated targets: name=/path/to/db.duckdb, a directory of .parquet/.csv/.jsonl files, a single .parquet/.csv/.jsonl file, or :memory:",
+          help: "Comma-separated targets: name=/path/to/db.duckdb, a directory of .parquet/.csv/.jsonl files, a single .parquet/.csv/.jsonl file or a public https:// / s3:// / gs:// URL to one (read through httpfs, no credentials), or :memory:",
         },
         {
           key: "DUCKDB_EXECUTION",
@@ -245,11 +250,22 @@ export function createDuckDbPack(opts: CreateDuckDbPackOpts = {}): Pack & {
       });
 
       // The file viewer: GET only (it reads), the path checked inside a folder source before DuckDB sees it.
-      app.get("/duckdb/files", async (c) => {
+      app.get("/duckdb/files", strictOrigin, async (c) => {
         const { data, uploads } = initServices(ctx.env, ctx);
         const sources = data.sources();
         const t = c.req.query("t") ?? "";
         const f = c.req.query("f") ?? "";
+        const q = fileQuery(c);
+        const u = c.req.query("u");
+        if (u !== undefined) {
+          const r = remoteOf(u, c.req.query("k"));
+          if ("error" in r) {
+            c.status(400);
+            return ctx.page(c, { title: "Files", body: filesHome({ sources, uploads, error: r.error, u: u.slice(0, 2048) }) });
+          }
+          const seen = await look(r.data, r.target.id, r.opened, q);
+          return ctx.page(c, { title: r.name, body: filePage({ target: r.target, file: r.opened, look: seen, q, remote: r.remote }) });
+        }
         if (!t) return ctx.page(c, { title: "Files", body: filesHome({ sources, uploads }) });
         const target = data.source(t);
         const opened = target ? open(target, f, c.req.query("all") === "1") : undefined;
@@ -260,11 +276,6 @@ export function createDuckDbPack(opts: CreateDuckDbPackOpts = {}): Pack & {
         if (opened.type === "dir") {
           return ctx.page(c, { title: opened.rel || target.label, body: folderPage({ target, dir: opened }) });
         }
-        const n = Number(c.req.query("n"));
-        const size = (PAGE_SIZES as readonly number[]).includes(n) ? n : 50;
-        const page = Math.min(100_000, Math.max(0, Math.floor(Number(c.req.query("p")) || 0)));
-        const cols = c.req.queries("c")?.slice(0, 1000);
-        const q = { cols, size, page, stats: c.req.query("stats") === "1", ...sliceParams((k) => c.req.query(k)) };
         const seen = await look(data, t, opened, q);
         return ctx.page(c, { title: opened.rel.split("/").pop() || opened.abs.split("/").pop() || target.label, body: filePage({ target, file: opened, look: seen, q }) });
       });
@@ -302,6 +313,27 @@ export function createDuckDbPack(opts: CreateDuckDbPackOpts = {}): Pack & {
         },
       );
 
+      const KINDS: readonly FileKind[] = ["parquet", "csv", "json"];
+      /** A URL typed on the Files page, checked, as a source of its own (shut in to that URL). */
+      type RemoteOpened = { url: string; target: DuckDbTarget; opened: Extract<ReturnType<typeof open>, { type: "file" }>; name: string; data: DuckDbData; remote: Remote };
+      const remoteOf = (raw: string, k: string | undefined): RemoteOpened | { error: string } => {
+        const url = cleanUrl(raw);
+        if (!url) return { error: "That isn't a URL to open: a public https://, s3:// or gs:// file, with no user or password in it and no wildcards." };
+        const kind = KINDS.includes(k as FileKind) ? (k as FileKind) : urlKind(url);
+        if (!kind) return { error: "The URL doesn't end in .parquet, .csv or .jsonl: pick its kind." };
+        const target = remoteSource(url, kind);
+        const opened = open(target, "") as RemoteOpened["opened"];
+        const name = decodeURIComponent(new URL(url).pathname.split("/").pop() || "") || target.label;
+        return { url, target, opened, name, data: createDuckDbData({ sources: [target], run: opts.run, now: opts.now }), remote: { u: url, ...(KINDS.includes(k as FileKind) ? { k: k as FileKind } : {}) } };
+      };
+      const fileQuery = (c: { req: { query(k: string): string | undefined; queries(k: string): string[] | undefined } }) => {
+        const n = Number(c.req.query("n"));
+        const size = (PAGE_SIZES as readonly number[]).includes(n) ? n : 50;
+        const page = Math.min(100_000, Math.max(0, Math.floor(Number(c.req.query("p")) || 0)));
+        const cols = c.req.queries("c")?.slice(0, 1000);
+        return { cols, size, page, stats: c.req.query("stats") === "1", ...sliceParams((k) => c.req.query(k)) };
+      };
+
       const refuse = (c: Parameters<typeof ctx.page>[0], status: 400 | 413 | 500, why: string) => {
         const { sources, uploads } = initServices(ctx.env, ctx);
         c.status(status);
@@ -309,11 +341,19 @@ export function createDuckDbPack(opts: CreateDuckDbPackOpts = {}): Pack & {
       };
 
       // The same slice as a download: a GET too (it only reads), the same path checks, capped rows.
-      app.get("/duckdb/files/export", async (c) => {
-        const { data } = initServices(ctx.env, ctx);
-        const t = c.req.query("t") ?? "";
-        const target = data.source(t);
-        const opened = target ? open(target, c.req.query("f") ?? "", c.req.query("all") === "1") : undefined;
+      app.get("/duckdb/files/export", strictOrigin, async (c) => {
+        let { data } = initServices(ctx.env, ctx);
+        let t = c.req.query("t") ?? "";
+        const u = c.req.query("u");
+        let target = data.source(t);
+        let opened = target ? open(target, c.req.query("f") ?? "", c.req.query("all") === "1") : undefined;
+        let name = opened?.rel || opened?.abs.split("/").pop() || "";
+        if (u !== undefined) {
+          const r = remoteOf(u, c.req.query("k"));
+          if ("error" in r) return c.text(r.error, 400);
+          ({ data, target, opened, name } = r);
+          t = r.target.id;
+        }
         if (!target || !opened || opened.type !== "file") return c.text("Not a file to export.", 404);
         const as = c.req.query("as") === "json" ? "json" : "csv";
         let out;
@@ -325,7 +365,7 @@ export function createDuckDbPack(opts: CreateDuckDbPackOpts = {}): Pack & {
         const body = as === "csv" ? toCsv(out.columns, out.rows) : JSON.stringify(out.rows.map((r) => Object.fromEntries(out.columns.map((k) => [k, r[k] ?? null]))), null, 2);
         return c.body(body, 200, {
           "content-type": as === "csv" ? "text/csv; charset=utf-8" : "application/json; charset=utf-8",
-          "content-disposition": `attachment; filename="${exportName(opened.rel || opened.abs.split("/").pop() || "", opened.all, as)}"`,
+          "content-disposition": `attachment; filename="${exportName(name, opened.all, as)}"`,
           "x-content-type-options": "nosniff",
           "cache-control": "no-store",
           ...(out.capped ? { "x-dovre-capped": String(out.rows.length) } : {}),
