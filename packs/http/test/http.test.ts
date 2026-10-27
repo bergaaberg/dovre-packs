@@ -746,3 +746,53 @@ test("the editor's checks are saved as # @expect lines", async () => {
   const page = await (await m.get("/http?repo=shop&file=c.http&n=0")).text();
   assert.match(page, /<textarea name="expect"[^>]*>status 200\njson \$.id exists<\/textarea>/);
 });
+
+test("chaining: a run passes login's token on; the plan shows it as written; the editor reuses the newest send of that name", async () => {
+  const fake = fakeFetch((url) => {
+    const p = new URL(url).pathname;
+    if (p === "/login") return new Response(JSON.stringify({ token: "tok-123", user: { id: 7 }, echo: SECRET }), { status: 200, headers: { "content-type": "application/json", location: "/orders/7" } });
+    return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+  });
+  const m = mounted({ fetchFn: fake.fetchFn });
+  smokeFile(m, `### early
+GET {{baseUrl}}/too-soon/{{login.response.body.token}}
+
+###
+# @name login
+POST {{baseUrl}}/login
+Content-Type: application/json
+
+{"user": "me"}
+
+### orders
+GET {{baseUrl}}{{login.response.headers.Location}}?by={{login.response.body.user.id}}
+Authorization: Bearer {{login.response.body.token}}
+
+### leak
+GET {{baseUrl}}/x/{{login.response.body.echo}}
+`);
+  const plan = await (await m.get("/http/run?repo=shop&file=smoke.http&env=dev")).text();
+  assert.match(plan, /https:\/\/api\.example\.com\/x\/\{\{login\.response\.body\.echo\}\}/, "a later value shows as written");
+  assert.match(plan, /Where it goes depends on login&#39;s response/);
+  assert.match(plan, /No response from login yet/, "one above login can't have it");
+  assert.equal(fake.calls.length, 0);
+
+  const at = (await m.post("/http/run", { repo: "shop", file: "smoke.http", env: "dev", hash: hashIn(plan) })).headers.get("location")!;
+  const page = await landed(m.get, at);
+  assert.deepEqual(fake.calls.map((c) => new URL(c.url).pathname + new URL(c.url).search), ["/login", "/orders/7?by=7"]);
+  assert.equal(new Headers(fake.calls[1]!.init.headers).get("authorization"), "Bearer tok-123");
+  assert.match(page, /No response from login yet/);
+  assert.match(page, /secret there \(masked\)/, "a secret echoed back isn't passed on");
+  assert.ok(!page.includes(SECRET) && !page.includes("tok-123"), "the token isn't shown in the run");
+
+  // The editor: the newest send named login.
+  const sent = await m.post("/http/send", send({ name: "orders", url: "https://api.example.com/o/{{login.response.body.user.id}}", repo: "shop", file: "smoke.http" }));
+  assert.equal(sent.status, 303);
+  assert.equal(new URL(fake.calls.at(-1)!.url).pathname, "/o/7");
+  const editor = await (await m.get("/http?repo=shop")).text();
+  inert(editor);
+  m.pack.history().clear();
+  const gone = await m.post("/http/send", send({ name: "orders", url: "https://api.example.com/o/{{login.response.body.user.id}}" }));
+  assert.equal(gone.status, 400);
+  assert.match(await gone.text(), /No response from login yet: send it first/);
+});

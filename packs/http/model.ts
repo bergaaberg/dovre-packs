@@ -9,10 +9,13 @@
  *    file's own) first; then the URL's host is fixed, and only then are secrets put in, each only for
  *    the hosts HTTP_SECRETS binds it to. A host can never come from a secret, and a repo's file or
  *    environment can't send a secret anywhere it isn't bound to.
+ *    `{{login.response.body.token}}` is a value from an earlier response (chain.ts), put in with the
+ *    plain variables, so the host check and the secrets' binding apply to it as to anything typed.
  *  - curl in (`fromCurl`) and out (`toCurl`): out, a secret stays a shell variable ("$API_TOKEN").
  */
 
 import { checkLines, MAX_CHECK, MAX_CHECKS } from "./checks.ts";
+import { type Refs, resolveRef } from "./chain.ts";
 
 export const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"] as const;
 export type Method = (typeof METHODS)[number];
@@ -295,16 +298,30 @@ function dynamic(expr: string, now: number): string | undefined {
 }
 
 /** Plain variables in (repeatedly, a few levels deep); secrets' placeholders stay; unknown names collected. */
-function plain(s: string, vars: Record<string, string>, secretNames: Set<string>, missing: Set<string>, now: number, depth = 0): string {
+type Fill = { vars: Record<string, string>; secretNames: Set<string>; missing: Set<string>; now: number; refs?: Refs; chain: string[]; later?: string };
+
+/**
+ * Plain variables in (repeatedly, a few levels deep); secrets' placeholders stay; unknown names
+ * collected. A response reference (chain.ts) goes in as it is, never filled in again; one from a
+ * request later in the same run stays as written.
+ */
+function plain(s: string, f: Fill, depth = 0): string {
   return s.replace(PLACE, (whole, inner: string) => {
-    if (secretNames.has(inner)) return whole;
+    if (f.secretNames.has(inner)) return whole;
     if (inner.startsWith("$")) {
-      const d = dynamic(inner, now);
-      if (d === undefined) missing.add(inner.split(/\s+/)[0]!);
+      const d = dynamic(inner, f.now);
+      if (d === undefined) f.missing.add(inner.split(/\s+/)[0]!);
       return d ?? whole;
     }
-    if (Object.hasOwn(vars, inner)) return depth < 5 ? plain(vars[inner]!, vars, secretNames, missing, now, depth + 1) : vars[inner]!;
-    missing.add(inner);
+    if (Object.hasOwn(f.vars, inner)) return depth < 5 ? plain(f.vars[inner]!, f, depth + 1) : f.vars[inner]!;
+    const ref = resolveRef(inner, f.refs);
+    if (ref) {
+      if ("value" in ref) return ref.value;
+      if ("error" in ref) f.chain.push(ref.error);
+      else f.later ??= inner.split(".")[0];
+      return whole;
+    }
+    f.missing.add(inner);
     return whole;
   });
 }
@@ -321,17 +338,21 @@ export type Prepared = {
 export type PrepareResult = ({ ok: true } & Prepared) | { ok: false; error: string };
 
 /** A request resolved for sending: variables, then the host, then the secrets bound to that host. */
-export function prepare(r: Req, vars: Record<string, string>, secrets: Secret[], now = Date.now()): PrepareResult {
-  const names = new Set(secrets.map((s) => s.name));
+export function prepare(r: Req, vars: Record<string, string>, secrets: Secret[], now = Date.now(), refs?: Refs): PrepareResult {
   const missing = new Set<string>();
-  const url1 = plain(fullUrl(r), vars, names, missing, now).trim();
-  const headers1 = sentHeaders(r).map(([k, v]) => [k, plain(v, vars, names, missing, now)] as [string, string]);
+  const f: Fill = { vars, secretNames: new Set(secrets.map((s) => s.name)), missing, now, refs, chain: [] };
+  const url1 = plain(fullUrl(r), f).trim();
+  const headers1 = sentHeaders(r).map(([k, v]) => [k, plain(v, f)] as [string, string]);
+  if (headers1.some(([, v]) => /[\r\n]/.test(v))) return { ok: false, error: "A header's value has a line break in it: nothing was sent." };
   const raw = sentBody(r);
-  const body1 = raw === undefined ? undefined : plain(raw, vars, names, missing, now);
+  const body1 = raw === undefined ? undefined : plain(raw, f);
+  if (f.chain.length) return { ok: false, error: `${f.chain[0]}: nothing was sent.` };
+  if (/[\r\n]/.test(url1)) return { ok: false, error: "The URL has a line break in it: nothing was sent." };
   if (missing.size) return { ok: false, error: `No value for ${[...missing].map((m) => `{{${m}}}`).join(", ")}: nothing was sent.` };
   const authority = /^([a-z][a-z0-9+.-]*:)\/\/([^/?#]*)/i.exec(url1);
   if (!authority) return { ok: false, error: "The URL must start with http:// or https://." };
   if (!/^https?:$/i.test(authority[1]!)) return { ok: false, error: "Only http:// and https:// URLs are sent." };
+  if (authority[2]!.includes("{{") && f.later) return { ok: false, error: `Where it goes depends on ${f.later}'s response: it's worked out when that comes back.` };
   if (authority[2]!.includes("{{")) return { ok: false, error: "A URL's host can't come from a secret: nothing was sent." };
   let target: URL;
   try {
@@ -595,8 +616,8 @@ const sq = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
  */
 export function toCurl(r: Req, vars: Record<string, string>, secrets: Secret[], now = Date.now()): string {
   const names = new Set(secrets.map((s) => s.name));
-  const missing = new Set<string>();
-  const quote = (s: string) => sq(plain(s, vars, names, missing, now)).replace(PLACE, (whole, inner: string) => (names.has(inner) ? `'"$${inner}"'` : whole)).replace(/^''(?=")|(?<=")''$/g, "");
+  const f: Fill = { vars, secretNames: names, missing: new Set(), now, chain: [] };
+  const quote = (s: string) => sq(plain(s, f)).replace(PLACE, (whole, inner: string) => (names.has(inner) ? `'"$${inner}"'` : whole)).replace(/^''(?=")|(?<=")''$/g, "");
   const parts = ["curl", quote(fullUrl(r))];
   if (r.method === "HEAD") parts.push("-I");
   else if (r.method !== "GET" && !(r.method === "POST" && sentBody(r))) parts.push("-X", r.method);
