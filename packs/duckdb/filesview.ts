@@ -94,32 +94,35 @@ export function fileCell(v: unknown): Child {
   return s.length > 300 ? html`<span title="${s.slice(0, 4000)}">${s.slice(0, 300)}…</span>` : s;
 }
 
+/** A source the viewer opens: a folder, or a single data file. */
+export const viewable = (s: DuckDbTarget) => !!(s.isDir || s.file);
+
 const notice = (o: { sources: DuckDbTarget[] }) =>
-  o.sources.some((s) => s.isDir)
+  o.sources.some(viewable)
     ? ""
     : Notice({
         tone: "warn",
-        children: html`No folder sources. Add a directory to <code>DUCKDB_SOURCES</code> (e.g. <code>lake=/path/to/parquet_dir</code>) to open its files here.`,
+        children: html`No folder or file sources. Add a directory or a data file to <code>DUCKDB_SOURCES</code> (e.g. <code>lake=/path/to/parquet_dir</code> or <code>orders=/path/to/orders.parquet</code>) to open it here.`,
       });
 
-/** /duckdb/files: the directory sources to open. */
+/** /duckdb/files: the folder and file sources to open. */
 export function filesHome(o: { sources: DuckDbTarget[]; error?: Child }): Html {
-  const dirs = o.sources.filter((s) => s.isDir);
+  const dirs = o.sources.filter(viewable);
   return html`${PageHeader({
     title: "Files",
     crumbs: [{ href: "/duckdb", label: "DuckDB" }],
-    sub: "Open a Parquet, CSV or JSON lines file in a folder source: its schema, stats and rows, without writing SQL.",
+    sub: "Open a Parquet, CSV or JSON lines file, in a folder source or listed on its own: its schema, stats and rows, without writing SQL.",
   })}
 <div data-live id="duckdb-files">
 ${o.error ? Notice({ tone: "bad", children: o.error }) : ""}
 ${notice(o)}
 ${Panel({
-  title: "Folder sources",
+  title: "Sources",
   meta: String(dirs.length),
   flush: true,
   children: dirs.length
-    ? html`<ul class="tgrid">${dirs.map((s) => html`<li><a href="${filesHref({ t: s.id })}"><span>${s.label}</span><span class="n">${s.path}</span></a></li>`)}</ul>`
-    : Empty({ title: "No folder sources" }),
+    ? html`<ul class="tgrid">${dirs.map((s) => html`<li><a href="${filesHref({ t: s.id })}"><span>${s.label}</span><span class="n">${s.file ? s.file : "folder"} · ${s.path}</span></a></li>`)}</ul>`
+    : Empty({ title: "No folder or file sources" }),
 })}
 </div>`;
 }
@@ -189,7 +192,7 @@ const nullCell = (v: string | number | undefined) => (v === undefined || v === "
 /** A file (or a folder's Parquet files as one): facts, schema, column stats, rows, and DuckDB for real queries. */
 export function filePage(o: { target: DuckDbTarget; file: Extract<Opened, { type: "file" }>; look: Look; q: FileQuery }): Html {
   const { target, file, look, q } = o;
-  const name = file.all ? `${file.rel ? file.rel.split("/").pop() : target.label}/*.parquet` : file.rel.split("/").pop()!;
+  const name = file.all ? `${file.rel ? file.rel.split("/").pop() : target.label}/*.parquet` : file.rel ? file.rel.split("/").pop()! : file.abs.split("/").pop() || target.label;
   const here = { t: target.id, f: file.rel, all: file.all, cols: q.cols, size: q.size, page: q.page, stats: q.stats, ...look.slice };
   const link = (over: Partial<FileQuery>) => filesHref({ ...here, ...over });
 
@@ -279,7 +282,7 @@ export function notOpenPage(o: { target?: DuckDbTarget; t: string; f: string; so
     sources: o.sources,
     error: o.target
       ? html`Can't open <code>${o.f}</code> in ${o.target.label}: it isn't a folder or a Parquet, CSV or JSON lines file inside it.`
-      : html`No folder source named <code>${o.t}</code>.`,
+      : html`No folder or file source named <code>${o.t}</code>.`,
   });
 }
 

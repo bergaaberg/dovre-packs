@@ -6,21 +6,10 @@
  * relative path with no `..`, whose real path (symlinks followed) stays inside the source's.
  */
 import { readdirSync, realpathSync, statSync } from "node:fs";
-import { extname, join, sep } from "node:path";
-import type { DuckDbData, DuckDbTarget, Row } from "./data.ts";
+import { join, sep } from "node:path";
+import { type DuckDbData, type DuckDbTarget, type FileKind, kindOf, type Row } from "./data.ts";
 
-export type FileKind = "parquet" | "csv" | "json";
-
-const KINDS: Record<string, FileKind> = {
-  ".parquet": "parquet",
-  ".csv": "csv",
-  ".tsv": "csv",
-  ".json": "json",
-  ".jsonl": "json",
-  ".ndjson": "json",
-};
-
-export const kindOf = (name: string): FileKind | undefined => KINDS[extname(name).toLowerCase()];
+export { type FileKind, kindOf };
 
 /** How many files a folder opened as one dataset may hold, and how many entries a folder lists. */
 export const MAX_FILES = 500;
@@ -65,6 +54,17 @@ export type Opened =
  * source (`..`, a symlink out, a missing file) or isn't a kind it reads.
  */
 export function open(root: DuckDbTarget, f: string, all = false): Opened | undefined {
+  if (root.file) {
+    // A file source is the file itself: nothing under it, nothing beside it.
+    if (all || cleanRel(f) !== "") return undefined;
+    try {
+      const st = statSync(root.path);
+      if (!st.isFile()) return undefined;
+      return { type: "file", rel: "", abs: root.path, kind: root.file, files: [realpathSync(root.path)], size: st.size, all: false };
+    } catch {
+      return undefined;
+    }
+  }
   if (!root.isDir) return undefined;
   const rel = cleanRel(f);
   if (rel === undefined) return undefined;

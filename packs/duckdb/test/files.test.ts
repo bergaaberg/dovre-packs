@@ -4,7 +4,7 @@
  * directory's views, and a hostile file (names, values) renders inert. No real duckdb: a fake runner.
  */
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
@@ -156,9 +156,9 @@ function fakeRunner(o: { cols?: string[]; fail?: RegExp } = {}): DuckDbRunner & 
   return run;
 }
 
-function mount(run: DuckDbRunner) {
+function mount(run: DuckDbRunner, sources = `lake=${lake}`) {
   const ctx = testContext({
-    env: { DUCKDB_SOURCES: `lake=${lake}` },
+    env: { DUCKDB_SOURCES: sources },
     page: async (c, o) => c.html(String(await o.body)),
   });
   const app = new Hono();
@@ -339,6 +339,59 @@ test("files: export downloads the slice, inside the source only", async () => {
   assert.equal(failing.status, 502);
 });
 
+test("files: a single file listed as a source opens on its own, shut in to that file", async () => {
+  const one = NAMES ? join(lake, `${IMG}.parquet`) : join(lake, "t.parquet");
+  const linked = join(lake, "link.parquet");
+  const [t, l, db] = parseSources(`one=${one},linked=${linked},db=${join(lake, "x.duckdb")}`);
+  assert.equal(t!.file, "parquet");
+  assert.equal(t!.isDir, false);
+  assert.equal(l!.file, "parquet");
+  assert.equal(db!.file, undefined, "a database file stays one");
+  assert.equal(parseSources(`d=${lake}`)[0]!.file, undefined, "a folder is never a file source");
+
+  // Only the file itself: no path under it, no folder mode.
+  assert.equal(open(t!, "")?.type, "file");
+  assert.equal(open(t!, "t2.parquet"), undefined);
+  assert.equal(open(t!, "../t2.parquet"), undefined);
+  assert.equal(open(t!, "", true), undefined);
+
+  const run = fakeRunner();
+  const get = mount(run, `one=${one},linked=${linked}`);
+  const r = await get("/duckdb/files?t=one&stats=1");
+  assert.equal(r.status, 200);
+  const body = await r.text();
+  inert(body);
+  assert.ok(body.includes("Open in DuckDB"));
+  assert.ok(run.seen.length >= 5);
+  for (const sql of run.seen) {
+    assert.ok(sql.includes(`SET allowed_paths = [${lit(realpathSync(one))}];`), sql);
+    assert.ok(!sql.includes("allowed_directories"), sql);
+    assert.match(sql, /SET lock_configuration = true;/);
+  }
+  for (const a of run.argv) assert.deepEqual(a, ["-json", ":memory:"]);
+
+  // A symlinked file source names the real file, which is what DuckDB is allowed to open.
+  const run2 = fakeRunner();
+  const r2 = await mount(run2, `linked=${linked}`)("/duckdb/files?t=linked");
+  assert.equal(r2.status, 200);
+  for (const sql of run2.seen) assert.ok(sql.includes(`SET allowed_paths = [${lit(realpathSync(join(outside, "secret.parquet")))}];`), sql);
+
+  for (const q of ["t=one&f=t2.parquet", "t=one&all=1", "t=one&f=..%2Fsecret.parquet"]) {
+    const before = run.seen.length;
+    assert.equal((await get(`/duckdb/files?${q}`)).status, 404, q);
+    assert.equal(run.seen.length, before, `${q}: duckdb never ran`);
+  }
+  const home = await (await get("/duckdb/files")).text();
+  inert(home);
+  assert.ok(home.includes("parquet ·"), "listed as a file source");
+
+  // Queries on it see one view named after the file, and nothing else.
+  const run3 = fakeRunner();
+  const data = createDuckDbData({ sources: [parseSources(`o=${join(lake, "it's.csv")}`)[0]!], run: run3 });
+  await data.query("o", "SELECT 1");
+  assert.ok(run3.seen[0]!.includes(`CREATE OR REPLACE TEMPORARY VIEW "it_s" AS SELECT * FROM read_csv(${lit(realpathSync(join(lake, "it's.csv")))});`), run3.seen[0]);
+});
+
 // ── Against the real duckdb CLI (skipped where it isn't installed) ──
 
 const hasDuckDb = (() => {
@@ -388,4 +441,27 @@ test("real duckdb: the viewer reads a Parquet file's schema, metadata, rows and 
   assert.equal(toCsv(out.columns, out.rows), `id,s\r\n0,"{""a"":0,""b"":[0]}"\r\n1,"{""a"":1,""b"":[1]}"\r\n`);
   // Even if a symlink out got past the viewer's own check, DuckDB is shut in to the source.
   await assert.rejects(data.scan("real", `SELECT * FROM read_parquet(${lit(join(outside, "secret.parquet"))})`), /disabled|Permission/i);
+});
+
+test("real duckdb: a file source is one view, and its siblings stay out of reach", { skip: !hasDuckDb && "duckdb not installed" }, async () => {
+  const dir = join(base, "real-one");
+  mkdirSync(dir);
+  const f = join(dir, "orders.parquet");
+  const sib = join(dir, "sibling.csv");
+  const env = { ...process.env };
+  delete env.AI_AGENT;
+  execFileSync("duckdb", [":memory:", "-c", `COPY (SELECT range AS id FROM range(7)) TO ${lit(f)}; COPY (SELECT 1 AS a) TO ${lit(sib)};`], { env, stdio: "ignore" });
+  const t = parseSources(`orders=${f}`)[0]!;
+  const data = createDuckDbData({ sources: [t] });
+  const n = await data.query("orders", "SELECT count(*) AS n FROM orders;");
+  assert.equal(Number(n.rows[0]!.n), 7);
+  assert.deepEqual((await data.tables("orders")).map((x) => x.table), ["orders"]);
+  const opened = open(t, "");
+  assert.equal(opened?.type, "file");
+  if (opened?.type !== "file") return;
+  const seen = await look(data, "orders", opened, { size: 25, page: 0 });
+  assert.equal(seen.error, undefined);
+  assert.equal(seen.facts?.rows, 7);
+  await assert.rejects(data.query("orders", `SELECT * FROM read_text(${lit(sib)})`), /disabled|Permission/i);
+  await assert.rejects(data.scan("orders", `SELECT * FROM read_csv(${lit(sib)})`), /disabled|Permission/i);
 });

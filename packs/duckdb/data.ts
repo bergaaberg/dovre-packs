@@ -2,8 +2,8 @@
  * DuckDB Pack (`duckdb`): data execution, source management, and zero-row queries.
  */
 import { execFile } from "node:child_process";
-import { existsSync, readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readdirSync, realpathSync, statSync } from "node:fs";
+import { basename, extname, join } from "node:path";
 import { promisify } from "node:util";
 import type { PackContext } from "dovre/packs/types.ts";
 
@@ -42,11 +42,27 @@ export type Found = {
   type?: string;
 };
 
+export type FileKind = "parquet" | "csv" | "json";
+
+const KINDS: Record<string, FileKind> = {
+  ".parquet": "parquet",
+  ".csv": "csv",
+  ".tsv": "csv",
+  ".json": "json",
+  ".jsonl": "json",
+  ".ndjson": "json",
+};
+
+/** The data file kind a name's extension says, or undefined. */
+export const kindOf = (name: string): FileKind | undefined => KINDS[extname(name).toLowerCase()];
+
 export type DuckDbTarget = {
   id: string;
   label: string;
   path: string;
   isDir?: boolean;
+  /** A single data file listed as a source: read in memory as one view, shut in to that file. */
+  file?: FileKind;
 };
 
 export type DuckDbRunner = (
@@ -112,7 +128,9 @@ export function parseSources(raw: string | undefined): DuckDbTarget[] {
         isDir = true;
       }
     } catch {}
-    targets.push({ id: cleanId, label: cleanId, path, isDir });
+    // A .parquet/.csv/.jsonl path is never a database file, so it is a file source.
+    const file = isDir || path === ":memory:" ? undefined : kindOf(path);
+    targets.push({ id: cleanId, label: cleanId, path, isDir, ...(file ? { file } : {}) });
   }
   return targets;
 }
@@ -172,9 +190,27 @@ export function directoryViewsSql(dirPath: string): string {
   }
 }
 
-/** What every in-memory run starts with: file access only under `dir` (none without one), then locked. */
-export function lockdownSql(dir: string | undefined): string {
-  const allowed = dir ? `SET allowed_directories = ['${join(dir, "/").replace(/'/g, "''")}'];\n` : "";
+/** The table function that reads data files of a kind. */
+export function readFn(kind: FileKind, arg: string): string {
+  return kind === "parquet" ? `read_parquet(${arg})` : kind === "csv" ? `read_csv(${arg})` : `read_json(${arg})`;
+}
+
+const sqlLit = (s: string) => `'${s.replace(/'/g, "''")}'`;
+
+/** A file source's one view, named after the file. */
+export const fileViewName = (path: string) => basename(path).replace(/\.[^.]+$/, "").toLowerCase().replace(/[^a-z0-9_]/g, "_") || "data";
+
+/**
+ * What every in-memory run starts with, then locked: file access only under `dir`, or only to the
+ * one file `file` (DuckDB's allowed_paths; checked against the real CLI that a sibling, even through
+ * read_text, is refused), or none.
+ */
+export function lockdownSql(dir: string | undefined, file?: string): string {
+  const allowed = dir
+    ? `SET allowed_directories = [${sqlLit(join(dir, "/"))}];\n`
+    : file
+      ? `SET allowed_paths = [${sqlLit(file)}];\n`
+      : "";
   return `${allowed}SET enable_external_access = false;
 SET autoinstall_known_extensions = false;
 SET autoload_known_extensions = false;
@@ -190,7 +226,7 @@ export type DuckDbData = {
   peek(t: string, table: string, n?: number): Promise<Rows>;
   find(t: string, text: string): Promise<Found[]>;
   /**
-   * One statement in a directory source, shut in as every in-memory run is, but without the
+   * One statement in a folder or file source, shut in as every in-memory run is, but without the
    * directory's views (the file viewer names its files itself, and one unreadable file elsewhere in
    * the directory mustn't break it).
    */
@@ -212,7 +248,7 @@ export function createDuckDbData(o: {
 
   const runQuery = async (target: DuckDbTarget, querySql: string, maxRows = MAX_ROWS, views = true): Promise<Rows> => {
     const t0 = now();
-    const isMemoryOrDir = target.path === ":memory:" || target.isDir;
+    const isMemoryOrDir = target.path === ":memory:" || target.isDir || !!target.file;
     // sqlOk keeps a query to one SELECT, but a SELECT can still read any file (read_text, read_csv),
     // call getenv() or autoload httpfs. So DuckDB itself is shut in (tested against the real CLI):
     // - a database file: -safe (no file access beyond it, no .shell) and -readonly;
@@ -222,7 +258,17 @@ export function createDuckDbData(o: {
     const args = isMemoryOrDir ? ["-json", ":memory:"] : ["-safe", "-readonly", "-json", target.path];
 
     let inputSql = querySql.trim();
-    if (isMemoryOrDir) {
+    if (target.file) {
+      // The real path, so a symlinked source still names the file DuckDB opens.
+      let real: string;
+      try {
+        real = realpathSync(target.path);
+      } catch {
+        throw new Error(`File not found: ${target.path}`);
+      }
+      const view = `CREATE OR REPLACE TEMPORARY VIEW "${fileViewName(target.path)}" AS SELECT * FROM ${readFn(target.file, sqlLit(real))};`;
+      inputSql = `${lockdownSql(undefined, real)}\n${views ? `${view}\n` : ""}${inputSql}`;
+    } else if (isMemoryOrDir) {
       const viewSql = target.isDir && views ? directoryViewsSql(target.path) : "";
       inputSql = `${lockdownSql(target.isDir ? target.path : undefined)}\n${viewSql ? `${viewSql}\n` : ""}${inputSql}`;
     }
@@ -261,7 +307,7 @@ export function createDuckDbData(o: {
     async scan(t: string, sql: string, maxRows = MAX_ROWS): Promise<Rows> {
       const target = targetMap.get(t);
       if (!target) throw new Error(`Unknown DuckDB source: ${t}`);
-      if (!target.isDir) throw new Error(`Not a directory source: ${t}`);
+      if (!target.isDir && !target.file) throw new Error(`Not a folder or file source: ${t}`);
       return runQuery(target, sql, maxRows, false);
     },
 

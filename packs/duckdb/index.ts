@@ -14,7 +14,7 @@ import {
   readDuckDb,
 } from "./data.ts";
 import { exportName, look, open, PAGE_SIZES, slice, toCsv } from "./files.ts";
-import { FILES_STYLES, filePage, filesHome, folderPage, notOpenPage, sliceParams } from "./filesview.ts";
+import { FILES_STYLES, filePage, filesHome, folderPage, notOpenPage, sliceParams, viewable } from "./filesview.ts";
 import { createDuckDbSchemas, type DuckDbSchemas, toAutocomplete } from "./schema.ts";
 import {
   type Asker,
@@ -98,7 +98,7 @@ export function createDuckDbPack(opts: CreateDuckDbPackOpts = {}): Pack & {
           key: "DUCKDB_SOURCES",
           label: "DuckDB sources",
           required: true,
-          help: "Comma-separated targets: name=/path/to/db.duckdb, directory of .parquet/.csv/.jsonl files, or :memory:",
+          help: "Comma-separated targets: name=/path/to/db.duckdb, a directory of .parquet/.csv/.jsonl files, a single .parquet/.csv/.jsonl file, or :memory:",
         },
         {
           key: "DUCKDB_EXECUTION",
@@ -242,9 +242,9 @@ export function createDuckDbPack(opts: CreateDuckDbPackOpts = {}): Pack & {
         if (!t) return ctx.page(c, { title: "Files", body: filesHome({ sources }) });
         const target = data.source(t);
         const opened = target ? open(target, f, c.req.query("all") === "1") : undefined;
-        if (!target || !target.isDir || !opened) {
+        if (!target || !viewable(target) || !opened) {
           c.status(404);
-          return ctx.page(c, { title: "Files", body: notOpenPage({ target: target?.isDir ? target : undefined, t, f, sources }) });
+          return ctx.page(c, { title: "Files", body: notOpenPage({ target: target && viewable(target) ? target : undefined, t, f, sources }) });
         }
         if (opened.type === "dir") {
           return ctx.page(c, { title: opened.rel || target.label, body: folderPage({ target, dir: opened }) });
@@ -255,7 +255,7 @@ export function createDuckDbPack(opts: CreateDuckDbPackOpts = {}): Pack & {
         const cols = c.req.queries("c")?.slice(0, 1000);
         const q = { cols, size, page, stats: c.req.query("stats") === "1", ...sliceParams((k) => c.req.query(k)) };
         const seen = await look(data, t, opened, q);
-        return ctx.page(c, { title: opened.rel.split("/").pop() || target.label, body: filePage({ target, file: opened, look: seen, q }) });
+        return ctx.page(c, { title: opened.rel.split("/").pop() || opened.abs.split("/").pop() || target.label, body: filePage({ target, file: opened, look: seen, q }) });
       });
 
       // The same slice as a download: a GET too (it only reads), the same path checks, capped rows.
@@ -275,7 +275,7 @@ export function createDuckDbPack(opts: CreateDuckDbPackOpts = {}): Pack & {
         const body = as === "csv" ? toCsv(out.columns, out.rows) : JSON.stringify(out.rows.map((r) => Object.fromEntries(out.columns.map((k) => [k, r[k] ?? null]))), null, 2);
         return c.body(body, 200, {
           "content-type": as === "csv" ? "text/csv; charset=utf-8" : "application/json; charset=utf-8",
-          "content-disposition": `attachment; filename="${exportName(opened.rel, opened.all, as)}"`,
+          "content-disposition": `attachment; filename="${exportName(opened.rel || opened.abs.split("/").pop() || "", opened.all, as)}"`,
           "x-content-type-options": "nosniff",
           "cache-control": "no-store",
           ...(out.capped ? { "x-dovre-capped": String(out.rows.length) } : {}),
