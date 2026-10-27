@@ -15,3 +15,4 @@ export { duckdbPack, duckdbCrate, createDuckDbPack } from "./packs/duckdb/index.
 export { jsonPack, createJsonPack } from "./packs/json/index.ts";
 export { httpPack, httpCrate, createHttpPack } from "./packs/http/index.ts";
 export { otelSinkPack, createOtelSinkPack } from "./packs/otel-sink/index.ts";
+export { avatarPack, createAvatarPack } from "./packs/avatar/index.ts";
