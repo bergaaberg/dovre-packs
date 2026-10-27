@@ -8,13 +8,32 @@ import { html } from "hono/html";
 import { safeUrl } from "dovre/pages/parts.ts";
 import { Empty, KeyValues, Notice, PageHeader, Panel, Pill, type Child, type Crumb, type Html } from "dovre/ui/kit.ts";
 import { MAX_SQL, type DuckDbTarget, type Row } from "./data.ts";
-import { DEFAULT_COLS, handoffSql, type Look, MAX_ENTRIES, type Opened, PAGE_SIZES, STATS_ROWS } from "./files.ts";
+import { DEFAULT_COLS, EXPORT_ROWS, FILTER_LABELS, FILTER_OPS, type Filter, handoffSql, type Look, MAX_ENTRIES, type Opened, PAGE_SIZES, type Slice, type Sort, STATS_ROWS } from "./files.ts";
 import { dbHref, queryForm } from "./view.ts";
 
-export type FileQuery = { cols?: string[]; size: number; page: number; stats?: boolean };
+export type FileQuery = { cols?: string[]; size: number; page: number; stats?: boolean } & Slice;
 
-/** /duckdb/files with these parameters (columns repeat as `c`). */
-export function filesHref(o: { t?: string; f?: string; all?: boolean; cols?: string[]; size?: number; page?: number; stats?: boolean }): string {
+type HrefOpts = { t?: string; f?: string; all?: boolean; cols?: string[]; size?: number; page?: number; stats?: boolean; filter?: Filter; sort?: Sort };
+
+/** /duckdb/files with these parameters (columns repeat as `c`; the filter is fc/fo/fv, the sort s/sd). */
+export function filesHref(o: HrefOpts): string {
+  return safeUrl(`/duckdb/files${query(o)}`);
+}
+
+/** /duckdb/files/export: the same slice as a download. */
+export const exportHref = (o: HrefOpts, as: "csv" | "json") => safeUrl(`/duckdb/files/export${query({ ...o, page: 0, stats: false }, as)}`);
+
+/** Reads a filter and sort back from a request's parameters (checked against the columns later). */
+export function sliceParams(get: (k: string) => string | undefined): Slice {
+  const fc = get("fc") ?? "", fo = get("fo") ?? "", s = get("s") ?? "";
+  const op = (FILTER_OPS as readonly string[]).includes(fo) ? (fo as Filter["op"]) : undefined;
+  return {
+    filter: fc && op ? { col: fc.slice(0, 1000), op, val: (get("fv") ?? "").slice(0, 1000) } : undefined,
+    sort: s ? { col: s.slice(0, 1000), desc: get("sd") === "1" } : undefined,
+  };
+}
+
+function query(o: HrefOpts, as?: string): string {
   const p = new URLSearchParams();
   if (o.t) p.set("t", o.t);
   if (o.f) p.set("f", o.f);
@@ -23,8 +42,18 @@ export function filesHref(o: { t?: string; f?: string; all?: boolean; cols?: str
   if (o.size && o.size !== 50) p.set("n", String(o.size));
   if (o.page) p.set("p", String(o.page));
   if (o.stats) p.set("stats", "1");
+  if (o.filter) {
+    p.set("fc", o.filter.col);
+    p.set("fo", o.filter.op);
+    if (o.filter.op !== "null" && o.filter.op !== "notnull") p.set("fv", o.filter.val);
+  }
+  if (o.sort) {
+    p.set("s", o.sort.col);
+    if (o.sort.desc) p.set("sd", "1");
+  }
+  if (as) p.set("as", as);
   const qs = p.toString();
-  return safeUrl(`/duckdb/files${qs ? `?${qs}` : ""}`);
+  return qs ? `?${qs}` : "";
 }
 
 export const bytes = (n: number | undefined) => {
@@ -133,7 +162,19 @@ function picker(o: { target: DuckDbTarget; file: Extract<Opened, { type: "file" 
     (c) => html`<label class="check"><input type="checkbox" name="c" value="${c.name}"${picked.has(c.name) ? html` checked` : ""}> ${c.name}</label>`,
   )}</fieldset><label class="field"><span class="label">Rows per page</span><select name="n">${PAGE_SIZES.map(
     (n) => html`<option value="${n}"${n === o.q.size ? html` selected` : ""}>${n}</option>`,
-  )}</select></label><div class="buttons"><button type="submit">Show</button></div></form>`;
+  )}</select></label>${sliceFields(o.look)}<div class="buttons"><button type="submit">Show</button></div></form>`;
+}
+
+/** Where (one column, an operator, a value) and order by. */
+function sliceFields(look: Look): Child {
+  const f = look.slice.filter, so = look.slice.sort;
+  const cols = look.columns.slice(0, 1000);
+  const opts = (sel: string | undefined) => cols.map((c) => html`<option value="${c.name}"${c.name === sel ? html` selected` : ""}>${c.name}</option>`);
+  return html`<div class="fields pq-slice"><label class="field"><span class="label">Where</span><select name="fc"><option value="">(no filter)</option>${opts(f?.col)}</select></label>
+<label class="field"><span class="label">Is</span><select name="fo">${FILTER_OPS.map((op) => html`<option value="${op}"${op === (f?.op ?? "eq") ? html` selected` : ""}>${FILTER_LABELS[op]}</option>`)}</select></label>
+<label class="field"><span class="label">Value</span><input type="text" name="fv" value="${f?.val ?? ""}" spellcheck="false" autocomplete="off"></label>
+<label class="field"><span class="label">Sort by</span><select name="s"><option value="">(file order)</option>${opts(so?.col)}</select></label>
+<div class="field"><label class="check"><input type="checkbox" name="sd" value="1"${so?.desc ? html` checked` : ""}> Descending</label></div></div>`;
 }
 
 function rowsSheet(cols: string[], rows: Row[]): Child {
@@ -149,8 +190,8 @@ const nullCell = (v: string | number | undefined) => (v === undefined || v === "
 export function filePage(o: { target: DuckDbTarget; file: Extract<Opened, { type: "file" }>; look: Look; q: FileQuery }): Html {
   const { target, file, look, q } = o;
   const name = file.all ? `${file.rel ? file.rel.split("/").pop() : target.label}/*.parquet` : file.rel.split("/").pop()!;
-  const link = (over: Partial<FileQuery>) =>
-    filesHref({ t: target.id, f: file.rel, all: file.all, cols: q.cols, size: q.size, page: q.page, stats: q.stats, ...over });
+  const here = { t: target.id, f: file.rel, all: file.all, cols: q.cols, size: q.size, page: q.page, stats: q.stats, ...look.slice };
+  const link = (over: Partial<FileQuery>) => filesHref({ ...here, ...over });
 
   const facts: [Child, Child][] = [
     ["Kind", file.kind === "parquet" ? "Parquet" : file.kind === "csv" ? "CSV" : "JSON lines"],
@@ -206,7 +247,12 @@ export function filePage(o: { target: DuckDbTarget; file: Extract<Opened, { type
   const from = q.page * q.size;
   const paging = html`<span>${look.page.rows.length ? `Rows ${count(from + 1)}–${count(from + look.page.rows.length)}` : ""}${
     q.page > 0 ? html` · <a href="${link({ page: q.page - 1 })}">Previous</a>` : ""
-  }${look.page.more ? html` · <a href="${link({ page: q.page + 1 })}">Next</a>` : ""}</span>`;
+  }${look.page.more ? html` · <a href="${link({ page: q.page + 1 })}">Next</a>` : ""}${
+    look.slice.filter && look.matching !== undefined ? ` · ${count(look.matching)} match` : ""
+  }</span>`;
+  const exports = look.page.columns.length
+    ? html`<p class="t2 sm">Download ${look.slice.filter || look.slice.sort ? "this filtered, sorted slice" : "these columns"} (the first ${count(EXPORT_ROWS)} rows at most): <a href="${exportHref(here, "csv")}" download>CSV</a> · <a href="${exportHref(here, "json")}" download>JSON</a></p>`
+    : "";
 
   return html`${PageHeader({
     title: name,
@@ -219,7 +265,7 @@ ${Panel({ title: "File", meta: Pill({ children: target.label }), children: KeyVa
 ${Panel({ title: "Schema", meta: String(look.columns.length), flush: true, children: schema })}
 ${leaves}
 ${stats}
-${look.columns.length ? Panel({ title: "Rows", meta: paging, children: html`${picker(o)}${rowsSheet(look.page.columns, look.page.rows)}` }) : ""}
+${look.columns.length ? Panel({ title: "Rows", meta: paging, children: html`${picker(o)}${rowsSheet(look.page.columns, look.page.rows)}${exports}` }) : ""}
 ${Panel({
   title: "Open in DuckDB",
   children: html`<p class="t2">For filters, joins and sums: the same file in a query on ${target.label}.</p>${queryForm(target.id, handoffSql(file, MAX_SQL))}`,
@@ -247,6 +293,7 @@ export const FILES_STYLES = `
 fieldset.pq-cols { display: flex; flex-wrap: wrap; gap: .3rem 1rem; border: 0; margin: 0 0 .6rem; padding: 0; max-height: 12rem; overflow: auto; }
 fieldset.pq-cols legend { padding: 0; margin-bottom: .3rem; }
 fieldset.pq-cols .check { overflow-wrap: anywhere; }
+.pq-slice select { max-width: 16rem; }
 details.nest > summary { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 details.nest > pre { white-space: pre-wrap; max-height: 20rem; overflow: auto; margin: .3rem 0 0; }
 `;

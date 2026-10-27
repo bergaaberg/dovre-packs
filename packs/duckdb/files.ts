@@ -145,8 +145,94 @@ export const columnMetaSql = (files: string[]) => {
   return `SELECT path_in_schema AS col, any_value(type) AS ty, string_agg(DISTINCT compression, ', ') AS codec, sum(total_compressed_size) AS packed, sum(total_uncompressed_size) AS unpacked, CASE WHEN count(stats_null_count) = count(*) THEN sum(stats_null_count) END AS nulls, ${extreme("min", "stats_min_value")} AS lo, ${extreme("max", "stats_max_value")} AS hi, CASE WHEN count(*) = 1 THEN any_value(stats_distinct_count) END AS distinct_count FROM parquet_metadata(${filesArg(files)}) GROUP BY path_in_schema ORDER BY min(column_id);`;
 };
 
-export const previewSql = (from: string, cols: string[], limit: number, offset: number) =>
-  `SELECT ${cols.map(ident).join(", ")} FROM ${from} LIMIT ${limit} OFFSET ${offset};`;
+// ── Filter, sort, export ─────────────────────────────────────────────────────
+
+export const FILTER_OPS = ["eq", "ne", "lt", "le", "gt", "ge", "contains", "null", "notnull"] as const;
+export type FilterOp = (typeof FILTER_OPS)[number];
+export const FILTER_LABELS: Record<FilterOp, string> = {
+  eq: "=",
+  ne: "≠",
+  lt: "<",
+  le: "≤",
+  gt: ">",
+  ge: "≥",
+  contains: "contains",
+  null: "is null",
+  notnull: "is not null",
+};
+/** Filter or sort on one of the file's own columns; the value only ever reaches SQL as a literal. */
+export type Filter = { col: string; op: FilterOp; val: string };
+export type Sort = { col: string; desc: boolean };
+export type Slice = { filter?: Filter; sort?: Sort };
+
+/** Rows an export holds at most. */
+export const EXPORT_ROWS = 10_000;
+
+const CMP: Partial<Record<FilterOp, string>> = { eq: "=", ne: "<>", lt: "<", le: "<=", gt: ">", ge: ">=" };
+
+/** ` WHERE …` for a filter, or "". A compared value is a string literal DuckDB casts to the column's type. */
+export function whereSql(f: Filter | undefined): string {
+  if (!f) return "";
+  const c = ident(f.col);
+  if (f.op === "null") return ` WHERE ${c} IS NULL`;
+  if (f.op === "notnull") return ` WHERE ${c} IS NOT NULL`;
+  if (f.op === "contains") return ` WHERE contains(lower(CAST(${c} AS VARCHAR)), lower(${lit(f.val)}))`;
+  return ` WHERE ${c} ${CMP[f.op]} ${lit(f.val)}`;
+}
+
+export const orderSql = (o: Sort | undefined) => (o ? ` ORDER BY ${ident(o.col)} ${o.desc ? "DESC" : "ASC"} NULLS LAST` : "");
+
+/** Keeps only a filter and sort on known columns (and a value where the operator needs one). */
+export function sliceOf(known: Set<string>, s: Slice): Slice {
+  const f = s.filter;
+  const filter = f && known.has(f.col) && FILTER_OPS.includes(f.op) && (f.op === "null" || f.op === "notnull" || f.val !== "") ? f : undefined;
+  const sort = s.sort && known.has(s.sort.col) ? s.sort : undefined;
+  return { filter, sort };
+}
+
+export const previewSql = (from: string, cols: string[], limit: number, offset: number, s: Slice = {}) =>
+  `SELECT ${cols.map(ident).join(", ")} FROM ${from}${whereSql(s.filter)}${orderSql(s.sort)} LIMIT ${limit} OFFSET ${offset};`;
+
+export const matchingSql = (from: string, f: Filter) => `SELECT count(*) AS n FROM ${from}${whereSql(f)};`;
+
+/** A value as text for a CSV cell: nested values as JSON, a text starting like a formula defused. */
+function csvValue(v: unknown): string {
+  if (v === null || v === undefined) return "";
+  if (typeof v === "object") return JSON.stringify(v);
+  const s = String(v);
+  return typeof v === "string" && /^[=+\-@\t\r]/.test(s) ? `'${s}` : s;
+}
+const csvCell = (s: string) => (/[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s);
+
+export function toCsv(cols: string[], rows: Row[]): string {
+  const lines = [cols.map(csvCell).join(",")];
+  for (const r of rows) lines.push(cols.map((c) => csvCell(csvValue(r[c]))).join(","));
+  return lines.join("\r\n") + "\r\n";
+}
+
+/** A download's name: the file's own name, cut to safe characters. */
+export function exportName(rel: string, all: boolean, as: "csv" | "json"): string {
+  const base = (all ? `${rel.split("/").pop() || "dataset"}-all` : (rel.split("/").pop() ?? "data").replace(/\.[^.]+$/, "")).replace(/[^A-Za-z0-9._-]+/g, "_").slice(0, 80);
+  return `${base || "data"}-slice.${as}`;
+}
+
+/** The picked columns, filtered and sorted, as many rows as an export holds. */
+export async function slice(
+  data: DuckDbData,
+  t: string,
+  o: Extract<Opened, { type: "file" }>,
+  q: { cols?: string[] } & Slice,
+): Promise<{ columns: string[]; rows: Row[]; capped: boolean }> {
+  const from = fromSql(o.kind, o.files);
+  const described = await data.scan(t, describeSql(from), 100_000);
+  const all = columnsOf(described.rows, []).map((c) => c.name);
+  const known = new Set(all);
+  const wanted = (q.cols ?? []).filter((c) => known.has(c));
+  const cols = wanted.length ? [...new Set(wanted)] : all.slice(0, DEFAULT_COLS);
+  if (!cols.length) return { columns: [], rows: [], capped: false };
+  const r = await data.scan(t, previewSql(from, cols, EXPORT_ROWS + 1, 0, sliceOf(known, q)), EXPORT_ROWS + 1);
+  return { columns: cols, rows: r.rows.slice(0, EXPORT_ROWS), capped: r.rows.length > EXPORT_ROWS };
+}
 
 export const summarizeSql = (from: string, cols: string[], cap = STATS_ROWS) =>
   `SUMMARIZE SELECT ${cols.map(ident).join(", ")} FROM ${from} LIMIT ${cap};`;
@@ -246,6 +332,9 @@ export type Look = {
   picked: string[];
   page: { rows: Row[]; columns: string[]; more: boolean; ms: number };
   stats?: Summary[];
+  /** The filter and sort applied (only on the file's own columns), and how many rows match the filter. */
+  slice: Slice;
+  matching?: number;
   /** What went wrong reading it (the schema or preview); metadata failing just leaves its panel out. */
   error?: string;
   statsError?: string;
@@ -261,7 +350,7 @@ export async function look(
   data: DuckDbData,
   t: string,
   o: Extract<Opened, { type: "file" }>,
-  q: { cols?: string[]; size: number; page: number; stats?: boolean },
+  q: { cols?: string[]; size: number; page: number; stats?: boolean } & Slice,
 ): Promise<Look> {
   const from = fromSql(o.kind, o.files);
   const empty = { rows: [], columns: [], more: false, ms: 0 };
@@ -273,25 +362,27 @@ export async function look(
     ]);
     columns = columnsOf(described.rows, schema?.rows ?? []);
   } catch (e) {
-    return { columns: [], picked: [], page: empty, error: message(e) };
+    return { columns: [], picked: [], page: empty, slice: {}, error: message(e) };
   }
 
   const known = new Set(columns.map((c) => c.name));
   const wanted = (q.cols ?? []).filter((c) => known.has(c));
   const picked = wanted.length ? [...new Set(wanted)] : columns.slice(0, DEFAULT_COLS).map((c) => c.name);
+  const sl = sliceOf(known, q);
 
-  const [facts, leaves, page, stats] = await Promise.all([
+  const [facts, leaves, page, stats, matching] = await Promise.all([
     o.kind === "parquet" ? data.scan(t, fileMetaSql(o.files), MAX_FILES).then((r) => factsOf(r.rows, o.files.length)).catch(() => undefined) : undefined,
     o.kind === "parquet" ? data.scan(t, columnMetaSql(o.files), 100_000).then((r) => leavesOf(r.rows)).catch(() => undefined) : undefined,
     picked.length
       ? data
-          .scan(t, previewSql(from, picked, q.size + 1, q.page * q.size), q.size + 1)
+          .scan(t, previewSql(from, picked, q.size + 1, q.page * q.size, sl), q.size + 1)
           .then((r) => ({ rows: r.rows.slice(0, q.size), columns: picked, more: r.rows.length > q.size, ms: r.ms }))
           .catch((e) => ({ ...empty, error: message(e) }))
       : { ...empty },
     q.stats && picked.length
       ? data.scan(t, summarizeSql(from, picked), picked.length).then((r) => ({ list: summariesOf(r.rows) })).catch((e) => ({ error: message(e) }))
       : undefined,
+    sl.filter ? data.scan(t, matchingSql(from, sl.filter), 1).then((r) => num(r.rows[0]?.n)).catch(() => undefined) : undefined,
   ]);
 
   return {
@@ -302,6 +393,8 @@ export async function look(
     page: { rows: page.rows, columns: page.columns, more: page.more, ms: page.ms },
     error: "error" in page ? page.error : undefined,
     stats: stats && "list" in stats ? stats.list : undefined,
+    slice: sl,
+    matching,
     statsError: stats && "error" in stats ? stats.error : undefined,
   };
 }
