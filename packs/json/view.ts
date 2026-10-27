@@ -17,12 +17,13 @@ import {
   relative,
 } from "./tools.ts";
 
-export type Tool = "format" | "query" | "diff" | "decode";
+export type Tool = "format" | "query" | "diff" | "convert" | "decode";
 
 const TOOLS: { id: Tool; label: string }[] = [
   { id: "format", label: "Format & tree" },
   { id: "query", label: "Query" },
   { id: "diff", label: "Diff" },
+  { id: "convert", label: "Convert" },
   { id: "decode", label: "Decode" },
 ];
 
@@ -181,6 +182,43 @@ export function diffPage(s: DiffState): Html {
     });
   }
   return html`${header("diff", "Compare two documents, key order ignored.")}${Panel({ children: form })}${out}`;
+}
+
+// ── Convert ──────────────────────────────────────────────────────────────────
+
+export type ConvertOp = "yaml" | "json" | "ts" | "schema";
+export const CONVERT_OPS: [ConvertOp, string][] = [
+  ["yaml", "JSON → YAML"],
+  ["json", "YAML → JSON"],
+  ["ts", "JSON → TypeScript"],
+  ["schema", "JSON → JSON Schema"],
+];
+
+export type ConvertState = {
+  input: string;
+  op?: ConvertOp;
+  root?: string;
+  result?: { out: string } | { json: Extract<Parsed, { ok: false }> } | { yaml: { error: string; line: number; column: number } };
+};
+
+export function convertPage(s: ConvertState): Html {
+  const op = s.op ?? "yaml";
+  const form = html`<form method="post" action="/json/convert" class="query" data-ctrl-enter>
+${textarea("input", "JSON or YAML", s.input, { placeholder: '{"paste": "your JSON here"}  or  paste: your YAML here', min: 10 })}
+<div class="fields"><label class="field"><span class="label">Root type name</span><input type="text" name="root" value="${s.root ?? "Root"}" maxlength="60" spellcheck="false" autocomplete="off"><span class="hint">For TypeScript.</span></label></div>
+<div class="buttons">${CONVERT_OPS.map(([v, l]) => html`<button type="submit" name="op" value="${v}"${v === op ? ' class="primary"' : ""}>${l}</button>`)}</div>
+<p class="t3 sm">Types and schemas are guessed from this one sample: a key missing from some items is optional, and items of one array are merged.</p>${PRIVATE}</form>`;
+  const r = s.result;
+  const label = CONVERT_OPS.find(([v]) => v === op)?.[1] ?? "Result";
+  let out: Html | "" = "";
+  if (r && "out" in r) out = Panel({ title: label, children: html`<pre class="code" data-copy>${r.out}</pre>` });
+  else if (r && "json" in r) out = Panel({ title: label, children: parseError(s.input, r.json) });
+  else if (r && "yaml" in r)
+    out = Panel({
+      title: label,
+      children: html`${Notice({ tone: "bad", children: html`<strong>Input isn't valid YAML</strong>: ${r.yaml.error} — line ${r.yaml.line}, column ${r.yaml.column}.` })}<pre class="code">${excerpt(s.input, r.yaml.line, r.yaml.column)}</pre>`,
+    });
+  return html`${header("convert", "JSON to YAML and back; types and a schema from a sample.")}${Panel({ children: form })}${out}`;
 }
 
 // ── Decode ───────────────────────────────────────────────────────────────────
