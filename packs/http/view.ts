@@ -13,6 +13,7 @@ import { compare } from "./compare.ts";
 import { parse } from "../json/tools.ts";
 import { changesList, tree } from "../json/view.ts";
 import { type Imported, MAX_SPEC } from "./openapi.ts";
+import { agentHref, debugPrompt, failing, writePrompt } from "./agent.ts";
 
 /** Where the editor's request is from: the environment, the repo and file it's saved to, and the file it was opened from (`opened`, its request `n`, the file's `hash` then). */
 export type Where = { env: string; repo: string; file: string; opened: string; n: string; hash: string };
@@ -121,7 +122,8 @@ function savedPanel(o: { repos: string[]; repo: string; files: FileInfo[] | unde
                 html`<li class="item"><a href="${homeHref({ repo: o.repo, file: f.name, n: String(i), env: o.env })}"><strong>${q.method}</strong> ${q.name || q.url}</a>${q.name ? html` <span class="t3 mono">${q.url}</span>` : ""}</li>`,
             )}</ul>`,
         )}`;
-  return Panel({ title: "Saved in repos", children: html`${pick}${list}` });
+  const agent = o.repo ? html`<div class="buttons"><a class="btn sm ghost" href="${agentHref(o.repo, writePrompt())}" title="Start an agent session that writes this repo's endpoints as .http requests">Write requests with an agent</a></div>` : "";
+  return Panel({ title: "Saved in repos", children: html`${pick}${list}${agent}` });
 }
 
 function historyPanel(list: Sent[]): Html {
@@ -162,9 +164,10 @@ export function bodyText(body: string, ct: string, view: string): { text: string
 
 /** The response, pretty / as a tree / raw, and a link to compare it with the send before (`prev`). */
 export function responseRegion(s: Sent, view: string, prev?: Sent): Html {
+  const debug = failing(s) ? html`<div class="buttons"><a class="btn sm ghost" href="${agentHref(s.from.repo, debugPrompt(s))}" title="Start an agent session with this request and its answer: you read the prompt first">Debug with an agent</a></div>` : "";
   const inner = (): Child => {
     if (s.state === "sending") return html`<p class="notes" data-pending><span class="spinner"></span> Sending ${s.out.method} <code>${s.out.url}</code>…</p>`;
-    if (s.state === "failed" || !s.resp) return Notice({ tone: "bad", children: html`Nothing came back from <code>${s.out.url}</code>: ${s.error ?? "it failed"}.` });
+    if (s.state === "failed" || !s.resp) return html`${Notice({ tone: "bad", children: html`Nothing came back from <code>${s.out.url}</code>: ${s.error ?? "it failed"}.` })}${debug}`;
     const r = s.resp;
     const ct = r.headers.find(([k]) => k === "content-type")?.[1] ?? "";
     const b = bodyText(r.body, ct, view);
@@ -182,6 +185,7 @@ export function responseRegion(s: Sent, view: string, prev?: Sent): Html {
       ["Size", `${sizeText(r.size)}${r.truncated ? " (cut off: only the first part was read)" : ""}`],
       ...(location ? ([["Redirects to", html`<code>${location}</code> <span class="t3">(not followed)</span>`]] as [Child, Child][]) : []),
     ])}
+${debug}
 ${prev?.resp ? html`<p class="notes">Sent before at ${clock(prev.at)}${prev.resp.status !== r.status ? html` (then ${prev.resp.status})` : ""}: <a href="${sentHref(s.id, "diff")}">compare with it</a></p>` : ""}
 <h3 class="sub-h">Body${r.binary || !r.body ? "" : views(parsed?.ok ? "tree" : view === "raw" ? "raw" : "pretty")}</h3>
 ${r.binary ? html`<p class="notes">${sizeText(r.size)} of ${ct || "binary data"}: not shown.</p>` : !r.body ? html`<p class="notes">No body.</p>` : parsed?.ok ? tree(parsed.value) : html`<pre class="output" data-copy>${b.text}</pre>`}
