@@ -454,3 +454,47 @@ test("compare: only an earlier send of the same method and URL that came back; t
   const h = compare(resp({ headers: [["Set-Cookie", "a"], ["set-cookie", "b"]] }), resp({ headers: [["set-cookie", "a, b"]] }));
   assert.deepEqual(h.headers, [], "repeated headers joined, names case-insensitive");
 });
+
+test("OpenAPI import: preview and open send nothing; save adds every operation to a repo's file, logged; hostile specs inert", async () => {
+  const m = mounted();
+  const spec = JSON.stringify({ openapi: "3.0.0", info: { title: `Shop ${H}` }, servers: [{ url: JS_URL }], paths: { "/items/{id}": { get: { operationId: `get${H}` }, post: { summary: "add", requestBody: { content: { "application/json": { example: { a: 1 } } } } } } } });
+  assert.equal((await m.post("/http/openapi", { spec }, { origin: ORIGIN, "sec-fetch-site": "cross-site" })).status, 404);
+  assert.equal((await m.post("/http/openapi/save", { spec, repo: "shop", file: "shop.http" }, { origin: "https://evil.example" })).status, 403);
+
+  const bad = await m.post("/http/openapi", { spec: `{"a": "${"x"}"}` });
+  assert.equal(bad.status, 400);
+  assert.match(await bad.text(), /isn&#39;t an OpenAPI spec|isn't an OpenAPI spec/);
+
+  const prev = await m.post("/http/openapi", { spec });
+  assert.equal(prev.status, 200);
+  const page = await prev.text();
+  inert(page);
+  assert.match(page, /2 requests from an OpenAPI spec/);
+  assert.match(page, /\{\{baseUrl\}\}\/items\/\{\{id\}\}/);
+  assert.match(page, /value="shop-script-alert-1-script-img-src-x-onerror-alert-1.http"/);
+
+  const opened = await (await m.post("/http/open", send({ method: "POST", url: "{{baseUrl}}/items", mode: "json", body: '{"a":1}', name: "add" }))).text();
+  assert.match(opened, /Opened: nothing was sent/);
+  assert.match(opened, /value="\{\{baseUrl\}\}\/items"/);
+
+  const refused = await m.post("/http/openapi/save", { spec, repo: "shop", file: "../x.http" });
+  assert.equal(refused.status, 400);
+  assert.match(await refused.text(), /plain name ending in .http/);
+  assert.equal((await m.post("/http/openapi/save", { spec, repo: "nope", file: "a.http" })).status, 400);
+
+  mkdirSync(join(m.code, "shop", ".http"), { recursive: true });
+  writeFileSync(join(m.code, "shop", ".http", "api.http"), "### mine\nGET https://api.example.com/mine\n");
+  const saved = await m.post("/http/openapi/save", { spec, repo: "shop", file: "api.http" });
+  assert.equal(saved.status, 303);
+  assert.equal(saved.headers.get("location"), "/http?repo=shop&file=api.http&n=1&saved=1");
+  const text = readFileSync(join(m.code, "shop", ".http", "api.http"), "utf8");
+  assert.ok(text.startsWith("### mine\nGET https://api.example.com/mine\n"), "what was there is kept");
+  assert.match(text, /### add\nPOST \{\{baseUrl\}\}\/items\/\{\{id\}\}\nContent-Type: application\/json\n\n\{\n {2}"a": 1\n\}/);
+
+  assert.equal((await m.post("/http/openapi/save", { spec, repo: "shop", file: "new.http" })).status, 303);
+  assert.match(readFileSync(join(m.code, "shop", ".http", "new.http"), "utf8"), /^# Shop .*: imported from an OpenAPI spec\. Its server: javascript:alert\(1\)\n/);
+  assert.equal(m.calls.length, 0, "nothing was sent");
+  const log = (await m.actions()).filter((a) => a.kind === "http.save");
+  assert.deepEqual(log.map((a) => [a.target, a.ok]), [["shop/.http/api.http", 1], ["shop/.http/new.http", 1]]);
+  assert.match(log[0]!.detail!, /^added · 2 from OpenAPI/);
+});

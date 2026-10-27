@@ -12,6 +12,7 @@ import type { Sent } from "./send.ts";
 import { compare } from "./compare.ts";
 import { parse } from "../json/tools.ts";
 import { changesList, tree } from "../json/view.ts";
+import { type Imported, MAX_SPEC } from "./openapi.ts";
 
 /** Where the editor's request is from: the environment, the repo and file it's saved to, and the file it was opened from (`opened`, its request `n`, the file's `hash` then). */
 export type Where = { env: string; repo: string; file: string; opened: string; n: string; hash: string };
@@ -79,6 +80,34 @@ function importPanel(curl = ""): Html {
   });
 }
 
+function openapiPanel(spec = ""): Html {
+  return Panel({
+    title: "Import an OpenAPI spec",
+    children: html`<form method="post" action="/http/openapi"><label class="field"><textarea name="spec" rows="3" maxlength="${MAX_SPEC}" spellcheck="false" class="mono" aria-label="OpenAPI spec" placeholder="openapi: 3.0.3&#10;paths:&#10;  /items: …">${spec}</textarea><span class="hint">OpenAPI 3 or Swagger 2, JSON or YAML: a request per operation. Read here, nothing is fetched or sent.</span></label><div class="buttons"><button type="submit">Preview</button></div></form>`,
+  });
+}
+
+/** An imported spec's requests: open one in the editor, or save them all to a repo's .http file. */
+export function openapiPage(o: { got: Extract<Imported, { ok: true }>; spec: string; repos: string[]; repo: string; file: string; problem?: string }): Html {
+  const g = o.got;
+  return html`${PageHeader({ title: g.title, sub: `${g.reqs.length} request${g.reqs.length === 1 ? "" : "s"} from an OpenAPI spec, nothing sent`, crumbs })}
+${o.problem ? Notice({ tone: "warn", children: o.problem }) : ""}
+${Notice({ tone: "neutral", children: html`Each URL starts with <code>{{baseUrl}}</code>: set it in an environment${g.server ? html` (the spec's server is <code>${g.server}</code>)` : ""}. {{Placeholders}} for parameters and auth stay to fill in.${g.notes.length ? ` ${g.notes.join(" ")}` : ""}` })}
+${Panel({
+  title: "Save them all",
+  children: html`<form method="post" action="/http/openapi/save"><input type="hidden" name="spec" value="${o.spec}"><div class="fields"><label class="field"><span class="label">Repo</span><select name="repo"><option value="">Pick a repo</option>${options(o.repos, o.repo)}</select></label>
+<label class="field"><span class="label">File</span><input name="file" value="${o.file}" maxlength="85" spellcheck="false" placeholder="api.http"></label></div>
+<div class="buttons"><button type="submit" class="primary">Save</button></div><p class="notes">A new file in <code>.http/</code>, or added to the end of one that's there (nothing in it changes).</p></form>`,
+})}
+${Panel({
+  title: "Requests",
+  children: html`<ul class="list">${g.reqs.map(
+    (r) =>
+      html`<li class="item"><form method="post" action="/http/open" class="inline">${Object.entries(formFields(r, noWhere())).map(([k, v]) => html`<input type="hidden" name="${k}" value="${v}">`)}<button type="submit">Open</button></form> <strong>${r.method}</strong> ${r.name} <span class="t3 mono">${r.url}</span></li>`,
+  )}</ul>`,
+})}`;
+}
+
 function savedPanel(o: { repos: string[]; repo: string; files: FileInfo[] | undefined; env: string }): Html {
   const pick = html`<form method="get" action="/http" class="fields"><label class="field"><span class="label">Repo</span><select name="repo">${o.repos.length ? "" : html`<option value="">No checkouts under CODE_DIR</option>`}${options(o.repos, o.repo)}</select></label>${o.env ? html`<input type="hidden" name="env" value="${o.env}">` : ""}<div class="buttons"><button type="submit">Open</button></div></form>`;
   const list = !o.repo
@@ -108,7 +137,7 @@ function historyPanel(list: Sent[]): Html {
   });
 }
 
-export type HomeOpts = EditorOpts & { files?: FileInfo[]; history: Sent[]; flash?: { tone: Tone; text: Child }; curl?: string; curlOut?: string };
+export type HomeOpts = EditorOpts & { files?: FileInfo[]; history: Sent[]; flash?: { tone: Tone; text: Child }; curl?: string; curlOut?: string; spec?: string };
 
 export function homePage(o: HomeOpts): Html {
   return html`${PageHeader({ title: "HTTP client", sub: "Requests from this machine, saved as .http files in your repos", crumbs })}
@@ -116,7 +145,7 @@ ${o.flash ? Notice({ tone: o.flash.tone, children: o.flash.text }) : ""}
 ${o.curlOut !== undefined ? Panel({ title: "As curl", children: html`<pre class="output" data-copy>${o.curlOut}</pre><p class="notes">Secrets stay shell variables ($NAME): set them in your shell to run it.</p>` }) : ""}
 ${editor(o)}
 <div class="grid-2">${savedPanel({ repos: o.repos, repo: o.where.repo, files: o.files, env: o.where.env })}${historyPanel(o.history)}</div>
-${importPanel(o.curl)}`;
+<div class="grid-2">${importPanel(o.curl)}${openapiPanel(o.spec)}</div>`;
 }
 
 /** A body for reading: JSON pretty-printed (unless asked raw), anything else as the text it is. */
