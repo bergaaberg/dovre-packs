@@ -121,14 +121,14 @@ ${
 ${Panel({
   title: "Configured Sources",
   meta: String(o.sources.length),
-  actions: o.sources.some((s) => s.isDir) ? html`<a href="/duckdb/files">Open a file</a>` : undefined,
+  actions: o.sources.some((s) => s.isDir || s.file) ? html`<a href="/duckdb/files">Open a file</a>` : undefined,
   flush: true,
   children: o.sources.length
     ? tgrid(
         o.sources.map((s) => ({
           href: dbHref(s.id),
           name: s.label,
-          n: s.path === ":memory:" ? ":memory:" : s.isDir ? "directory" : "duckdb",
+          n: s.path === ":memory:" ? ":memory:" : s.isDir ? "directory" : s.file ? `${s.file} file` : "duckdb",
         }))
       )
     : Empty({ title: "No sources configured" }),
@@ -173,7 +173,11 @@ export function duckdbSourcePage(o: {
     title: o.target.label,
     crumbs: crumbs(),
     sub: html`Source: <code>${o.target.path}</code> · Read-only.${
-      o.target.isDir ? html` <a href="${safeUrl(`/duckdb/files?t=${encodeURIComponent(o.target.id)}`)}">Browse its files</a>` : ""
+      o.target.isDir
+        ? html` <a href="${safeUrl(`/duckdb/files?t=${encodeURIComponent(o.target.id)}`)}">Browse its files</a>`
+        : o.target.file
+          ? html` <a href="${safeUrl(`/duckdb/files?t=${encodeURIComponent(o.target.id)}`)}">Open in the file viewer</a>`
+          : ""
     }`,
   })}
 <div data-live id="duckdb-${o.target.id}">
