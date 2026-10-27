@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@bergaaberg/peak':
+        specifier: github:bergaaberg/peak#v0.1.0
+        version: https://codeload.github.com/bergaaberg/peak/tar.gz/7cc934b1125f8465725b6d59c4816074e65cc781
       dovre:
         specifier: link:../dovre
         version: link:../dovre
@@ -26,6 +29,12 @@ importers:
         version: 7.0.2
 
 packages:
+
+  '@bergaaberg/peak@https://codeload.github.com/bergaaberg/peak/tar.gz/7cc934b1125f8465725b6d59c4816074e65cc781':
+    resolution: {tarball: https://codeload.github.com/bergaaberg/peak/tar.gz/7cc934b1125f8465725b6d59c4816074e65cc781}
+    version: 0.1.0
+    engines: {node: '>=22'}
+    hasBin: true
 
   '@types/node@24.19.2':
     resolution: {integrity: sha512-93d49wCWJkCyN87MxLpNN6KXPCwFw7bVUg79mGUV1OS40JGWwVCr8n61DXCSqz7CV6/VfPkb7xec7uP2M+QHWQ==}
@@ -168,6 +177,10 @@ packages:
     hasBin: true
 
 snapshots:
+
+  '@bergaaberg/peak@https://codeload.github.com/bergaaberg/peak/tar.gz/7cc934b1125f8465725b6d59c4816074e65cc781':
+    dependencies:
+      yaml: 2.9.1
 
   '@types/node@24.19.2':
     dependencies:
