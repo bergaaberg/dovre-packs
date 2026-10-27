@@ -9,6 +9,9 @@ import { type Child, Confirm, Empty, KeyValues, Notice, PageHeader, Panel, Pill,
 import { type FileInfo, FILE_RE } from "./files.ts";
 import { headersText, MAX_BODY_IN, MAX_HEADERS, MAX_NAME, MAX_URL, METHODS, MODES, type Req, type Secret } from "./model.ts";
 import type { Sent } from "./send.ts";
+import { compare } from "./compare.ts";
+import { parse } from "../json/tools.ts";
+import { changesList, tree } from "../json/view.ts";
 
 /** Where the editor's request is from: the environment, the repo and file it's saved to, and the file it was opened from (`opened`, its request `n`, the file's `hash` then). */
 export type Where = { env: string; repo: string; file: string; opened: string; n: string; hash: string };
@@ -128,13 +131,21 @@ export function bodyText(body: string, ct: string, view: string): { text: string
   return { text: body, json: false };
 }
 
-export function responseRegion(s: Sent, view: string): Html {
+/** The response, pretty / as a tree / raw, and a link to compare it with the send before (`prev`). */
+export function responseRegion(s: Sent, view: string, prev?: Sent): Html {
   const inner = (): Child => {
     if (s.state === "sending") return html`<p class="notes" data-pending><span class="spinner"></span> Sending ${s.out.method} <code>${s.out.url}</code>…</p>`;
     if (s.state === "failed" || !s.resp) return Notice({ tone: "bad", children: html`Nothing came back from <code>${s.out.url}</code>: ${s.error ?? "it failed"}.` });
     const r = s.resp;
     const ct = r.headers.find(([k]) => k === "content-type")?.[1] ?? "";
     const b = bodyText(r.body, ct, view);
+    const parsed = view === "tree" && b.json && !r.truncated ? parse(r.body) : undefined;
+    const views = (cur: string) =>
+      html` <span class="t3">${b.json || view === "tree" ? "JSON, " : ""}${[
+        ["pretty", "pretty"],
+        ...(b.json || view === "tree" ? [["tree", "tree"]] : []),
+        ["raw", "raw"],
+      ].map(([v, l], i) => html`${i ? " · " : ""}${v === cur ? html`<strong>${l}</strong>` : html`<a href="${sentHref(s.id, v === "pretty" ? undefined : v)}">${l}</a>`}`)}</span>`;
     const location = r.headers.find(([k]) => k === "location")?.[1];
     return html`${KeyValues([
       ["Status", html`${Pill({ tone: statusTone(r.status), children: String(r.status) })} ${r.statusText}`],
@@ -142,8 +153,9 @@ export function responseRegion(s: Sent, view: string): Html {
       ["Size", `${sizeText(r.size)}${r.truncated ? " (cut off: only the first part was read)" : ""}`],
       ...(location ? ([["Redirects to", html`<code>${location}</code> <span class="t3">(not followed)</span>`]] as [Child, Child][]) : []),
     ])}
-<h3 class="sub-h">Body${b.json ? html` <span class="t3">JSON, pretty · <a href="${sentHref(s.id, "raw")}">raw</a></span>` : view === "raw" ? html` <span class="t3"><a href="${sentHref(s.id)}">pretty</a></span>` : ""}</h3>
-${r.binary ? html`<p class="notes">${sizeText(r.size)} of ${ct || "binary data"}: not shown.</p>` : r.body ? html`<pre class="output" data-copy>${b.text}</pre>` : html`<p class="notes">No body.</p>`}
+${prev?.resp ? html`<p class="notes">Sent before at ${clock(prev.at)}${prev.resp.status !== r.status ? html` (then ${prev.resp.status})` : ""}: <a href="${sentHref(s.id, "diff")}">compare with it</a></p>` : ""}
+<h3 class="sub-h">Body${r.binary || !r.body ? "" : views(parsed?.ok ? "tree" : view === "raw" ? "raw" : "pretty")}</h3>
+${r.binary ? html`<p class="notes">${sizeText(r.size)} of ${ct || "binary data"}: not shown.</p>` : !r.body ? html`<p class="notes">No body.</p>` : parsed?.ok ? tree(parsed.value) : html`<pre class="output" data-copy>${b.text}</pre>`}
 <h3 class="sub-h">Headers</h3>
 ${r.headers.length ? html`<div class="sheet"><table class="data"><tbody>${r.headers.map(([k, v]) => html`<tr><th scope="row" class="mono">${k}</th><td class="mono">${v}</td></tr>`)}</tbody></table></div>` : html`<p class="notes">None.</p>`}`;
   };
@@ -154,9 +166,41 @@ ${r.headers.length ? html`<div class="sheet"><table class="data"><tbody>${r.head
   })}</div>`;
 }
 
-export function sentPage(o: HomeOpts & { sent: Sent; view: string }): Html {
+const HTONE = { added: "ok", removed: "bad", changed: "warn" } as const;
+
+/** This response against the send before it: what changed in the status, the headers and the body. */
+export function comparePanel(s: Sent, prev: Sent | undefined): Html {
+  if (!s.resp || !prev?.resp)
+    return Panel({ title: "Compared with the send before", children: html`<p class="notes">No earlier send of ${s.out.method} <code>${s.out.url}</code> came back in this session's history.</p>` });
+  const c = compare(prev.resp, s.resp);
+  const body =
+    c.body.kind === "json"
+      ? changesList(c.body.changes, c.body.more)
+      : c.body.kind === "binary"
+        ? html`<p class="notes">${c.body.same ? "The same bytes." : "Different bytes (binary: not compared further)."}</p>`
+        : html`<p class="notes">${c.body.same ? "The same text." : `Different text: ${sizeText(c.body.before)} before, ${sizeText(c.body.after)} now.`}${c.body.same ? "" : " Only JSON bodies are compared key by key."}</p>`;
+  return Panel({
+    title: "Compared with the send before",
+    meta: html`<span class="t3">${clock(prev.at)} → ${clock(s.at)} · <a href="${sentHref(prev.id)}">that response</a></span>`,
+    children: html`${KeyValues([
+      ["Status", c.status ? html`${Pill({ tone: statusTone(c.status.before), children: String(c.status.before) })} → ${Pill({ tone: statusTone(c.status.after), children: String(c.status.after) })}` : html`<span class="t3">the same (${s.resp.status})</span>`],
+      ["Time", `${prev.resp.ms} ms → ${s.resp.ms} ms`],
+    ])}
+<h3 class="sub-h">Headers</h3>
+${c.headers.length ? html`<div class="sheet"><table class="data"><tbody>${c.headers.map(
+      (h) => html`<tr><th scope="row" class="mono">${h.name}</th><td>${Pill({ tone: HTONE[h.kind], children: h.kind })}</td><td class="mono">${h.kind === "added" ? "" : h.before}</td><td class="mono">${h.kind === "removed" ? "" : h.after}</td></tr>`,
+    )}</tbody></table></div>` : html`<p class="notes">The same headers.</p>`}
+<h3 class="sub-h">Body</h3>
+${body}`,
+  });
+}
+
+const clock = (at: number) => `${new Date(at).toISOString().slice(11, 19)} UTC`;
+
+export function sentPage(o: HomeOpts & { sent: Sent; view: string; prev?: Sent }): Html {
   return html`${PageHeader({ title: o.sent.req.name || `${o.sent.out.method} request`, sub: html`<span class="mono">${o.sent.out.url}</span>`, crumbs })}
-${responseRegion(o.sent, o.view)}
+${o.view === "diff" ? comparePanel(o.sent, o.prev) : ""}
+${responseRegion(o.sent, o.view === "diff" ? "pretty" : o.view, o.prev)}
 ${Panel({ title: "Sent", children: o.sent.out.headers.length ? html`<div class="sheet"><table class="data"><tbody>${o.sent.out.headers.map(([k, v]) => html`<tr><th scope="row" class="mono">${k}</th><td class="mono">${v}</td></tr>`)}</tbody></table></div>` : html`<p class="notes">No headers of its own.</p>` })}
 ${editor(o)}`;
 }
