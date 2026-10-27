@@ -17,6 +17,9 @@
  *  - Agents (agent.ts): drafted prompts on core's /agents/new, and the `send` tool on Dovre's MCP
  *    server (Pack.tools): a running agent turn's GET or HEAD, only to this machine or HTTP_AGENT_HOSTS,
  *    secrets bound as for any send, the answer masked and cut short, in history, logged.
+ *  - Chaining (chain.ts): `{{login.response.body.token}}` takes a value from the response to the request
+ *    named login: in a run, the one earlier in it; in the editor, its newest send in history. Masked
+ *    values aren't reused, and the value meets the same host check and secret binding as typed text.
  *  - Running a file as a smoke test (run.ts, checks.ts): GET /http/run shows what it will send and
  *    each request's `# @expect` checks, sending nothing; one click on POST /http/run sends them one
  *    after the other (each an ordinary send, re-checked against the file as it was shown), and the
@@ -41,6 +44,8 @@ import { styles as jsonStyles } from "../json/view.ts";
 import { confirmSavePage, fileOk, homeHref, type HomeOpts, homePage, noWhere, openapiPage, runPage, runPageHref, runPlanPage, sentHref, sentPage, type Where } from "./view.ts";
 import { fileNameOf, fromOpenApi, MAX_SPEC } from "./openapi.ts";
 import { fromCollection, varLines } from "./collections.ts";
+import type { Refs } from "./chain.ts";
+import type { Resp } from "./send.ts";
 import { spanActions } from "./trace.ts";
 
 /** Pasted text as requests: a Postman or Bruno collection, else an OpenAPI spec. */
@@ -82,12 +87,21 @@ export function createHttpPack(opts: CreateHttpPackOpts = {}): Pack & { history(
     return { vars: { ...varsOf(w.env, theirs, mine), ...fileVars }, envs: envNames(theirs, mine) };
   }
 
+  /** Responses for `{{name.response…}}` in the editor: the newest send of that name, from the same file if there's one. */
+  function sentRefs(w: Where): Refs {
+    return (name) => {
+      const done = history.list().filter((s) => s.req.name === name && s.state === "done" && s.resp);
+      return (done.find((s) => s.from.repo === w.repo && s.from.file === w.opened) ?? done[0])?.resp;
+    };
+  }
+
   /** Where it would go, worked out without sending: the URL masked, or why it won't go. */
-  function targetOf(ctx: PackContext, r: Req, w: Where): HomeOpts["target"] {
+  function targetOf(ctx: PackContext, r: Req, w: Where, refs: Refs = sentRefs(w)): HomeOpts["target"] {
     if (!r.url) return undefined;
     const secrets = secretsOf(ctx);
-    const p = prepare(r, varsFor(ctx, w).vars, secrets, now());
-    return p.ok ? { ok: true, text: masker(secrets)(p.url) } : { ok: false, text: p.error };
+    const p = prepare(r, varsFor(ctx, w).vars, secrets, now(), refs);
+    // A value that comes back during a run is shown as written, not URL-encoded.
+    return p.ok ? { ok: true, text: masker(secrets)(p.url).replace(/%7B%7B(.*?)%7D%7D/gi, "{{$1}}") } : { ok: false, text: p.error };
   }
 
   function draw(ctx: PackContext, c: Context<AppEnv>, r: Req, w: Where, extra: Partial<HomeOpts> = {}, status = 200) {
@@ -160,10 +174,11 @@ export function createHttpPack(opts: CreateHttpPackOpts = {}): Pack & { history(
 
   function planPage(ctx: PackContext, c: Context<AppEnv>, repo: string, env: string, got: Extract<ReturnType<typeof loadRun>, { ok: true }>, problem?: string) {
     const w: Where = { ...noWhere(), env, repo, opened: got.f.name };
-    const items = got.reqs.slice(0, MAX_RUN).map((r) => ({
+    // A response from a request above it comes back during the run: it's shown as written.
+    const items = got.reqs.slice(0, MAX_RUN).map((r, i) => ({
       method: r.method,
       name: r.name,
-      target: targetOf(ctx, r, w) ?? { ok: false, text: "No URL." },
+      target: targetOf(ctx, r, w, (name) => (got.reqs.slice(0, i).some((x) => x.name === name) ? "later" : undefined)) ?? { ok: false, text: "No URL." },
       checks: (r.expect ?? []).map((t) => {
         const p = parseCheck(t);
         return { text: t, ...("error" in p ? { error: p.error } : {}) };
@@ -182,9 +197,11 @@ export function createHttpPack(opts: CreateHttpPackOpts = {}): Pack & { history(
     const mask = masker(secrets);
     const vars = varsFor(ctx, w).vars;
     const publish = () => ctx.publish(["http", `http-run:${run.id}`]);
+    // What came back so far in this run, by request name, for `{{name.response…}}`.
+    const back = new Map<string, Resp>();
     for (const step of run.steps) {
       const { span: _span, ...r } = reqs[step.n]!;
-      const p = prepare(r, vars, secrets, now());
+      const p = prepare(r, vars, secrets, now(), (name) => back.get(name));
       if (!p.ok) {
         Object.assign(step, { state: "failed", error: `Not sent: ${p.error}` });
         publish();
@@ -198,6 +215,7 @@ export function createHttpPack(opts: CreateHttpPackOpts = {}): Pack & { history(
       if (s.state !== "done" || !s.resp) {
         Object.assign(step, { state: "failed", error: `Nothing came back: ${s.error ?? "it failed"}.` });
       } else {
+        if (r.name) back.set(r.name, s.resp);
         step.status = s.resp.status;
         step.ms = s.resp.ms;
         step.checks = runChecks(r.expect, s.resp);
@@ -329,7 +347,7 @@ export function createHttpPack(opts: CreateHttpPackOpts = {}): Pack & { history(
         const f = await c.req.parseBody();
         const r = reqOfForm(f);
         const w = whereOf(f);
-        const p = prepare(r, varsFor(ctx, w).vars, secretsOf(ctx), now());
+        const p = prepare(r, varsFor(ctx, w).vars, secretsOf(ctx), now(), sentRefs(w));
         if (!p.ok) return draw(ctx, c, r, w, { flash: { tone: "warn", text: p.error } }, 400);
         const { s } = start(ctx, r, w, p);
         return c.redirect(sentHref(s.id), 303);
