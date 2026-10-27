@@ -217,7 +217,8 @@ test("hostile input: response body, headers, status text, URLs, names and file n
   const m = mounted({ fetchFn: fake.fetchFn });
   mkdirSync(join(m.code, "shop", ".http"));
   writeFileSync(join(m.code, "shop", ".http", "api.http"), `### ${H}\nGET https://h.example/${H}?q=${H}\nX-Name: ${H}\n\n${H}\n`);
-  writeFileSync(join(m.code, "shop", ".http", `${H.slice(0, 20).replace(/\//g, "")}.http`), "GET https://h.example/\n");
+  // Windows refuses < > in file names, so there the hostile-named file can't exist to be listed.
+  if (process.platform !== "win32") writeFileSync(join(m.code, "shop", ".http", `${H.slice(0, 20).replace(/\//g, "")}.http`), "GET https://h.example/\n");
   const home = await (await m.get(`/http?repo=shop&file=api.http&n=0&env=${encodeURIComponent(H)}`)).text();
   inert(home);
   assert.ok(home.includes("&lt;script&gt;alert(1)&lt;/script&gt;"));
