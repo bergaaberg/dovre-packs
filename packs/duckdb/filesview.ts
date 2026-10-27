@@ -10,6 +10,7 @@ import { Empty, KeyValues, Notice, PageHeader, Panel, Pill, type Child, type Cru
 import { MAX_SQL, type DuckDbTarget, type Row } from "./data.ts";
 import { DEFAULT_COLS, EXPORT_ROWS, FILTER_LABELS, FILTER_OPS, type Filter, handoffSql, type Look, MAX_ENTRIES, type Opened, PAGE_SIZES, type Slice, type Sort, STATS_ROWS } from "./files.ts";
 import { dbHref, queryForm } from "./view.ts";
+import { KEEP_MS, MAX_UPLOAD, UPLOAD_KINDS } from "./uploads.ts";
 
 export type FileQuery = { cols?: string[]; size: number; page: number; stats?: boolean } & Slice;
 
@@ -105,8 +106,15 @@ const notice = (o: { sources: DuckDbTarget[] }) =>
         children: html`No folder or file sources. Add a directory or a data file to <code>DUCKDB_SOURCES</code> (e.g. <code>lake=/path/to/parquet_dir</code> or <code>orders=/path/to/orders.parquet</code>) to open it here.`,
       });
 
-/** /duckdb/files: the folder and file sources to open. */
-export function filesHome(o: { sources: DuckDbTarget[]; error?: Child }): Html {
+/** A file from this computer: a plain file field (browsers take a dropped file on it too). */
+const uploadForm = (up: DuckDbTarget) =>
+  Panel({
+    title: "Open a file from this computer",
+    children: html`<form method="post" action="/duckdb/files/upload" enctype="multipart/form-data" class="query"><label class="field"><span class="label">Parquet, CSV/TSV or JSON lines file</span><input type="file" name="file" accept="${UPLOAD_KINDS}" required><span class="hint">Choose a file or drop it here. It is copied into <code>${up.path}</code> (the <strong>${up.label}</strong> source) and opens in the viewer. ${MAX_UPLOAD / 1024 / 1024} MB at most, removed after ${KEEP_MS / 3_600_000} hours; a file of the same name is replaced.</span></label><div class="buttons"><button type="submit" class="primary" data-busy="Adding">Open</button></div></form>`,
+  });
+
+/** /duckdb/files: the folder and file sources to open, and a file to add. */
+export function filesHome(o: { sources: DuckDbTarget[]; uploads?: DuckDbTarget; error?: Child }): Html {
   const dirs = o.sources.filter(viewable);
   return html`${PageHeader({
     title: "Files",
@@ -115,7 +123,8 @@ export function filesHome(o: { sources: DuckDbTarget[]; error?: Child }): Html {
   })}
 <div data-live id="duckdb-files">
 ${o.error ? Notice({ tone: "bad", children: o.error }) : ""}
-${notice(o)}
+${o.uploads ? uploadForm(o.uploads) : ""}
+${notice({ sources: o.sources.filter((s) => s !== o.uploads) })}
 ${Panel({
   title: "Sources",
   meta: String(dirs.length),

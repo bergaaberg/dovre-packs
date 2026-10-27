@@ -2,8 +2,11 @@
  * DuckDB Pack (`duckdb`): zero-row schema exploration, AI query builder,
  * manual/agentic execution, opt-in AI result review, and multi-source routing.
  */
+import { existsSync } from "node:fs";
 import { html } from "hono/html";
+import { bodyLimit } from "hono/body-limit";
 import { type Pack, PACK_API } from "dovre/packs/types.ts";
+import { strictOrigin } from "dovre/strict.ts";
 import {
   createDuckDbData,
   type DuckDbData,
@@ -16,6 +19,7 @@ import {
 import { exportName, look, open, PAGE_SIZES, slice, toCsv } from "./files.ts";
 import { FILES_STYLES, filePage, filesHome, folderPage, notOpenPage, sliceParams, viewable } from "./filesview.ts";
 import { createDuckDbSchemas, type DuckDbSchemas, toAutocomplete } from "./schema.ts";
+import { cleanName, MAX_UPLOAD, save, uploadsDir, uploadsSource } from "./uploads.ts";
 import {
   type Asker,
   createDuckDbAgent,
@@ -40,6 +44,10 @@ export type CreateDuckDbPackOpts = {
   run?: DuckDbRunner;
   asker?: Asker;
   schemaDir?: string;
+  /** Where files added from this computer go (tests); else beside Dovre's database. */
+  uploadsDir?: string;
+  /** The biggest file it takes (tests); else MAX_UPLOAD. */
+  maxUpload?: number;
   now?: () => number;
 };
 
@@ -54,7 +62,10 @@ export function createDuckDbPack(opts: CreateDuckDbPackOpts = {}): Pack & {
   let cachedAgent: DuckDbAgent | undefined;
 
   const initServices = (env: Record<string, string | undefined>, ctx?: { publish(topics: string[]): void }) => {
-    const sources = parseSources(env.DUCKDB_SOURCES);
+    const configured = parseSources(env.DUCKDB_SOURCES);
+    const up = uploadsSource(opts.uploadsDir ?? uploadsDir(env), configured);
+    // Listed once something was added, so an unused uploads folder never shows as a source.
+    const sources = existsSync(up.path) ? [...configured, up] : configured;
     const data = createDuckDbData({ sources, run: opts.run, now: opts.now });
     const schemas = createDuckDbSchemas({ data, dir: opts.schemaDir, now: opts.now });
     const defaultMode = (env.DUCKDB_EXECUTION?.trim().toLowerCase() === "agentic" ? "agentic" : "manual") as "manual" | "agentic";
@@ -73,7 +84,7 @@ export function createDuckDbPack(opts: CreateDuckDbPackOpts = {}): Pack & {
     cachedSchemas = schemas;
     cachedAgent = agent;
 
-    return { data, schemas, agent, sources, defaultMode };
+    return { data, schemas, agent, sources, defaultMode, uploads: up };
   };
 
   return {
@@ -235,11 +246,11 @@ export function createDuckDbPack(opts: CreateDuckDbPackOpts = {}): Pack & {
 
       // The file viewer: GET only (it reads), the path checked inside a folder source before DuckDB sees it.
       app.get("/duckdb/files", async (c) => {
-        const { data } = initServices(ctx.env, ctx);
+        const { data, uploads } = initServices(ctx.env, ctx);
         const sources = data.sources();
         const t = c.req.query("t") ?? "";
         const f = c.req.query("f") ?? "";
-        if (!t) return ctx.page(c, { title: "Files", body: filesHome({ sources }) });
+        if (!t) return ctx.page(c, { title: "Files", body: filesHome({ sources, uploads }) });
         const target = data.source(t);
         const opened = target ? open(target, f, c.req.query("all") === "1") : undefined;
         if (!target || !viewable(target) || !opened) {
@@ -257,6 +268,45 @@ export function createDuckDbPack(opts: CreateDuckDbPackOpts = {}): Pack & {
         const seen = await look(data, t, opened, q);
         return ctx.page(c, { title: opened.rel.split("/").pop() || opened.abs.split("/").pop() || target.label, body: filePage({ target, file: opened, look: seen, q }) });
       });
+
+      // A file from this computer: into the uploads folder under a clean name, then open it. Only
+      // from Dovre's own pages (strictOrigin), and no bigger than MAX_UPLOAD, checked as it arrives.
+      const max = opts.maxUpload ?? MAX_UPLOAD;
+      const mb = (n: number) => (n >= 1024 * 1024 ? `${Math.round(n / 1024 / 1024)} MB` : `${n} bytes`);
+      app.post(
+        "/duckdb/files/upload",
+        strictOrigin,
+        bodyLimit({
+          maxSize: max + 64 * 1024,
+          onError: (c) => refuse(c, 413, `That file is bigger than ${mb(max)}.`),
+        }),
+        async (c) => {
+          const { uploads } = initServices(ctx.env, ctx);
+          let file: unknown;
+          try {
+            file = (await c.req.parseBody()).file;
+          } catch {
+            return refuse(c, 400, "That upload didn't arrive whole.");
+          }
+          if (!(file instanceof File) || !file.size) return refuse(c, 400, "Pick a file to add.");
+          const name = cleanName(file.name);
+          if (!name) return refuse(c, 400, "Only Parquet, CSV/TSV and JSON lines files open here.");
+          if (file.size > max) return refuse(c, 413, `That file is bigger than ${mb(max)}.`);
+          try {
+            save(uploads.path, name, new Uint8Array(await file.arrayBuffer()), (opts.now ?? Date.now)());
+          } catch (e) {
+            ctx.log(`upload failed: ${String((e as Error)?.message ?? e).slice(0, 200)}`);
+            return refuse(c, 500, "The file couldn't be saved.");
+          }
+          return c.redirect(`/duckdb/files?t=${encodeURIComponent(uploads.id)}&f=${encodeURIComponent(name)}`, 303);
+        },
+      );
+
+      const refuse = (c: Parameters<typeof ctx.page>[0], status: 400 | 413 | 500, why: string) => {
+        const { sources, uploads } = initServices(ctx.env, ctx);
+        c.status(status);
+        return ctx.page(c, { title: "Files", body: filesHome({ sources, uploads, error: why }) });
+      };
 
       // The same slice as a download: a GET too (it only reads), the same path checks, capped rows.
       app.get("/duckdb/files/export", async (c) => {
