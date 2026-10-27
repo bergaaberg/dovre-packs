@@ -21,8 +21,8 @@
  *    each request's `# @expect` checks, sending nothing; one click on POST /http/run sends them one
  *    after the other (each an ordinary send, re-checked against the file as it was shown), and the
  *    results fill in over the hub. Logged as `http.run` (the file, how many passed).
- *  - Importing curl or an OpenAPI spec (openapi.ts) only reads the text: nothing is fetched or sent.
- *    Saving a spec's requests adds them to a new file or the end of one (`http.save`, one click).
+ *  - Importing curl, an OpenAPI spec (openapi.ts) or a Postman / Bruno collection (collections.ts)
+ *    only reads the text: nothing is fetched or sent. Saving the requests adds them to a new file or the end of one (`http.save`, one click).
  */
 import { html } from "hono/html";
 import type { Context } from "hono";
@@ -38,6 +38,10 @@ import { previous } from "./compare.ts";
 import { styles as jsonStyles } from "../json/view.ts";
 import { confirmSavePage, fileOk, homeHref, type HomeOpts, homePage, noWhere, openapiPage, runPage, runPageHref, runPlanPage, sentHref, sentPage, type Where } from "./view.ts";
 import { fileNameOf, fromOpenApi, MAX_SPEC } from "./openapi.ts";
+import { fromCollection, varLines } from "./collections.ts";
+
+/** Pasted text as requests: a Postman or Bruno collection, else an OpenAPI spec. */
+const importText = (text: string) => fromCollection(text) ?? fromOpenApi(text);
 import { parseCheck, runChecks } from "./checks.ts";
 import { createRuns, failedSteps, MAX_RUN, passed, type Run } from "./run.ts";
 
@@ -411,7 +415,7 @@ export function createHttpPack(opts: CreateHttpPackOpts = {}): Pack & { history(
       app.post("/http/openapi", async (c) => {
         const f = await c.req.parseBody();
         const spec = str(f.spec, MAX_SPEC);
-        const got = fromOpenApi(spec);
+        const got = importText(spec);
         if (!got.ok) return draw(ctx, c, blankReq(), noWhere(), { flash: { tone: "warn", text: got.error }, spec }, 400);
         return ctx.page(c, { title: got.title, current: "/http", body: openapiPage({ got, spec, repos: listRepos(codeDirOf(ctx.env)), repo: str(f.repo, 100), file: fileNameOf(got.title) }) });
       });
@@ -422,7 +426,7 @@ export function createHttpPack(opts: CreateHttpPackOpts = {}): Pack & { history(
         const spec = str(f.spec, MAX_SPEC);
         const repo = str(f.repo, 100);
         const file = str(f.file, 85).trim();
-        const got = fromOpenApi(spec);
+        const got = importText(spec);
         if (!got.ok) return draw(ctx, c, blankReq(), noWhere(), { flash: { tone: "warn", text: got.error }, spec }, 400);
         const fail = async (problem: string) => {
           const res = await ctx.page(c, { title: got.title, current: "/http", body: openapiPage({ got, spec, repos: listRepos(codeDirOf(ctx.env)), repo, file, problem }) });
@@ -439,13 +443,16 @@ export function createHttpPack(opts: CreateHttpPackOpts = {}): Pack & { history(
           if (!m.endsWith("isn't there.")) return fail(m);
         }
         const blocks = got.reqs.map(serializeReq).join("\n");
-        const head = `# ${got.title}: imported from an OpenAPI spec.${got.server ? ` Its server: ${got.server}` : ""}\n# Set {{baseUrl}} in an environment.\n\n`;
+        const head =
+          got.from === "an OpenAPI spec"
+            ? `# ${got.title}: imported from an OpenAPI spec.${got.server ? ` Its server: ${got.server}` : ""}\n# Set {{baseUrl}} in an environment.\n\n`
+            : `# ${got.title}: imported from ${got.from}.\n${got.vars?.length ? `${varLines(got.vars)}\n` : ""}\n`;
         const text = current ? `${current.text.replace(/\s+$/, "")}\n\n${blocks}` : head + blocks;
         const leak = secretIn(text, secretsOf(ctx));
-        if (leak) return fail(`The spec has ${leak.name}'s value in it: nothing was saved.`);
+        if (leak) return fail(`That has ${leak.name}'s value in it: nothing was saved.`);
         const target = `${repo}/.http/${file}`;
         const done = writeFile(root, file, text, current ? current.hash : "");
-        await logAction(ctx.db, { kind: "http.save", target, detail: `${current ? "added" : "created"} · ${got.reqs.length} from OpenAPI (${got.title})`.slice(0, 200), ok: done.ok, error: done.ok ? undefined : done.error });
+        await logAction(ctx.db, { kind: "http.save", target, detail: `${current ? "added" : "created"} · ${got.reqs.length} from ${got.from.replace(/^an? /, "")} (${got.title})`.slice(0, 200), ok: done.ok, error: done.ok ? undefined : done.error });
         if (!done.ok) return fail(`${done.error} Nothing was saved.`);
         const n = current ? parseHttp(current.text).reqs.length : 0;
         return c.redirect(homeHref({ repo, file, n: String(n), saved: "1" }), 303);

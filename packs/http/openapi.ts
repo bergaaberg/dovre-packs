@@ -18,7 +18,7 @@ import { MAX_BODY_IN, MAX_NAME, MAX_URL, METHODS, type Method, type Req } from "
 export const MAX_SPEC = 1_000_000;
 export const MAX_OPS = 500;
 
-export type Imported = { ok: true; title: string; server: string; reqs: Req[]; notes: string[] } | { ok: false; error: string };
+export type Imported = { ok: true; title: string; /** "an OpenAPI spec", "a Postman collection"… */ from: string; server: string; reqs: Req[]; notes: string[]; /** `@name = value` lines for a new file. */ vars?: [string, string][] } | { ok: false; error: string };
 
 type Obj = { [k: string]: Json };
 const isObj = (v: unknown): v is Obj => !!v && typeof v === "object" && !Array.isArray(v);
@@ -223,7 +223,7 @@ export function fromOpenApi(text: string): Imported {
   if (!reqs.length) return { ok: false, error: "The spec has no operations this client can send." };
   if (skipped) notes.push(`${skipped} operation${skipped === 1 ? "" : "s"} left out (TRACE, or more than ${MAX_OPS}).`);
   const info = isObj(spec.info) ? spec.info : {};
-  return { ok: true, title: one(info.title, 120) || "OpenAPI", server: serverOf(spec, v2), reqs, notes };
+  return { ok: true, title: one(info.title, 120) || "OpenAPI", from: "an OpenAPI spec", server: serverOf(spec, v2), reqs, notes };
 }
 
 /** A file name for the spec's requests: its title as a plain name. */
