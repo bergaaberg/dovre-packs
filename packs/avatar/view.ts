@@ -4,17 +4,15 @@
  * never put markup of it inline. Its address carries the picture's key and a mood; the page script
  * (src/ui/app.js.ts, "avatar") swaps the mood and the key as things happen and shows what it says.
  */
-import type { Hono } from "hono";
-import { html } from "hono/html";
 import type { Avatar, AvatarNow, Mood, TodayMode } from "./avatar.ts";
 import { MOODS, todayModeOf } from "./avatar.ts";
 import { isoSvg } from "./iso.ts";
 import { BODIES, buildAvatar, CREATURES, type Creature, effects, EXTRAS, type Extra, FINISHES, type Look, lookOf } from "./model.ts";
 import { situationOf } from "./mood.ts";
-import type { AppEnv } from "dovre/env.ts";
+import type { App } from "dovre/env.ts";
 import type { PackContext } from "dovre/packs/types.ts";
 import { AVATAR_CSS } from "./style.ts";
-import { PageHeader, Panel } from "dovre/ui/kit.ts";
+import { html, PageHeader, Panel } from "dovre/ui/kit.ts";
 import { Ago } from "dovre/pages/parts.ts";
 
 export type AvatarPlace = "dock" | "hero" | "mini" | "stage";
@@ -82,7 +80,7 @@ ${Panel({
 const MOOD = new Set<string>(MOODS);
 
 /** Its pages: the image, a preview while picking, how things are now, and the crafting page. */
-export function avatarRoutes(app: Hono<AppEnv>, ctx: PackContext, a: Avatar) {
+export function avatarRoutes(app: App, ctx: PackContext, a: Avatar) {
   app.get("/avatar/image.svg", (c) => {
     const m = c.req.query("m") ?? "idle";
     const mood = (MOOD.has(m) ? m : "idle") as Mood;
