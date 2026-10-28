@@ -109,23 +109,26 @@ test("TOPO_RULES_OFF: a rule that's off finds nothing", () => {
   assert.deepEqual(rules(checkRules({ entries: [e], off: rulesOff("component scratch-runs-nothing").off })), []);
 });
 
-test("topoPage: the Rules panel by repo, each with why and fix; the setting's unknown words; hostile text stays inert", () => {
+test("topoPage: rule findings on their repo with why and fix, the used repo's path in warn; the setting's unknown words; hostile text stays inert", () => {
   const e = entry("toy", `name: Toy\ntier: scratch\nruns:\n  workers: [${JSON.stringify(H)}]\nuses:\n  - { repo: acme/api, what: ${JSON.stringify(H)} }\n`);
   const api = entry("api", "name: API\nowner: '@o'\n");
   const findings = checkRules({ entries: [e, api], owners: ["acme"] });
   assert.equal(findings.length, 2);
+  assert.equal(findings.find((f) => f.rule === "uses")?.uses, "acme/api");
   const out = String(topoPage({ entries: [e, api], hosted: true, rules: { findings, off: new Set(["owner"]), unknown: [H] } }));
-  assert.match(out, /<h2[^>]*>Rules/);
-  assert.match(out, /2 against the rules/);
-  assert.match(out, /<code>scratch-runs-nothing<\/code> It&#39;s scratch/);
-  assert.match(out, /<code>uses<\/code> It uses/);
-  assert.equal(out.match(/class="topo-finding"/g)?.length, 2);
-  assert.equal(out.match(/<strong>acme\/toy<\/strong>/g)?.length, 1, "both findings in one row for the repo");
-  assert.match(out, /off now: owner/);
+  assert.match(out, /<a class="topo-place on" href="\/topo\?at=acme%2Ftoy"/, "the place with findings is picked");
+  assert.match(out, /<text class="topo-bt"[^>]*>2<\/text>/);
+  assert.match(out, /2 to look at/);
+  assert.match(out, /<span class="topo-sev warn">rule: scratch-runs-nothing<\/span> It&#39;s scratch/);
+  assert.match(out, /<span class="topo-sev warn">rule: uses<\/span> It uses/);
+  assert.match(out, /<path class="topo-tr warn" d="M[^"]+"/, "the path to the used repo is drawn in warn");
+  assert.match(out, /<a class="topo-pchip warn" href="\/topo\?at=acme%2Fapi">api<\/a>/);
   assert.match(out, /names something that isn&#39;t a rule/);
-  assert.match(out, /href="\/agents\/new\?repo=toy&amp;prompt=/, "an agent session fixes them");
+  assert.match(out, /href="\/agents\/new\?repo=toy&amp;prompt=Topo%20found[^"]*"[^>]*>Fix with an agent/, "an agent session fixes them");
   assertInert("topo rules", out);
-  assert.doesNotMatch(String(topoPage({ entries: [api], rules: { findings: [], off: new Set(), unknown: [] } })), /Rules/);
+  const clear = String(topoPage({ entries: [api], rules: { findings: [], off: new Set(), unknown: [] } }));
+  assert.doesNotMatch(clear, /topo-badge|rule:/);
+  assert.match(clear, /topo-sev ok">clear/);
 });
 
 test("ruleLines: a line per finding within the budget", () => {
@@ -156,10 +159,10 @@ test("/topo hosted: rule findings from the forge's files; Bino hears them; Setti
     },
   });
   const text = await (await get("/topo")).text();
-  assert.match(text, /<code>owner<\/code> It&#39;s active, but names no owner/);
+  assert.match(text, /rule: owner<\/span> It&#39;s active, but names no owner/);
   assert.match(text, /It uses ACME\/old, which is deprecated/);
   assert.match(text, /It uses ACME\/gone, which isn&#39;t followed/);
-  assert.doesNotMatch(text, /<code>component<\/code>/, "switched off");
+  assert.doesNotMatch(text, /rule: component/, "switched off");
   const ctx = testContext({ hosted: true, env: { TOPO_RULES_OFF: "component" } });
   assert.match(String(pack.bino!(ctx)), /Against the peak\.yaml rules:\n- quill \(owner\)/);
   const settings = String(pack.settings!(ctx));

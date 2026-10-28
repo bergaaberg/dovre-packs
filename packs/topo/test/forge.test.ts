@@ -159,18 +159,19 @@ test("/topo hosted: the forge's files, linked on the forge; coverage; agents sta
         }) as Record<string, string>)[`${repo}:${path}`],
     },
   });
-  const res = await get("/topo");
+  const res = await get("/topo?at=acme/quill");
   assert.equal(res.status, 200);
   const text = await res.text();
   assert.match(text, /Quill/);
   assert.match(text, /href="https:\/\/github\.com\/ACME\/quill\/blob\/HEAD\/docs\/PLAN\.md"/, "docs open on the forge");
   assert.match(text, /href="https:\/\/github\.com\/ACME\/quill"[^>]*>Repo ↗/);
   assert.doesNotMatch(text, /href="\/code\//, "there's no code viewer hosted");
-  assert.match(text, /Files with warnings/);
+  assert.match(text, /topo-sev warn">warnings<\/span>/);
   assert.match(text, /Unknown key &quot;shiny&quot;/);
-  assert.match(text, /Without a peak\.yaml/);
+  assert.match(text, /href="\/topo\?at=acme%2Fplain"/, "a repo without a file is off the map");
   assert.match(text, /ACME\/plain/);
   assertInert("/topo hosted", text);
+  for (const at of ["acme/evil", "acme/plain"]) assertInert(`/topo hosted at ${at}`, await (await get(`/topo?at=${encodeURIComponent(at)}`)).text());
 
   const facts = pack.slots!(testContext({ hosted: true }))["pr.facts"]!({ repo: "ACME/quill", number: 1, branch: "x", title: "x", url: "https://github.com/ACME/quill/pull/1" });
   assert.match(String(facts.map(([, v]) => v).join("")), /blob\/HEAD\/docs\/PLAN\.md/, "a PR's docs link to the forge too");
@@ -179,13 +180,13 @@ test("/topo hosted: the forge's files, linked on the forge; coverage; agents sta
 test("topoPage: agents start where there's a checkout, or hosted (on the Mac); not locally for a repo only on the forge", () => {
   const far: TopoEntry = { repo: "far", full: "acme/far", ...forgeUrls({ id: "github", host: "github.com" }, "acme/far"), file: "peak.yaml", peak: { version: 1, name: "Far", tier: "active", components: [{ name: "web", owns: ["web"] }], docs: {}, uses: [], environments: {} } };
   const plain: Coverage = { repo: "plain", full: "acme/plain", web: "https://github.com/acme/plain", kind: "uncataloged", lines: [] };
-  const local = String(topoPage({ entries: [far], coverage: [plain] }));
+  const local = String(topoPage({ entries: [far], coverage: [plain] })) + String(topoPage({ entries: [far], coverage: [plain], at: "acme/plain" }));
   assert.doesNotMatch(local, /\/agents\/new\?repo=(far|plain)/);
   assert.match(local, /href="https:\/\/github\.com\/acme\/plain"[^>]*>Repo ↗/);
   const hosted = String(topoPage({ entries: [far], coverage: [plain], hosted: true }));
   assert.match(hosted, /href="\/agents\/new\?repo=far"/);
   assert.match(hosted, /Focus agent/);
-  assert.match(hosted, /href="\/agents\/new\?repo=plain&amp;prompt=Write/);
+  assert.match(String(topoPage({ entries: [far], coverage: [plain], hosted: true, at: "acme/plain" })), /href="\/agents\/new\?repo=plain&amp;prompt=Write/);
 });
 
 test("topoPage: says when there's nothing to read, and what the forge couldn't read", () => {
