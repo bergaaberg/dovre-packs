@@ -10,7 +10,8 @@
  * there that no file claims. Its rules (step 3) check owners, components, scratch repos and what
  * each repo uses; TOPO_RULES_OFF switches some off. The page draws it all as a map (dovre-packs#72):
  * the repos by tier, what each uses, and the findings on the repo they're about; TOPO_MAP picks the
- * style (lanes, rings, terrain, or off for the list alone).
+ * style (lanes, rings, terrain, or off for the list alone). Drift is a need on Today, ringing as
+ * topo-drift once switched on, and Today's opening line says which repos are out of line (step 4).
  */
 import { listRepos } from "dovre/sources/claude.ts";
 import { WORK } from "dovre/agents/workdir.ts";
@@ -20,6 +21,7 @@ import { CloudInventory } from "./cloud.ts";
 import { declaresCloudflare, drift } from "./drift.ts";
 import { ForgeCatalog } from "./forge.ts";
 import { mapStyle } from "./map.ts";
+import { driftNeeds, RING, topoBrief } from "./needs.ts";
 import { checkRules, rulesOff } from "./rules.ts";
 import { TopoScanner } from "./scan.ts";
 import { CSS } from "./style.ts";
@@ -31,6 +33,7 @@ export { TopoCatalog, type Coverage } from "./catalog.ts";
 export { CloudInventory, type CloudRead } from "./cloud.ts";
 export { drift, type Drift, type Missing, type Orphan } from "./drift.ts";
 export { checkRules, type Finding, RULES, type RuleId, rulesOff } from "./rules.ts";
+export { driftNeeds, RING, topoBrief } from "./needs.ts";
 export { drawMap, mapStyle, type MapStyle, STYLES, topoModel } from "./map.ts";
 
 export type TopoDeps = {
@@ -107,6 +110,7 @@ export function createTopoPack(o: TopoDeps = {}): Pack {
         { key: "TOPO_RULES_OFF", label: "Rules switched off", help: "Rule ids, comma-separated: owner, component, scratch-runs-nothing, uses. Every rule is on unless named here." },
         { key: "TOPO_MAP", label: "Map style", help: "lanes (the default: a lane per tier), rings (active in the middle), terrain (active at the summit), or off (the list alone)." },
       ],
+      rings: [{ kind: RING, label: "Topo finds drift", hint: "Something a peak.yaml declares isn't on Cloudflare, or something there is in no peak.yaml", off: true }],
       // Topo was called Atlas: old links and bookmarks land on /topo.
       paths: ["atlas"],
     },
@@ -115,6 +119,11 @@ export function createTopoPack(o: TopoDeps = {}): Pack {
     styles: CSS,
     nav: () => [{ href: "/topo", title: "Topo", icon: "contours", group: "Code" }],
     pages: () => [{ title: "Topo", href: "/topo", icon: "⎈", about: "The map of your repos: what each is and uses, by tier, with what's out of line drawn on it", also: ["topo", "atlas", "map", "peak", "range", "catalog", "manifest", "repos", "coverage"] }],
+    needs: (ctx) => {
+      const d = driftOf(ctx);
+      return d.read ? driftNeeds(d.drift, d.read.at) : [];
+    },
+    brief: (ctx) => topoBrief({ drift: driftOf(ctx).drift, findings: rulesOf(ctx).findings, problems: of(ctx).problems() }),
     // Within Bino's 1500 characters a pack: drift first (what to act on), then the rules, then the repos.
     bino: (ctx) => {
       const d = driftLines(driftOf(ctx).drift, 500);

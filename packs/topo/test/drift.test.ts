@@ -245,4 +245,11 @@ test("/topo hosted with Cloudflare set: reads the inventory and shows drift; Bin
   const bino = String(pack.bino!(testContext({ hosted: true })));
   assert.match(bino, /^Drift against Cloudflare:\n- missing: quill declares worker quill-api/);
   assert.match(bino, /Quill/, "then the repos");
+  const ctx = testContext({ hosted: true });
+  assert.deepEqual(pack.needs!(ctx).map((n) => [n.key, n.href, n.ring]), [
+    ["missing acme/quill workers quill-api", "/topo?at=acme%2Fquill", "topo-drift"],
+    ["orphan cf:workers:stray", "/topo?at=cf%3Aworkers%3Astray", "topo-drift"],
+  ]);
+  assert.deepEqual(pack.manifest.rings, [{ kind: "topo-drift", label: "Topo finds drift", hint: "Something a peak.yaml declares isn't on Cloudflare, or something there is in no peak.yaml", off: true }], "drift rings only once I switch it on");
+  assert.deepEqual(pack.brief!(ctx), [{ text: "quill", href: "/topo?at=acme%2Fquill", tone: "bad" }, " is out of line on Topo", ", and ", { text: "1 thing on Cloudflare", href: "/topo", tone: "warn" }, " no peak.yaml claims."]);
 });
