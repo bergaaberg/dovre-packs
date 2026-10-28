@@ -5,7 +5,7 @@
  * New work's Projects) and Bino's lines.
  */
 import { html } from "hono/html";
-import { type Child, Empty, type Html, Item, List, newTab, Notice, PageHeader, Panel, Pill, type Tone } from "dovre/ui/kit.ts";
+import { type Child, Confirm, ConfirmSubmit, Empty, type Html, Item, List, newTab, Notice, PageHeader, Panel, Pill, type Tone } from "dovre/ui/kit.ts";
 import { Link, safeUrl } from "dovre/pages/parts.ts";
 import { type Kind, KINDS, runsIn, SPEC_URL, type Peak } from "@bergaaberg/peak";
 import type { Coverage } from "./catalog.ts";
@@ -14,6 +14,17 @@ import { CF_NAMES, type Drift, type Missing, type Orphan } from "./drift.ts";
 import { clip, drawMap, type Glyph, type MapStyle, type Off, offKind, offName, type Picture, type Place, type RepoFinding, type Spot, STYLES, textW, topoModel, type TopoModel } from "./map.ts";
 import { type Finding, RULES, type RuleId } from "./rules.ts";
 import type { TopoEntry, TopoRepo } from "./scan.ts";
+import { WRITE } from "./fix.ts";
+
+/** Fix PRs (step 5), when the forge can open them: who I am there (a new file's owner), and how the last one went. */
+export type PrOpts = { login?: string; said?: { ok: boolean; text: string; url?: string } };
+const PR_KIND = `topo.${WRITE}`;
+const said = (pr?: PrOpts) => (pr?.said ? Notice({ tone: pr.said.ok ? "ok" : "warn", children: html`${pr.said.text}${pr.said.url ? html` ${Link(pr.said.url, "Open the PR")}` : ""}` }) : "");
+/** Drops a missing thing from the repo's peak.yaml, in a PR. */
+const dropPr = (e: TopoEntry, m: { kind: string; name: string; worker?: string }, what: string) =>
+  e.full
+    ? Confirm({ kind: PR_KIND, action: "/topo/pr", fields: { what: "drop", repo: e.full, kind: m.kind, name: m.name, ...(m.worker ? { worker: m.worker } : {}) }, label: "PR: take it out", question: html`Open a PR on ${e.full} taking ${what} <code>${m.name}</code> out of ${e.file}? It isn't on Cloudflare.` })
+    : "";
 
 function tierTone(tier?: string): Tone {
   if (!tier) return "neutral";
@@ -220,7 +231,7 @@ function runsOf(p: Place): { kind: Kind; name: string; envs: { env: string; miss
   return [...out.values()];
 }
 
-function repoCard(p: Place, model: TopoModel, hosted: boolean): Html {
+function repoCard(p: Place, model: TopoModel, hosted: boolean, pr?: PrOpts): Html {
   const { entry } = p;
   const peak = entry.peak;
   const open = fileHref(entry, entry.file);
@@ -230,7 +241,7 @@ function repoCard(p: Place, model: TopoModel, hosted: boolean): Html {
   const warnUse = (k: string) => p.findings.some((f) => f.uses && f.uses.toLowerCase() === (named(k)?.entry.full ?? "").toLowerCase());
   const docs = Object.entries(peak.docs ?? {}).filter(([, path]) => typeof path === "string" && path.trim());
   return html`
-    <div class="topo-ch"><h2>${entry.repo}</h2>${Pill({ tone: tierTone(peak.tier), children: peak.tier })}</div>
+    ${said(pr)}<div class="topo-ch"><h2>${entry.repo}</h2>${Pill({ tone: tierTone(peak.tier), children: peak.tier })}</div>
     <p class="topo-sub">${entry.full ?? entry.repo}${peak.name !== entry.repo ? html` · ${peak.name}` : ""} · owner ${peak.owner ?? "none"}</p>
     ${peak.description ? html`<p class="topo-about">${peak.description}</p>` : ""}
     ${repoLinks(entry, hosted)}
@@ -245,8 +256,8 @@ function repoCard(p: Place, model: TopoModel, hosted: boolean): Html {
         ? html`<ul class="topo-runs">${runs.map(
             (r) => html`<li>${glyphIcon(r.kind, r.envs.some((e) => e.miss))}<span class="topo-rn"><span class="t3">${GLYPH_NAMES[r.kind]}</span> ${r.name}</span><span class="topo-envs">${r.envs.map(
               (e) => html`<span class="topo-env${e.miss ? " miss" : ""}">${e.env}${e.miss ? ": missing" : ""}</span>`,
-            )}</span></li>`,
-          )}${objects.map((m) => html`<li>${glyphIcon("workers", true)}<span class="topo-rn"><span class="t3">class on ${m.worker}</span> ${m.name}</span><span class="topo-envs"><span class="topo-env miss">missing</span></span></li>`)}</ul>`
+            )}${pr && r.envs.some((e) => e.miss) ? dropPr(entry, r, GLYPH_NAMES[r.kind]) : ""}</span></li>`,
+          )}${objects.map((m) => html`<li>${glyphIcon("workers", true)}<span class="topo-rn"><span class="t3">class on ${m.worker}</span> ${m.name}</span><span class="topo-envs"><span class="topo-env miss">missing</span>${pr ? dropPr(entry, m, `the class on ${m.worker}`) : ""}</span></li>`)}</ul>`
         : none("Nothing. A library or a tool."),
     )}
     ${section(
@@ -290,12 +301,18 @@ function repoCard(p: Place, model: TopoModel, hosted: boolean): Html {
   `;
 }
 
-function offCard(o: Off, model: TopoModel, hosted: boolean): Html {
+function offCard(o: Off, model: TopoModel, hosted: boolean, pr?: PrOpts): Html {
   if (o.what === "orphan") {
     const like = o.like ? model.places.find((p) => p.key === o.like) : undefined;
     const kind = CF_NAMES[o.orphan.kind][0];
+    const full = like?.entry.full;
+    // A class goes on the worker entry that names its worker; a pattern or health.workers can't take it.
+    const claimable = !!full && (o.orphan.kind !== "objects" || !!like!.entry.peak.runs?.workers?.some((w) => w.name === o.orphan.worker));
+    const claim = pr && claimable
+      ? Confirm({ kind: PR_KIND, action: "/topo/pr", fields: { what: "claim", repo: full!, kind: o.orphan.kind, name: o.orphan.name, ...(o.orphan.worker ? { worker: o.orphan.worker } : {}) }, label: `PR: claim it in ${like!.entry.repo}`, question: html`Open a PR on ${full} adding <code>${o.orphan.name}</code> to ${o.orphan.kind === "objects" ? html`<code>${o.orphan.worker}</code>'s objects` : html`<code>runs.${o.orphan.kind}</code>`} in ${like!.entry.file}?` })
+      : "";
     return html`
-      <div class="topo-ch"><h2>${offName(o)}</h2>${Pill({ children: kind })}</div>
+      ${said(pr)}<div class="topo-ch"><h2>${offName(o)}</h2>${Pill({ children: kind })}</div>
       <p class="topo-sub">On Cloudflare, in no peak.yaml</p>
       ${findingBox({
         sev: "warn",
@@ -303,14 +320,15 @@ function offCard(o: Off, model: TopoModel, hosted: boolean): Html {
         why: `It's on Cloudflare, and no peak.yaml lists it under runs.${like ? ` The name looks like ${like.entry.full ?? like.entry.repo}'s.` : ""}`,
         fix: like ? `Add it under runs in ${like.entry.full ?? like.entry.repo}, or delete it if it's left over.` : "Add it under runs in the repo that deploys it, or delete it if it's left over. A name ending in * claims by prefix.",
       })}
-      <div class="buttons">${like && agentable(like.entry, hosted) ? btn(agentHref(like.entry, claimPrompt(o.orphan, like.entry.file)), `Claim it in ${like.entry.repo}`, true) : ""}${like ? btn(`/topo?at=${encodeURIComponent(like.key)}`, `Go to ${like.entry.repo}`) : ""}</div>
+      <div class="buttons">${like && agentable(like.entry, hosted) ? btn(agentHref(like.entry, claimPrompt(o.orphan, like.entry.file)), `Claim it in ${like.entry.repo}`, true) : ""}${claim}${like ? btn(`/topo?at=${encodeURIComponent(like.key)}`, `Go to ${like.entry.repo}`) : ""}</div>
     `;
   }
   const r = o.repo;
   const bare = o.what === "bare";
   const open = r.file ? fileHref(r, r.file) : undefined;
+  const start = pr && bare && r.full ? startForm(r, pr) : "";
   return html`
-    <div class="topo-ch"><h2>${r.repo}</h2>${Pill({ children: "repo" })}</div>
+    ${said(pr)}<div class="topo-ch"><h2>${r.repo}</h2>${Pill({ children: "repo" })}</div>
     <p class="topo-sub">${r.full ?? r.repo}</p>
     ${findingBox(
       bare
@@ -324,7 +342,23 @@ function offCard(o: Off, model: TopoModel, hosted: boolean): Html {
           : btn(agentHref(r, fixPrompt({ file: r.file!, problems: r.lines })), "Fix with an agent", true, "Start an agent session that fixes it")
         : ""
     }${open ? btn(open, `Open ${r.file}`) : codeLink(r, "btn sm ghost")}</div>
+    ${start}
   `;
+}
+
+/** A new peak.yaml in a PR: what it's called and who answers for it; the worker comes from its wrangler config. */
+function startForm(r: Coverage, pr: PrOpts): Html {
+  const short = r.repo.replace(/^.*\//, "");
+  return section(
+    "Or open a PR with a first one",
+    html`<form method="post" action="/topo/pr" class="fields"><input type="hidden" name="what" value="start"><input type="hidden" name="repo" value="${r.full}">
+      <label class="field"><span class="label">Name</span><input name="name" value="${short}" required maxlength="100"></label>
+      <label class="field"><span class="label">Description</span><input name="description" maxlength="300" placeholder="Empty: the README's first paragraph"></label>
+      <label class="field"><span class="label">Tier</span><select name="tier"><option>active</option><option>maintained</option><option>scratch</option></select></label>
+      <label class="field"><span class="label">Owner</span><input name="owner" value="${pr.login ? `@${pr.login}` : ""}" maxlength="100"></label>
+      <div class="field">${ConfirmSubmit({ kind: PR_KIND, label: "Open the PR", question: html`Open a PR on ${r.full} adding peak.yaml? The worker and its Durable Object classes come from its wrangler config, if it has one.` })}</div>
+    </form>`,
+  );
 }
 
 // ── The list ───────────────────────────────────────────────────────────────
@@ -410,6 +444,8 @@ export function topoPage(opts: {
   at?: string;
   /** The TOPO_MAP setting, read. */
   map?: { style: MapStyle; unknown?: string };
+  /** Fix PRs, when the forge can open them. */
+  pr?: PrOpts;
 }): Html {
   const { entries, coverage = [], unread, reads, hosted = false, drift, rules, map = { style: "lanes" as MapStyle } } = opts;
   const model = topoModel({ entries, coverage, findings: rules?.findings, drift: drift?.drift });
@@ -423,7 +459,7 @@ export function topoPage(opts: {
 
   const place = model.places.find((p) => p.key === at);
   const off = place ? undefined : model.off.find((o) => o.key === at);
-  const card = place ? repoCard(place, model, hosted) : off ? offCard(off, model, hosted) : "";
+  const card = place ? repoCard(place, model, hosted, opts.pr) : off ? offCard(off, model, hosted, opts.pr) : "";
   const list = listPanel(model, at, pic?.folded ?? []);
 
   return html`
