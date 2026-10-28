@@ -13,6 +13,7 @@ import { createAvatarData, gatherAvatarStats, gatherMerges, nightShareOf, statsF
 import { openDb } from "dovre/db.ts";
 import { needsOf } from "dovre/home/needs.ts";
 import { AVATAR_CSS, AVATAR_PAGE_CSS } from "../style.ts";
+import { AVATAR_JS } from "../script.ts";
 import { resetWhen, setWhen } from "dovre/when.ts";
 import { HOSTILE as H, assertInert, packApp, testDeploy as deploy, testPr as pr, testSession as session, testSnapshot as snapshot } from "dovre/packs/testing.ts";
 
@@ -340,7 +341,9 @@ test("the animation suite: life on its own loops, a move per mood and scene, all
   }
   // The new ones move with translate / rotate / scale, so they stack with the transform ones.
   for (const m of AVATAR_CSS.matchAll(/@keyframes av-(look|shut|glint|wag|stretch|read|wiggle|tilt|droop|dance|shiver) \{([^\n]*)\}/g)) assert.doesNotMatch(m[2]!, /transform:/, m[1]);
-  assert.match(AVATAR_CSS, /prefers-reduced-motion: reduce\) \{ \.av, \.av \* \{ animation: none !important; \}/);
+  // Still under reduced motion, unless Settings → Look → Motion says Always (data-motion on <html>).
+  assert.match(AVATAR_CSS, /prefers-reduced-motion: reduce\) \{ :root:not\(\[data-motion="always"\]\) \.av, :root:not\(\[data-motion="always"\]\) \.av \* \{ animation: none !important; \}/);
+  assert.match(AVATAR_JS, /const AV_STILL = document\.documentElement\.dataset\.motion !== "always" && matchMedia/);
 });
 
 test("without the avatar pack, the Bino button is the word and Today has no avatar", async () => {

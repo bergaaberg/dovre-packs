@@ -7,7 +7,8 @@
  * (`dovre:change`, `dovre:swap`).
  */
 export const AVATAR_JS = String.raw`
-const AV_STILL = matchMedia("(prefers-reduced-motion: reduce)").matches;
+// Still when the system asks for less motion, unless Settings → Look → Motion says Always.
+const AV_STILL = document.documentElement.dataset.motion !== "always" && matchMedia("(prefers-reduced-motion: reduce)").matches;
 let avNow = null;
 let avHold = 0;
 let avTimer = 0;

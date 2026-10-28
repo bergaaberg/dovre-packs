@@ -100,7 +100,8 @@ export const AVATAR_CSS = String.raw`
 @keyframes av-float { from { transform: none; } to { transform: translateX(2px); } }
 @keyframes av-hover { from { transform: translateY(-1.5px); } to { transform: translateY(1.5px); } }
 @keyframes av-steam { from { transform: none; opacity: .9; } to { transform: translateY(-6px); opacity: 0; } }
-@media (prefers-reduced-motion: reduce) { .av, .av * { animation: none !important; } }
+/* Still when the system asks, unless Settings → Look → Motion says Always. */
+@media (prefers-reduced-motion: reduce) { :root:not([data-motion="always"]) .av, :root:not([data-motion="always"]) .av * { animation: none !important; } }
 `;
 
 /** Where the avatar sits on pages: the dock button, Today's header, Bino's page and pane, and what it says. */
@@ -148,7 +149,7 @@ export const AVATAR_PAGE_CSS = String.raw`
 .av-traits span { color: var(--ink-3); }
 @keyframes av-say-in { from { opacity: 0; translate: 0 6px; } to { opacity: 1; translate: none; } }
 @media (max-width: 760px) { .av-craft { grid-template-columns: 1fr; } .av-hero { width: 160px; } }
-@media (prefers-reduced-motion: reduce) { .av-say, .av-hero.going { animation: none; } .av-ctl { transition: none; } }
+@media (prefers-reduced-motion: reduce) { :root:not([data-motion="always"]) .av-say, :root:not([data-motion="always"]) .av-hero.going { animation: none; } :root:not([data-motion="always"]) .av-ctl { transition: none; } }
 .tdock.open > .av-say { display: none; }
 @media (max-width: 900px) {
   body:has(.tab-gap) .av-say { position: fixed; left: 50%; right: auto; bottom: calc(86px + var(--sab)); max-width: calc(100vw - 32px); transform: translateX(-50%); }
