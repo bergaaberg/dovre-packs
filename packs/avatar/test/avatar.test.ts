@@ -8,7 +8,7 @@ import { PACK_API, type Pack, type PackForge } from "dovre/packs/types.ts";
 import { isoSvg, shade } from "../iso.ts";
 import { signalsFrom } from "../feed.ts";
 import { buildAvatar, CREATURES, type Creature, DEFAULT_LOOK, effects, LAYER, lookOf, PARTS, statsOf, traits } from "../model.ts";
-import { type Signals, situationKey, situationOf } from "../mood.ts";
+import { type Signals, situationKey, situationOf, trySituation } from "../mood.ts";
 import { createAvatarData, gatherAvatarStats, gatherMerges, nightShareOf, statsFrom, streakOf } from "../stats.ts";
 import { openDb } from "dovre/db.ts";
 import { needsOf } from "dovre/home/needs.ts";
@@ -221,6 +221,41 @@ test("the service: the first scene once the signals come in is where it starts, 
   assert.equal(a.now().say, undefined, "a fresh start (a new Worker isolate) doesn't announce what was already so");
   sig = { ...CALM, trouble: [{ level: "fire" as const, why: "120 failed messages", href: "/signals" }] };
   assert.equal(a.now().say?.text, "This is fine. 120 failed messages.", "a turn after that is said");
+});
+
+test("trying a scene: a known scene replaces the real one, known props add on top, the rest is ignored", () => {
+  const real = situationOf({ ...CALM, deploysWaiting: 1 });
+  const fire = trySituation(real, "fire", ["beacon"]);
+  assert.equal(fire.scene, "fire");
+  assert.deepEqual(fire.props, { ...real.props, beacon: true, mug: true }, "a coffee in the flames, the hard hat kept");
+  assert.deepEqual(fire.why, [], "no reasons: nothing is going on");
+  const busy = trySituation(real, "now", ["drones", "asking", "papers", "notes"]);
+  assert.equal(busy.scene, "calm", "'now' keeps the real scene");
+  assert.deepEqual([busy.props.drones, busy.props.droneAsks, busy.props.papers, busy.props.notes], [2, true, 3, 2]);
+  const odd = trySituation(real, H, [H, "__proto__", 1]);
+  assert.deepEqual([odd.scene, odd.props], [real.scene, real.props], "unknown words change nothing");
+});
+
+test("the crafting page tries a scene: the panel, what each would say, and the preview drawn in it, nothing kept", async (t) => {
+  setWhen({ tz: "UTC" });
+  t.after(resetWhen);
+  const pack = createAvatarPack({ now: () => Date.parse("2026-10-22T10:00:00Z") });
+  const { get } = packApp([pack], { snapshot: snapshot() });
+  const page = await (await get("/avatar")).text();
+  assertInert("avatar page", page);
+  assert.match(page, /name="scene" value="now" data-say="" checked>As things are/);
+  assert.match(page, /name="scene" value="fire" data-say="This is fine\.">Fire/);
+  assert.match(page, /name="try" value="beacon">/);
+  const fire = await (await get("/avatar/preview.svg?creature=dino&scene=fire&try=beacon")).text();
+  assert.match(fire, /class="av mood-idle scene-fire"/);
+  assert.match(fire, /class="av-fire"/, "the flames");
+  assert.match(fire, /class="av-beacon"/);
+  const odd = await (await get(`/avatar/preview.svg?scene=${encodeURIComponent(H)}&try=${encodeURIComponent(H)}`)).text();
+  assert.match(odd, /class="av mood-idle scene-calm"/, "an unknown scene is the real one");
+  assert.doesNotMatch(odd, /class="av-fire"|<script|javascript:/);
+  const now = await (await get("/avatar/now")).json();
+  assert.equal(now.scene, "calm", "trying changes nothing real");
+  assert.equal(now.say, undefined);
 });
 
 test("the pack: the image with its cache rules, what's going on now, Today and the Bino button, the crafting page, and saving a look", async (t) => {

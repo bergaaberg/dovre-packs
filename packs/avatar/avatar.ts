@@ -53,7 +53,8 @@ export type Avatar = {
   /** The stats and situation behind it, for the crafting page. */
   facts(): { stats: ReturnType<typeof statsOf>; situation: Situation; gathered?: number };
 };
-const SAY: Record<Situation["scene"], Omit<Say, "at"> | undefined> = {
+/** What it says when the scene turns to this one (also shown when trying a scene on /avatar). */
+export const SAY: Record<Situation["scene"], Omit<Say, "at"> | undefined> = {
   fire: { text: "This is fine.", tone: "bad" },
   storm: { text: "Rain coming in.", tone: "warn" },
   party: { text: "Merged!", tone: "ok", href: "/prs" },

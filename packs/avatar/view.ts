@@ -5,10 +5,10 @@
  * (src/ui/app.js.ts, "avatar") swaps the mood and the key as things happen and shows what it says.
  */
 import type { Avatar, AvatarNow, Mood, TodayMode } from "./avatar.ts";
-import { MOODS, todayModeOf } from "./avatar.ts";
+import { MOODS, SAY, todayModeOf } from "./avatar.ts";
 import { isoSvg } from "./iso.ts";
 import { BODIES, buildAvatar, CREATURES, type Creature, effects, EXTRAS, type Extra, FINISHES, type Look, lookOf } from "./model.ts";
-import { situationOf } from "./mood.ts";
+import { SCENES, situationOf, TRY_PROPS, trySituation } from "./mood.ts";
 import type { App } from "dovre/env.ts";
 import type { PackContext } from "dovre/packs/types.ts";
 import { AVATAR_CSS } from "./style.ts";
@@ -60,6 +60,12 @@ ${Panel({ title: "Colours", children: html`<div class="av-picks">${Object.entrie
 ${Panel({ title: o.look.creature === "dino" ? "Binoculars" : "Eyes and trim", children: html`<div class="av-picks">${Object.entries(FINISHES).map(([k, v]) => radio("finish", k, v.label, o.look.finish === k, `f-${k}`))}</div>` })}
 ${Panel({ title: "On Today", children: html`<div class="av-picks">${([["move", "Moving"], ["still", "Still"], ["hide", "Hidden"]] as const).map(([v, l]) => radio("today", v, l, (o.today ?? "move") === v))}</div>` })}
 ${Panel({ title: "Show", children: html`<div class="av-picks">${(Object.keys(EXTRAS) as Extra[]).map((k) => html`<label class="av-pick"><input type="checkbox" name="show" value="${k}"${o.look.show[k] ? html` checked` : ""}>${EXTRAS[k]}</label>`)}</div>` })}
+${Panel({
+  title: "Try a scene",
+  children: html`<div class="av-picks">${(["now", ...SCENES] as const).map((s) => html`<label class="av-pick"><input type="radio" name="scene" value="${s}" data-say="${s === "now" ? "" : (SAY[s]?.text ?? "")}"${s === "now" ? html` checked` : ""}>${s === "now" ? "As things are" : s[0]!.toUpperCase() + s.slice(1)}</label>`)}</div>
+<div class="av-picks">${Object.entries(TRY_PROPS).map(([k, label]) => html`<label class="av-pick"><input type="checkbox" name="try" value="${k}">${label}</label>`)}</div>
+<p class="hint t3">Drawn on the stage above to see how it looks. Nothing is kept, and Today stays as things are.</p>`,
+})}
 <div class="buttons"><button type="submit" class="primary" data-busy="Saving">Save</button>${o.saved ? html`<span class="t3">Saved.</span>` : ""}</div>
 </form>
 </div>
@@ -89,12 +95,14 @@ export function avatarRoutes(app: App, ctx: PackContext, a: Avatar) {
     const current = c.req.query("k") === a.now().key;
     return c.body(svg, 200, { "content-type": "image/svg+xml; charset=utf-8", "cache-control": current ? "private, max-age=31536000, immutable" : "no-store" });
   });
-  /** A look not saved yet, while picking (the crafting page's preview). */
+  /** A look not saved yet, while picking, in a scene being tried (the crafting page's preview). */
   app.get("/avatar/preview.svg", (c) => {
     const q = c.req.queries();
     const look = lookOf({ creature: q.creature?.[0], body: q.body?.[0], finish: q.finish?.[0], show: Object.fromEntries(Object.keys(EXTRAS).map((k) => [k, (q.show ?? []).includes(k)])) });
     const f = a.facts();
-    const svg = isoSvg(buildAvatar(look, f.stats, f.situation).voxels, { shadow: true, headroom: 2, className: "mood-idle", style: AVATAR_CSS, label: "Preview" });
+    // "Try a scene": a scene and props to look at, never kept.
+    const sit = trySituation(f.situation, q.scene?.[0], q.try ?? []);
+    const svg = isoSvg(buildAvatar(look, f.stats, sit).voxels, { shadow: true, headroom: 2, className: `mood-idle scene-${sit.scene}`, style: AVATAR_CSS, label: "Preview" });
     return c.body(svg, 200, { "content-type": "image/svg+xml; charset=utf-8", "cache-control": "no-store" });
   });
   /** Pause, play or hide it on Today: the page script sends it quietly, a plain form goes back to Today. */
