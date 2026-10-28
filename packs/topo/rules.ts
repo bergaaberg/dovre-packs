@@ -22,7 +22,7 @@ export const RULES = [
 export type RuleId = (typeof RULES)[number]["id"];
 
 /** One rule finding: which file, what's wrong, and what fixes it. */
-export type Finding = TopoRepo & { file: string; rule: RuleId; why: string; fix: string };
+export type Finding = TopoRepo & { file: string; rule: RuleId; why: string; fix: string; /** For `uses`: the used repo (`owner/name`) it's about. */ uses?: string };
 
 /** The rules switched off by TOPO_RULES_OFF ("owner, component"), and any words in it that aren't rules. */
 export function rulesOff(setting: string | undefined): { off: Set<RuleId>; unknown: string[] } {
@@ -87,7 +87,7 @@ export function checkRules(o: RulesInput): Finding[] {
   for (const e of o.entries) {
     const { peak } = e;
     const at = { repo: e.repo, full: e.full, web: e.web, blob: e.blob, dir: e.dir, file: e.file };
-    const add = (rule: RuleId, why: string, fix: string) => out.push({ ...at, rule, why, fix });
+    const add = (rule: RuleId, why: string, fix: string, uses?: string) => out.push({ ...at, rule, why, fix, ...(uses ? { uses } : {}) });
     const tier = lower(peak.tier ?? "");
 
     if (!off.has("owner") && tier === "active" && !peak.owner) {
@@ -114,15 +114,15 @@ export function checkRules(o: RulesInput): Finding[] {
         const used = find(o.entries, target);
         if (!used) {
           if (find(o.problems ?? [], target)) continue;
-          if (find(o.bare ?? [], target)) add("uses", `It uses ${target}, which has no peak.yaml.`, `Write a peak.yaml in ${target}, or drop it from uses.`);
-          else if (o.followedKnown) add("uses", `It uses ${target}, which isn't followed (archived, renamed or gone).`, `Point uses at the repo's current name, or drop it.`);
+          if (find(o.bare ?? [], target)) add("uses", `It uses ${target}, which has no peak.yaml.`, `Write a peak.yaml in ${target}, or drop it from uses.`, target);
+          else if (o.followedKnown) add("uses", `It uses ${target}, which isn't followed (archived, renamed or gone).`, `Point uses at the repo's current name, or drop it.`, target);
           continue;
         }
-        if (lower(used.peak.tier ?? "") === "deprecated") add("uses", `It uses ${target}, which is deprecated.`, `Move off ${target}, then drop it from uses.`);
+        if (lower(used.peak.tier ?? "") === "deprecated") add("uses", `It uses ${target}, which is deprecated.`, `Move off ${target}, then drop it from uses.`, target);
         if (u.what) {
           const theirs = allRuns(used.peak).map(({ r }) => r);
           if (!theirs.some((r) => r.name === u.what) && !claimer(theirs, u.what)) {
-            add("uses", `It uses ${u.what} from ${target}, which runs no such thing.`, theirs.length ? `Name one of its runs entries (${theirs.slice(0, 6).map((r) => r.name).join(", ")}${theirs.length > 6 ? ", …" : ""}), or drop what.` : `Add it under runs in ${target}, or drop what.`);
+            add("uses", `It uses ${u.what} from ${target}, which runs no such thing.`, theirs.length ? `Name one of its runs entries (${theirs.slice(0, 6).map((r) => r.name).join(", ")}${theirs.length > 6 ? ", …" : ""}), or drop what.` : `Add it under runs in ${target}, or drop what.`, target);
           }
         }
       }

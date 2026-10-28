@@ -181,26 +181,37 @@ runs:
   assert.deepEqual(drift([e], read({ workers: ["rooms-api"] })).missing, [], "classes aren't judged when they couldn't be read");
 });
 
-test("topoPage: the Drift panels, the settings hint, what Cloudflare couldn't read, and all clear", () => {
+test("topoPage: what's missing on Cloudflare on its repo, unclaimed things off the map, the settings hint, what Cloudflare couldn't read, and all clear", () => {
   const e = entry("skribb", "name: Skribb\nruns:\n  workers: [skribb-web]\n");
-  const r = read({ workers: ["loose-a", "loose-b"] }, { "loose-a": ["X"] }, [{ what: "buckets", why: "HTTP 403: Authentication error" }]);
-  const out = String(topoPage({ entries: [e], drift: { configured: true, read: r, drift: drift([e], r), declares: true } }));
-  assert.match(out, /Missing in Cloudflare/);
-  assert.match(out, /Declares worker <code>skribb-web<\/code>, but Cloudflare has none · production/);
+  const r = read({ workers: ["loose-a", "skribb-old"] }, { "loose-a": ["X"] }, [{ what: "buckets", why: "HTTP 403: Authentication error" }]);
+  const view = { configured: true, read: r, drift: drift([e], r), declares: true };
+  const out = String(topoPage({ entries: [e], drift: view }));
+  assert.match(out, /<rect class="topo-badge bad"[^>]*><\/rect><text class="topo-bt"[^>]*>1<\/text>/, "a badge on the place");
+  assert.match(out, /<rect class="topo-g miss"/, "the worker's mark is drawn missing");
+  assert.match(out, /Declares worker skribb-web for production, but Cloudflare has none\./);
+  assert.match(out, /<span class="topo-env miss">production: missing<\/span>/);
   assert.match(out, /href="https:\/\/github\.com\/acme\/skribb\/blob\/HEAD\/peak\.yaml"/);
-  assert.match(out, /Not in any peak\.yaml/);
-  assert.match(out, /<code>loose-a<\/code>, <code>loose-b<\/code>/);
-  assert.match(out, /3 out of line with Cloudflare/);
+  assert.match(out, /1 missing on Cloudflare · 2 to look at/);
+  assert.match(out, /href="\/topo\?at=cf%3Aworkers%3Aloose-a"/, "unclaimed things are off the map");
+  assert.match(out, /Unclaimed, looks like this repo(&#39;|')s[\s\S]*skribb-old/, "a look-alike is named on its repo's card");
+  assert.match(out, /class="topo-hint hot" d="M/, "with a dotted line to it, lit while its repo is picked");
   assert.match(out, /aren(&#39;|')t checked: R2 buckets \(HTTP 403: Authentication error\)/);
-  assert.doesNotMatch(out, /some orphans may be theirs/);
-  const withBad = String(topoPage({ entries: [e], coverage: [{ repo: "bad", kind: "problems", file: "peak.yaml", lines: ["name is required."] }], drift: { configured: true, read: r, drift: drift([e], r), declares: true } }));
-  assert.match(withBad, /One file has problems, so what it claims isn(&#39;|')t counted: some orphans may be theirs\./);
+  assert.doesNotMatch(out, /some unclaimed things may be theirs/);
+
+  const orphan = String(topoPage({ entries: [e], drift: view, at: "cf:workers:skribb-old" }));
+  assert.match(orphan, /On Cloudflare, in no peak\.yaml/);
+  assert.match(orphan, /The name looks like acme\/skribb(&#39;|')s\./);
+  assert.match(orphan, /href="\/topo\?at=acme%2Fskribb"[^>]*>Go to skribb/);
+
+  const withBad = String(topoPage({ entries: [e], coverage: [{ repo: "bad", kind: "problems", file: "peak.yaml", lines: ["name is required."] }], drift: view }));
+  assert.match(withBad, /One file has problems, so what it claims isn(&#39;|')t counted: some unclaimed things may be theirs\./);
 
   assert.match(String(topoPage({ entries: [e], drift: { configured: false, declares: true } })), /Set <code>CF_ACCOUNT_ID<\/code>/);
   assert.doesNotMatch(String(topoPage({ entries: [], drift: { configured: false, declares: false } })), /CF_ACCOUNT_ID/, "no hint when no file declares Cloudflare runs");
   const fine = read({ workers: ["skribb-web"] });
-  assert.match(String(topoPage({ entries: [e], drift: { configured: true, read: fine, drift: drift([e], fine), declares: true } })), /everything there is claimed/);
-  assert.doesNotMatch(String(topoPage({ entries: [e], filter: "active", drift: { configured: true, read: r, drift: drift([e], r), declares: true } })), /Missing in Cloudflare/, "a tier filter shows repos only");
+  const clear = String(topoPage({ entries: [e], drift: { configured: true, read: fine, drift: drift([e], fine), declares: true } }));
+  assert.match(clear, /Cloudflare matches the files/);
+  assert.doesNotMatch(clear, /topo-badge/);
 });
 
 test("topoPage: hostile names in drift stay inert", () => {
@@ -229,9 +240,8 @@ test("/topo hosted with Cloudflare set: reads the inventory and shows drift; Bin
     forge: { id: "github", name: "GitHub", can: [], host: "github.com", repos: async () => ["ACME/quill"], file: async (repo, path) => (repo === "ACME/quill" && path === "peak.yaml" ? "name: Quill\nruns:\n  workers: [quill-web, quill-api]\n" : undefined) },
   });
   const text = await (await get("/topo")).text();
-  assert.match(text, /Missing in Cloudflare/);
-  assert.match(text, /<code>quill-api<\/code>/);
-  assert.match(text, /Not in any peak\.yaml[\s\S]*<code>stray<\/code>/);
+  assert.match(text, /Declares worker quill-api for production, but Cloudflare has none\./);
+  assert.match(text, /href="\/topo\?at=cf%3Aworkers%3Astray"/);
   const bino = String(pack.bino!(testContext({ hosted: true })));
   assert.match(bino, /^Drift against Cloudflare:\n- missing: quill declares worker quill-api/);
   assert.match(bino, /Quill/, "then the repos");

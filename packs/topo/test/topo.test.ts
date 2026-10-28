@@ -228,7 +228,7 @@ test("agents.new slot: a checkout's components set the prompt", () => {
   assert.match(out, /\.claude%2Frules%2Fdb\.md/);
 });
 
-test("topoPage: repo panels, components, docs, focus links, bare checkouts and the tier filter", () => {
+test("topoPage: a place per repo on the map, the picked one's card (components, docs, focus links), what's off the map", () => {
   const entries: TopoEntry[] = [
     {
       repo: "quill",
@@ -252,25 +252,37 @@ test("topoPage: repo panels, components, docs, focus links, bare checkouts and t
     },
     { repo: "harbor", dir: "/x/harbor", file: "peak.yaml", peak: { version: 1, name: "Harbor", description: "Laid-back Roman city builder", tier: "utility", components: [], docs: { design: "docs/DESIGN.md" }, uses: [], environments: {} } },
   ];
-  const out = String(topoPage({ entries, coverage: [{ repo: "plain-repo", dir: "/x/plain-repo", kind: "uncataloged", lines: [] }] }));
-  for (const re of [/Topo/, /Quill/, /active/, /quill\.example/, /Focus%20on%20component/, /\.claude\/rules\/db\.md/, /docs%2FPLAN\.md/, /Without a peak\.yaml/, /plain-repo/, /1 without a peak\.yaml/]) assert.match(out, re);
+  const plain = { repo: "plain-repo", dir: "/x/plain-repo", kind: "uncataloged" as const, lines: [] };
+  const out = String(topoPage({ entries, coverage: [plain] }));
+  assert.match(out, /<svg class="topo-svg"/);
+  assert.match(out, /<a class="topo-place on" href="\/topo\?at=quill"/, "the first place is picked");
+  assert.match(out, /<a class="topo-place" href="\/topo\?at=harbor"/);
+  assert.match(out, /<a class="topo-chip" href="\/topo\?at=plain-repo"/, "a repo without a file is off the map");
+  for (const re of [/Quill/, /quill\.example/, /Focus%20on%20component/, /\.claude\/rules\/db\.md/, /docs%2FPLAN\.md/, /no peak\.yaml/, /OFF THE MAP/, /2 cataloged repos · 1 to look at/]) assert.match(out, re);
+  assert.doesNotMatch(out, /Laid-back/, "only the picked place has a card");
   assert.doesNotMatch(out, /range\.yaml/);
-  assert.doesNotMatch(out, /Files with problems/);
 
-  const broken = String(topoPage({ entries, coverage: [{ repo: "bad", dir: "/x/bad", kind: "problems", file: "peak.yaml", lines: ["name is required.", "url must be an http(s) URL."] }] }));
-  assert.match(broken, /Files with problems/);
+  const harbor = String(topoPage({ entries, coverage: [plain], at: "HARBOR" }));
+  assert.match(harbor, /Laid-back Roman city builder/);
+  assert.match(harbor, /docs%2FDESIGN\.md/);
+  assert.match(harbor, /<tr class="on"><th scope="row"><a href="\/topo\?at=harbor">harbor/, "the list marks it too");
+
+  // #140: a repo without a file offers an agent session that drafts its peak.yaml.
+  assert.match(String(topoPage({ entries, coverage: [plain], at: "plain-repo" })), /href="\/agents\/new\?repo=plain-repo&(amp;)?prompt=Write%20a%20peak\.yaml[^"]*peak%20check[^"]*"[^>]*>Write peak\.yaml<\/a>/);
+
+  const broken = String(topoPage({ entries, coverage: [{ repo: "bad", dir: "/x/bad", kind: "problems", file: "peak.yaml", lines: ["name is required.", "url must be an http(s) URL."] }], at: "bad" }));
+  assert.match(broken, /unreadable/);
   assert.match(broken, /name is required\. url must be an http\(s\) URL\./);
   assert.match(broken, /href="\/code\/bad\?path=peak\.yaml"/);
-  assert.match(broken, /github\.com\/bergaaberg\/peak\/blob\/main\/SPEC\.md/);
   assert.match(broken, /href="\/agents\/new\?repo=bad&(amp;)?prompt=peak\.yaml%20in%20this%20repo%20has%20problems/);
-  assertInert("topo problems", String(topoPage({ entries: [{ ...entries[1]!, repo: H }], coverage: [{ repo: H, dir: "/x", kind: "problems", file: "peak.yaml", lines: [H] }, { repo: H, full: `o/${H}`, web: `https://github.com/o/${H}`, blob: `https://github.com/o/${H}/blob/HEAD/`, kind: "warnings", file: "peak.yaml", lines: [H] }, { repo: H, kind: "uncataloged", lines: [] }] })));
 
-  // #140: an uncataloged checkout offers an agent session that drafts its peak.yaml.
-  assert.match(out, /href="\/agents\/new\?repo=plain-repo&(amp;)?prompt=Write%20a%20peak\.yaml[^"]*peak%20check[^"]*"[^>]*>Write peak\.yaml<\/a>/);
+  const hostile = { entries: [{ ...entries[1]!, repo: H }], coverage: [{ repo: H, dir: "/x", kind: "problems" as const, file: "peak.yaml", lines: [H] }, { repo: H, full: `o/${H}`, web: `https://github.com/o/${H}`, blob: `https://github.com/o/${H}/blob/HEAD/`, kind: "warnings" as const, file: "peak.yaml", lines: [H] }, { repo: H, kind: "uncataloged" as const, lines: [] }] };
+  for (const at of [undefined, H, H.toLowerCase()]) for (const style of ["lanes", "rings", "off"] as const) assertInert(`topo ${style} at ${at}`, String(topoPage({ ...hostile, at, map: { style } })));
 
-  const filtered = String(topoPage({ entries, filter: "active" }));
-  assert.match(filtered, /Quill/);
-  assert.doesNotMatch(filtered, /Harbor/);
+  const list = String(topoPage({ entries, map: { style: "off" } }));
+  assert.doesNotMatch(list, /topo-svg/, "off: no map");
+  assert.match(list, /<table class="topo-table">[\s\S]*quill[\s\S]*harbor/);
+  assert.match(String(topoPage({ entries, map: { style: "lanes", unknown: "<b>" } })), /<code>TOPO_MAP<\/code> is <code>&lt;b&gt;<\/code>, which isn(&#39;|')t a style/);
 });
 
 test("the topo pack: in the menu's Code group and in search; /topo served, /atlas redirects; off without a code folder", async () => {

@@ -8,7 +8,9 @@
  * (`pnpm add github:bergaaberg/peak#v0.2.0`). With a Cloudflare account and a read-only token set,
  * it also checks drift (step 2): what the files declare on Cloudflare and isn't there, and what's
  * there that no file claims. Its rules (step 3) check owners, components, scratch repos and what
- * each repo uses; TOPO_RULES_OFF switches some off.
+ * each repo uses; TOPO_RULES_OFF switches some off. The page draws it all as a map (dovre-packs#72):
+ * the repos by tier, what each uses, and the findings on the repo they're about; TOPO_MAP picks the
+ * style (lanes, rings, terrain, or off for the list alone).
  */
 import { listRepos } from "dovre/sources/claude.ts";
 import { WORK } from "dovre/agents/workdir.ts";
@@ -17,8 +19,10 @@ import { TopoCatalog } from "./catalog.ts";
 import { CloudInventory } from "./cloud.ts";
 import { declaresCloudflare, drift } from "./drift.ts";
 import { ForgeCatalog } from "./forge.ts";
+import { mapStyle } from "./map.ts";
 import { checkRules, rulesOff } from "./rules.ts";
 import { TopoScanner } from "./scan.ts";
+import { CSS } from "./style.ts";
 import { binoLines, componentField, driftLines, type DriftView, prFacts, prLead, projectsPanel, ruleLines, type RulesView, rulesSettings, topoPage } from "./view.ts";
 
 export { TopoScanner, type TopoEntry, type TopoProblem, type TopoRepo } from "./scan.ts";
@@ -27,6 +31,7 @@ export { TopoCatalog, type Coverage } from "./catalog.ts";
 export { CloudInventory, type CloudRead } from "./cloud.ts";
 export { drift, type Drift, type Missing, type Orphan } from "./drift.ts";
 export { checkRules, type Finding, RULES, type RuleId, rulesOff } from "./rules.ts";
+export { drawMap, mapStyle, type MapStyle, STYLES, topoModel } from "./map.ts";
 
 export type TopoDeps = {
   /** Keeps what it read for 30 s; default: one over `ctx.codeDir` (none without a code folder). */
@@ -36,9 +41,6 @@ export type TopoDeps = {
   /** Keeps what it read for 15 min; default: one over the CF_ACCOUNT_ID and CF_API_TOKEN settings. */
   cloud?: CloudInventory;
 };
-
-const CSS = `.topo-rule { margin-left: .5rem; opacity: .8; }
-.topo-finding { display: block; }`;
 
 export function createTopoPack(o: TopoDeps = {}): Pack {
   let catalog: TopoCatalog | undefined;
@@ -103,6 +105,7 @@ export function createTopoPack(o: TopoDeps = {}): Pack {
           help: "Workers Scripts, D1, Workers KV Storage, Workers R2 Storage and Queues Read. Without it Topo doesn't check drift.",
         },
         { key: "TOPO_RULES_OFF", label: "Rules switched off", help: "Rule ids, comma-separated: owner, component, scratch-runs-nothing, uses. Every rule is on unless named here." },
+        { key: "TOPO_MAP", label: "Map style", help: "lanes (the default: a lane per tier), rings (active in the middle), terrain (active at the summit), or off (the list alone)." },
       ],
       // Topo was called Atlas: old links and bookmarks land on /topo.
       paths: ["atlas"],
@@ -111,7 +114,7 @@ export function createTopoPack(o: TopoDeps = {}): Pack {
     refresh: (ctx) => reload(ctx),
     styles: CSS,
     nav: () => [{ href: "/topo", title: "Topo", icon: "contours", group: "Code" }],
-    pages: () => [{ title: "Topo", href: "/topo", icon: "⎈", about: "The map of your repos: what each is, its components, rules and docs", also: ["topo", "atlas", "map", "peak", "range", "catalog", "manifest", "repos", "coverage"] }],
+    pages: () => [{ title: "Topo", href: "/topo", icon: "⎈", about: "The map of your repos: what each is and uses, by tier, with what's out of line drawn on it", also: ["topo", "atlas", "map", "peak", "range", "catalog", "manifest", "repos", "coverage"] }],
     // Within Bino's 1500 characters a pack: drift first (what to act on), then the rules, then the repos.
     bino: (ctx) => {
       const d = driftLines(driftOf(ctx).drift, 500);
@@ -120,7 +123,7 @@ export function createTopoPack(o: TopoDeps = {}): Pack {
     },
     settings: (ctx) => {
       const { off, unknown } = rulesOff(ctx.env.TOPO_RULES_OFF);
-      return rulesSettings(off, unknown);
+      return rulesSettings(off, unknown, mapStyle(ctx.env.TOPO_MAP));
     },
     slots: (ctx) => ({
       "agents.new": ({ repo }) => componentField(repo, of(ctx).get(repo)),
@@ -140,7 +143,17 @@ export function createTopoPack(o: TopoDeps = {}): Pack {
         return ctx.page(c, {
           title: "Topo · Dovre",
           current: "/topo",
-          body: topoPage({ entries: t.list(), coverage: t.coverage(), unread: t.unread(), filter: c.req.query("tier"), hosted: ctx.hosted, reads: { checkouts: !!t.scanner, forge: !!t.forge?.can() }, drift: driftOf(ctx), rules: rulesOf(ctx) }),
+          body: topoPage({
+            entries: t.list(),
+            coverage: t.coverage(),
+            unread: t.unread(),
+            hosted: ctx.hosted,
+            reads: { checkouts: !!t.scanner, forge: !!t.forge?.can() },
+            drift: driftOf(ctx),
+            rules: rulesOf(ctx),
+            at: c.req.query("at"),
+            map: mapStyle(ctx.env.TOPO_MAP),
+          }),
         });
       });
     },
