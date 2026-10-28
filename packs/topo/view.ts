@@ -8,6 +8,8 @@ import { type Child, Dot, type Html, Item, List, newTab, Notice, PageHeader, Pan
 import { Link, safeUrl } from "dovre/pages/parts.ts";
 import { SCHEMA_URL, SPEC_URL, type Peak } from "@bergaaberg/peak";
 import type { Coverage } from "./catalog.ts";
+import type { CloudRead } from "./cloud.ts";
+import { CF_NAMES, type Drift, type Missing, type Orphan } from "./drift.ts";
 import type { TopoEntry, TopoRepo } from "./scan.ts";
 
 function tierTone(tier?: string): Tone {
@@ -164,6 +166,67 @@ function coveragePanels(coverage: Coverage[], hosted: boolean): Html {
   `;
 }
 
+/** What the page knows about drift: whether Cloudflare is set up, its last read, and the findings. */
+export type DriftView = { configured: boolean; read?: CloudRead; drift?: Drift; /** Some file declares Cloudflare runs. */ declares: boolean };
+
+const what = (kind: Missing["kind"], worker?: string) => (worker ? html`${CF_NAMES[kind][0]} on <code>${worker}</code>` : CF_NAMES[kind][0]);
+
+/** A missing entry's row: what the file declares, in which environments, and where the file opens. */
+function missingItem(m: Missing): Html {
+  const open = fileHref(m, m.file);
+  return Item({
+    lead: Dot({ tone: "bad" }),
+    title: html`<strong>${m.full ?? m.repo}</strong> <span class="t3">${m.file}</span>`,
+    line: html`Declares ${what(m.kind, m.worker)} <code>${m.name}</code>, but Cloudflare has none · ${m.envs.join(", ")}`,
+    trail: open ? html`<div class="buttons"><a class="btn sm ghost" href="${safeUrl(open)}"${newTab(safeUrl(open))}>Open</a></div>` : "",
+  });
+}
+
+/** Orphans, a row per kind (and per worker for Durable Object classes). */
+function orphanItems(orphans: Orphan[]): Html[] {
+  const groups = new Map<string, Orphan[]>();
+  for (const o of orphans) {
+    const k = `${o.kind}\n${o.worker ?? ""}`;
+    groups.set(k, [...(groups.get(k) ?? []), o]);
+  }
+  return [...groups.values()].map((g) => {
+    const { kind, worker } = g[0]!;
+    return Item({
+      lead: Dot({ tone: "warn" }),
+      title: worker ? html`<strong>${CF_NAMES[kind][1]}</strong> on <code>${worker}</code>` : html`<strong>${CF_NAMES[kind][1]}</strong>`,
+      line: html`${g.map((o, i) => html`${i ? ", " : ""}<code>${o.name}</code>`)}`,
+      trail: html`<span class="t3">${g.length}</span>`,
+    });
+  });
+}
+
+/** Drift (dovre-packs#68 step 2): what the files declare on Cloudflare and isn't there, and what's there that no file claims. */
+function driftPanels(d: DriftView): Html | "" {
+  if (!d.configured) {
+    return d.declares ? Notice({ children: html`Set <code>CF_ACCOUNT_ID</code> and <code>CF_API_TOKEN</code> (read-only) in Settings to check what the files declare against Cloudflare.` }) : "";
+  }
+  if (!d.read || !d.drift) return "";
+  const { missing, orphans } = d.drift;
+  const unread = d.read.failed.length
+    ? Notice({ tone: "warn", children: html`Couldn't read from Cloudflare this time, so these aren't checked: ${d.read.failed.map((f, i) => html`${i ? "; " : ""}${CF_NAMES[f.what][1]} (${f.why})`)}.` })
+    : "";
+  const clear = !missing.length && !orphans.length;
+  return html`
+    ${unread}
+    ${missing.length ? Panel({ title: "Missing in Cloudflare", meta: String(missing.length), flush: true, children: List(missing.map(missingItem)) }) : ""}
+    ${orphans.length
+      ? Panel({
+          title: "Not in any peak.yaml",
+          meta: String(orphans.length),
+          foot: html`Claim them under <code>runs</code> in the repo that deploys them. A name ending in <code>*</code> claims by prefix.`,
+          flush: true,
+          children: List(orphanItems(orphans)),
+        })
+      : ""}
+    ${clear ? Panel({ title: "Drift", children: html`<p class="t3">What the files declare on Cloudflare is there, and everything there is claimed.</p>` }) : ""}
+  `;
+}
+
 /** The page's body; the pack's route puts it in Dovre's shell. */
 export function topoPage(
   opts: {
@@ -176,9 +239,11 @@ export function topoPage(
     reads?: { checkouts: boolean; forge: boolean };
     filter?: string;
     hosted?: boolean;
+    /** Drift against Cloudflare. */
+    drift?: DriftView;
   },
 ): Html {
-  const { entries, coverage = [], unread, reads, filter, hosted = false } = opts;
+  const { entries, coverage = [], unread, reads, filter, hosted = false, drift } = opts;
   const filtered = filter ? entries.filter((e) => (e.peak.tier ?? "").toLowerCase() === filter.toLowerCase()) : entries;
 
   const tiers = Array.from(new Set(entries.map((e) => (e.peak.tier ?? "").toLowerCase()).filter(Boolean))) as string[];
@@ -200,7 +265,8 @@ export function topoPage(
 
   const bare = coverage.filter((f) => f.kind === "uncataloged").length;
   const fix = coverage.length - bare;
-  const sub = `${entries.length} cataloged ${entries.length === 1 ? "repo" : "repos"}${bare ? ` · ${bare} without a peak.yaml` : ""}${fix ? ` · ${fix} to fix` : ""}. What each repo is, what owns what, and what to read.`;
+  const drifts = (drift?.drift?.missing.length ?? 0) + (drift?.drift?.orphans.length ?? 0);
+  const sub = `${entries.length} cataloged ${entries.length === 1 ? "repo" : "repos"}${bare ? ` · ${bare} without a peak.yaml` : ""}${fix ? ` · ${fix} to fix` : ""}${drifts ? ` · ${drifts} out of line with Cloudflare` : ""}. What each repo is, what owns what, and what to read.`;
 
   const notes: Html[] = [];
   if (reads && !reads.checkouts && !reads.forge) notes.push(Notice({ tone: "warn", children: "Nothing to read: there's no code folder here, and the forge can't read repos' files." }));
@@ -223,6 +289,7 @@ export function topoPage(
       ${notes}
       ${filtered.map((e) => repoPanel(e, hosted))}
       ${!filter ? coveragePanels(coverage, hosted) : ""}
+      ${!filter && drift ? driftPanels(drift) : ""}
     </div>
   `;
 }
@@ -294,6 +361,28 @@ export function binoLines(entries: TopoEntry[], max = 1400): string {
     const l = `- ${repo}${peak.tier ? ` [${peak.tier}]` : ""}: ${(peak.description ?? peak.name).replace(/\s+/g, " ").slice(0, 100)}.${comps}${docs ? ` Docs: ${docs}.` : ""}`.slice(0, 400);
     if (used + l.length > max) {
       out.push(`- (and ${entries.length - i} more cataloged repositories)`);
+      break;
+    }
+    out.push(l);
+    used += l.length + 1;
+  }
+  return out.join("\n");
+}
+
+/** What Bino is told about drift: missing names by repo, then orphans by kind, within `max` characters. */
+export function driftLines(d: Drift | undefined, max = 600): string {
+  if (!d || (!d.missing.length && !d.orphans.length)) return "";
+  const named = (kind: Missing["kind"], name: string, worker?: string) => `${CF_NAMES[kind][0]} ${worker ? `${worker}/` : ""}${name}`;
+  const lines = [
+    "Drift against Cloudflare:",
+    ...d.missing.map((m) => `- missing: ${m.repo} declares ${named(m.kind, m.name, m.worker)} (${m.envs.join(", ")}), not on Cloudflare`),
+    ...d.orphans.map((o) => `- orphan: ${named(o.kind, o.name, o.worker)} is on Cloudflare, in no peak.yaml`),
+  ];
+  const out: string[] = [];
+  let used = 0;
+  for (const [i, l] of lines.entries()) {
+    if (used + l.length > max) {
+      out.push(`- (and ${lines.length - i} more)`);
       break;
     }
     out.push(l);
