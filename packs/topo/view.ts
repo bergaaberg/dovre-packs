@@ -201,7 +201,7 @@ function orphanItems(orphans: Orphan[]): Html[] {
 }
 
 /** Drift (dovre-packs#68 step 2): what the files declare on Cloudflare and isn't there, and what's there that no file claims. */
-function driftPanels(d: DriftView): Html | "" {
+function driftPanels(d: DriftView, unusable: number): Html | "" {
   if (!d.configured) {
     return d.declares ? Notice({ children: html`Set <code>CF_ACCOUNT_ID</code> and <code>CF_API_TOKEN</code> (read-only) in Settings to check what the files declare against Cloudflare.` }) : "";
   }
@@ -210,9 +210,13 @@ function driftPanels(d: DriftView): Html | "" {
   const unread = d.read.failed.length
     ? Notice({ tone: "warn", children: html`Couldn't read from Cloudflare this time, so these aren't checked: ${d.read.failed.map((f, i) => html`${i ? "; " : ""}${CF_NAMES[f.what][1]} (${f.why})`)}.` })
     : "";
+  const unsure = unusable && orphans.length
+    ? Notice({ children: html`${unusable === 1 ? "One file has" : `${unusable} files have`} problems, so what ${unusable === 1 ? "it claims" : "they claim"} isn't counted: some orphans may be theirs.` })
+    : "";
   const clear = !missing.length && !orphans.length;
   return html`
     ${unread}
+    ${unsure}
     ${missing.length ? Panel({ title: "Missing in Cloudflare", meta: String(missing.length), flush: true, children: List(missing.map(missingItem)) }) : ""}
     ${orphans.length
       ? Panel({
@@ -289,7 +293,7 @@ export function topoPage(
       ${notes}
       ${filtered.map((e) => repoPanel(e, hosted))}
       ${!filter ? coveragePanels(coverage, hosted) : ""}
-      ${!filter && drift ? driftPanels(drift) : ""}
+      ${!filter && drift ? driftPanels(drift, coverage.filter((f) => f.kind === "problems").length) : ""}
     </div>
   `;
 }

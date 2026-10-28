@@ -192,6 +192,9 @@ test("topoPage: the Drift panels, the settings hint, what Cloudflare couldn't re
   assert.match(out, /<code>loose-a<\/code>, <code>loose-b<\/code>/);
   assert.match(out, /3 out of line with Cloudflare/);
   assert.match(out, /aren(&#39;|')t checked: R2 buckets \(HTTP 403: Authentication error\)/);
+  assert.doesNotMatch(out, /some orphans may be theirs/);
+  const withBad = String(topoPage({ entries: [e], coverage: [{ repo: "bad", kind: "problems", file: "peak.yaml", lines: ["name is required."] }], drift: { configured: true, read: r, drift: drift([e], r), declares: true } }));
+  assert.match(withBad, /One file has problems, so what it claims isn(&#39;|')t counted: some orphans may be theirs\./);
 
   assert.match(String(topoPage({ entries: [e], drift: { configured: false, declares: true } })), /Set <code>CF_ACCOUNT_ID<\/code>/);
   assert.doesNotMatch(String(topoPage({ entries: [], drift: { configured: false, declares: false } })), /CF_ACCOUNT_ID/, "no hint when no file declares Cloudflare runs");
