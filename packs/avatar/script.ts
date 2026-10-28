@@ -117,7 +117,7 @@ document.addEventListener("pointerover", (e) => {
   img.setAttribute("src", avSrc(img, "pop"));
   setTimeout(() => { if (img.dataset.mood === "pop" && Date.now() > avHold) { const m = avRest(); img.dataset.mood = m; img.setAttribute("src", avSrc(img, m)); } }, 1800);
 });
-// The crafting page: the stage shows the look being picked before it's saved.
+// The crafting page: the stage shows the look being picked before it's saved, in a scene being tried.
 {
   const form = document.querySelector("[data-av-form]");
   const stage = document.querySelector('img[data-av="stage"]');
@@ -125,6 +125,13 @@ document.addEventListener("pointerover", (e) => {
     const q = new URLSearchParams(new FormData(form));
     stage.removeAttribute("data-av");
     stage.setAttribute("src", "/avatar/preview.svg?" + q.toString());
+    // Trying a scene: the stage's line says what it would, and stops following how things are.
+    const scene = form.querySelector('input[name="scene"]:checked');
+    const why = document.querySelector(".av-stage .av-why");
+    if (why && (scene && scene.value !== "now" || form.querySelector('input[name="try"]:checked'))) {
+      why.removeAttribute("data-av-why");
+      why.textContent = (scene?.dataset.say ? scene.dataset.say + " " : "") + "(Trying: nothing is kept.)";
+    }
   });
 }
 // Before the core's own submit handler (it runs on the bubble): the choice goes in the background.

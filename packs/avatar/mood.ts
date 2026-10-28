@@ -76,5 +76,40 @@ export function situationOf(s: Signals): Situation {
   return { scene, props, why, ...(href ? { href } : {}) };
 }
 
+/** The props /avatar's "Try a scene" can add, each as it would look with something going on. */
+export const TRY_PROPS = {
+  beacon: "Beacon (on duty)",
+  hardhat: "Hard hat (a deploy waits)",
+  drones: "Drones (agents working)",
+  asking: "A red drone (an agent asks)",
+  papers: "Papers (reviews asked)",
+  notes: "Notes (My list)",
+} as const;
+export type TryProp = keyof typeof TRY_PROPS;
+
+/**
+ * A scene to look at without it happening (/avatar's "Try a scene"): `scene` replaces the real one
+ * (anything else keeps it), and each known prop in `props` is added on top. Only known words count;
+ * nothing here is kept.
+ */
+export function trySituation(real: Situation, scene: unknown, props: unknown[]): Situation {
+  const sc = (SCENES as readonly unknown[]).includes(scene) ? (scene as Scene) : real.scene;
+  const on = (k: TryProp) => props.includes(k);
+  const p = real.props;
+  return {
+    scene: sc,
+    why: [],
+    props: {
+      hardhat: p.hardhat || on("hardhat"),
+      drones: Math.max(p.drones, on("drones") ? 2 : 0, on("asking") ? 1 : 0),
+      droneAsks: p.droneAsks || on("asking"),
+      papers: Math.max(p.papers, on("papers") ? 3 : 0),
+      notes: Math.max(p.notes, on("notes") ? 2 : 0),
+      beacon: p.beacon || on("beacon"),
+      mug: p.mug || sc === "fire" || on("papers"),
+    },
+  };
+}
+
 /** A short key that changes when the picture would: what the image's address carries. */
 export const situationKey = (x: Situation) => `${x.scene}.${Object.values(x.props).map((v) => (typeof v === "boolean" ? (v ? 1 : 0) : v)).join("")}`;
