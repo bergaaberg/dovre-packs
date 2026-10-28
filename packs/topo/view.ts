@@ -10,6 +10,7 @@ import { SCHEMA_URL, SPEC_URL, type Peak } from "@bergaaberg/peak";
 import type { Coverage } from "./catalog.ts";
 import type { CloudRead } from "./cloud.ts";
 import { CF_NAMES, type Drift, type Missing, type Orphan } from "./drift.ts";
+import { type Finding, RULES, type RuleId } from "./rules.ts";
 import type { TopoEntry, TopoRepo } from "./scan.ts";
 
 function tierTone(tier?: string): Tone {
@@ -231,6 +232,51 @@ function driftPanels(d: DriftView, unusable: number): Html | "" {
   `;
 }
 
+/** What the page knows about the rules: the findings, which rules are off, and words in TOPO_RULES_OFF that aren't rules. */
+export type RulesView = { findings: Finding[]; off: Set<RuleId>; unknown: string[] };
+
+/** One repo's rule findings in a row: each with why and the fix, the file, and an agent session that fixes them. */
+function rulesItem(g: Finding[], hosted: boolean): Html {
+  const f = g[0]!;
+  const open = fileHref(f, f.file);
+  return Item({
+    lead: Dot({ tone: "warn" }),
+    title: html`<strong>${f.full ?? f.repo}</strong> <span class="t3">${f.file}</span>`,
+    more: html`${g.map((x) => html`<span class="topo-finding"><code>${x.rule}</code> ${x.why} <span class="t3">${x.fix}</span></span>`)}`,
+    trail: html`
+      <div class="buttons">
+        ${open ? html`<a class="btn sm ghost" href="${safeUrl(open)}"${newTab(safeUrl(open))}>Open</a>` : ""}
+        ${agentable(f, hosted) ? html`<a class="btn sm ghost" href="${agentHref(f, rulesPrompt(g))}" title="Start an agent session that fixes them">Fix</a>` : ""}
+      </div>
+    `,
+  });
+}
+
+/** Rules (dovre-packs#68 step 3): policy and dependency findings, a row per repo. */
+function rulesPanels(r: RulesView, hosted: boolean): Html | "" {
+  const unknown = r.unknown.length
+    ? Notice({ tone: "warn", children: html`<code>TOPO_RULES_OFF</code> names ${r.unknown.length === 1 ? "something that isn't a rule" : "things that aren't rules"}: ${r.unknown.join(", ")}. The rules are ${RULES.map((x, i) => html`${i ? ", " : ""}<code>${x.id}</code>`)}.` })
+    : "";
+  if (!r.findings.length) return unknown;
+  const groups = new Map<string, Finding[]>();
+  for (const f of r.findings) groups.set(f.full ?? f.repo, [...(groups.get(f.full ?? f.repo) ?? []), f]);
+  return html`
+    ${unknown}
+    ${Panel({
+      title: "Rules",
+      meta: String(r.findings.length),
+      foot: html`Switch a rule off by naming it in <code>TOPO_RULES_OFF</code> in Settings${r.off.size ? html` (off now: ${[...r.off].join(", ")})` : ""}.`,
+      flush: true,
+      children: List([...groups.values()].map((g) => rulesItem(g, hosted))),
+    })}
+  `;
+}
+
+/** Topo's panel on Settings: each rule, and whether it's on. */
+export function rulesSettings(off: Set<RuleId>, unknown: string[]): Html {
+  return html`<p class="notes">Rules: ${RULES.map((r, i) => html`${i ? "; " : ""}<code>${r.id}</code> ${off.has(r.id) ? "(off)" : "(on)"} ${r.about}`)}${unknown.length ? html` Not rules, so ignored: ${unknown.join(", ")}.` : ""} Switch one off by naming it in <code>TOPO_RULES_OFF</code>.</p>`;
+}
+
 /** The page's body; the pack's route puts it in Dovre's shell. */
 export function topoPage(
   opts: {
@@ -245,9 +291,11 @@ export function topoPage(
     hosted?: boolean;
     /** Drift against Cloudflare. */
     drift?: DriftView;
+    /** Policy and dependency rules. */
+    rules?: RulesView;
   },
 ): Html {
-  const { entries, coverage = [], unread, reads, filter, hosted = false, drift } = opts;
+  const { entries, coverage = [], unread, reads, filter, hosted = false, drift, rules } = opts;
   const filtered = filter ? entries.filter((e) => (e.peak.tier ?? "").toLowerCase() === filter.toLowerCase()) : entries;
 
   const tiers = Array.from(new Set(entries.map((e) => (e.peak.tier ?? "").toLowerCase()).filter(Boolean))) as string[];
@@ -270,7 +318,7 @@ export function topoPage(
   const bare = coverage.filter((f) => f.kind === "uncataloged").length;
   const fix = coverage.length - bare;
   const drifts = (drift?.drift?.missing.length ?? 0) + (drift?.drift?.orphans.length ?? 0);
-  const sub = `${entries.length} cataloged ${entries.length === 1 ? "repo" : "repos"}${bare ? ` · ${bare} without a peak.yaml` : ""}${fix ? ` · ${fix} to fix` : ""}${drifts ? ` · ${drifts} out of line with Cloudflare` : ""}. What each repo is, what owns what, and what to read.`;
+  const sub = `${entries.length} cataloged ${entries.length === 1 ? "repo" : "repos"}${bare ? ` · ${bare} without a peak.yaml` : ""}${fix ? ` · ${fix} to fix` : ""}${rules?.findings.length ? ` · ${rules.findings.length} against the rules` : ""}${drifts ? ` · ${drifts} out of line with Cloudflare` : ""}. What each repo is, what owns what, and what to read.`;
 
   const notes: Html[] = [];
   if (reads && !reads.checkouts && !reads.forge) notes.push(Notice({ tone: "warn", children: "Nothing to read: there's no code folder here, and the forge can't read repos' files." }));
@@ -293,6 +341,7 @@ export function topoPage(
       ${notes}
       ${filtered.map((e) => repoPanel(e, hosted))}
       ${!filter ? coveragePanels(coverage, hosted) : ""}
+      ${!filter && rules ? rulesPanels(rules, hosted) : ""}
       ${!filter && drift ? driftPanels(drift, coverage.filter((f) => f.kind === "problems").length) : ""}
     </div>
   `;
@@ -308,6 +357,10 @@ export const draftPrompt = () =>
 /** For a file Dovre can't use, or one with warnings: what's wrong, and the check to run after. */
 export const fixPrompt = (p: { file: string; problems: string[]; warnings?: boolean }) =>
   `${p.file} in this repo has ${p.warnings ? "warnings" : "problems"} (the format: ${SPEC_URL}): ${p.problems.join(" ")} Fix them, then run \`${CHECK}\` until it passes${p.warnings ? " with no warnings" : ""}.`;
+
+/** For a repo's rule findings: each, with its fix, and the check to run after. */
+export const rulesPrompt = (g: Finding[]) =>
+  `${g[0]!.file} in this repo is against Dovre's peak.yaml rules (the format: ${SPEC_URL}): ${g.map((f) => `${f.why} ${f.fix}`).join(" ")} Fix them where the repo says enough to (ask me when it doesn't), then run \`${CHECK}\`.`;
 
 const focusPrompt = (peak: Peak, c: Peak["components"][number]) =>
   `Focus on component "${c.name}" (${c.owns.join(", ")}) in ${peak.name}${c.rules ? `, following rules in ${c.rules}` : ""}: `;
@@ -382,6 +435,23 @@ export function driftLines(d: Drift | undefined, max = 600): string {
     ...d.missing.map((m) => `- missing: ${m.repo} declares ${named(m.kind, m.name, m.worker)} (${m.envs.join(", ")}), not on Cloudflare`),
     ...d.orphans.map((o) => `- orphan: ${named(o.kind, o.name, o.worker)} is on Cloudflare, in no peak.yaml`),
   ];
+  const out: string[] = [];
+  let used = 0;
+  for (const [i, l] of lines.entries()) {
+    if (used + l.length > max) {
+      out.push(`- (and ${lines.length - i} more)`);
+      break;
+    }
+    out.push(l);
+    used += l.length + 1;
+  }
+  return out.join("\n");
+}
+
+/** What Bino is told about the rules: a line per finding, within `max` characters. */
+export function ruleLines(findings: Finding[], max = 300): string {
+  if (!findings.length) return "";
+  const lines = ["Against the peak.yaml rules:", ...findings.map((f) => `- ${f.repo} (${f.rule}): ${f.why}`.slice(0, 200))];
   const out: string[] = [];
   let used = 0;
   for (const [i, l] of lines.entries()) {
