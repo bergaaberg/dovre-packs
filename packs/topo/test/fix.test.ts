@@ -146,17 +146,17 @@ const cloudOf = (have: CloudRead["have"]): CloudInventory => {
   return { configured: () => true, peek: () => read, load: async () => read } as unknown as CloudInventory;
 };
 
-test("/topo: a Confirm of kind topo.peak-pr on the cards, a POST opens the PR, and the card says how it went", async () => {
+test("/topo: a Confirm of kind topo.peak-pr on the cards (one click by default, dovre#104), a POST opens the PR, and the card says how it went", async () => {
   const asked: Proposal[] = [];
   const text = "name: Quill\nruns:\n  workers: [quill-web, quill-api]\n";
   const pack = createTopoPack({ cloud: cloudOf({ workers: ["quill-web", "quill-cron"] }) });
   assert.deepEqual(pack.writes, [{ kind: "peak-pr", label: "Open a PR fixing a repo's peak.yaml" }]);
   const { get, post, db } = packApp([pack], { hosted: true, forge: appForge({ "ACME/quill:peak.yaml": text, "ACME/bare:README.md": "x" }, asked) });
   const missing = await (await get("/topo?at=acme%2Fquill")).text();
-  assert.match(missing, /<summary>PR: take it out…<\/summary>/);
+  assert.match(missing, /<button type="submit">PR: take it out<\/button>/);
   assert.match(missing, /name="what" value="drop">.*name="name" value="quill-api"/s);
   const orphan = await (await get("/topo?at=cf%3Aworkers%3Aquill-cron")).text();
-  assert.match(orphan, /<summary>PR: claim it in quill…<\/summary>/);
+  assert.match(orphan, /<button type="submit">PR: claim it in quill<\/button>/);
   const bare = await (await get("/topo?at=acme%2Fbare")).text();
   assert.match(bare, /Or open a PR with a first one/);
   assert.match(bare, /name="owner" value="@[\w-]+"/);
