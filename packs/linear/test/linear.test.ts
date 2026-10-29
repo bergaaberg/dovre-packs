@@ -233,3 +233,42 @@ test("linear: the comment act re-checks the issue, refuses closed ones, and logs
   assert.ok(!r3.ok);
   assert.match(String(r3.error), /ENG-99/);
 });
+
+test("linear: lookups read one issue (description and latest comments, cut) and search titles; none without a key", async () => {
+  const { fetchFn, calls } = fakeLinear([
+    {
+      match: /DovreLinearLook/,
+      body: {
+        issue: {
+          identifier: "ENG-12",
+          title: "Fix the thing",
+          description: `Long ${"x".repeat(3000)}`,
+          priority: 2,
+          state: { name: "In Progress" },
+          assignee: { name: "Kari" },
+          project: { name: "Q4" },
+          cycle: { number: 7 },
+          dueDate: "2026-11-02",
+          comments: { nodes: [{ body: "Looks good", createdAt: "2026-10-28T10:00:00Z", user: { name: "Ola" } }] },
+        },
+      },
+    },
+    { match: /DovreLinearSearch/, body: { issues: { nodes: [{ identifier: "ENG-3", title: "Certs renew", state: { name: "Todo" }, assignee: null }] } } },
+  ]);
+  const pack = createLinearPack({ fetchFn });
+  assert.deepEqual(pack.lookups!(testContext({ env: {} })), [], "no key, no lookups");
+  const ctx = testContext({ env: { LINEAR_API_KEY: "k" } });
+  const [issue, search] = pack.lookups!(ctx);
+  assert.deepEqual([issue!.kind, search!.kind], ["issue", "search"]);
+  const text = await issue!.run({ key: "eng-12" }, ctx);
+  assert.match(text, /^ENG-12: Fix the thing/);
+  assert.match(text, /State: In Progress, priority: High, assignee: Kari, project: Q4, cycle 7, due 2026-11-02\./);
+  assert.match(text, /Ola \(2026-10-28\): Looks good/);
+  assert.ok(text.length < 2600, "the description is cut");
+  assert.equal((calls[0]!.body as { variables: { key: string } }).variables.key, "ENG-12");
+  // Not a key: Linear isn't asked.
+  assert.match(await issue!.run({ key: "DROP TABLE" }, ctx), /isn't an issue key/);
+  assert.equal(calls.length, 1);
+  assert.equal(await search!.run({ q: "certs" }, ctx), 'Issues with "certs" in the title:\n- ENG-3 [Todo] Certs renew');
+  assert.match(await search!.run({ q: "x" }, ctx), /at least two/);
+});
