@@ -30,14 +30,16 @@ Core (`bergaaberg/dovre`) ships with the built-in cockpit packs (`agents`, `assi
 
 ## Installing a Pack in 1 Command
 
-From your Dovre checkout (`../dovre`):
+From your instance repository (e.g. `../dovre-home`), with Dovre checked out beside it:
 
 ```bash
-# Install into your instance repository (e.g. ../dovre-home) and wire into crates.ts / packs.ts:
-pnpm --dir ../dovre packs add cf-health --into ../dovre-home
-pnpm --dir ../dovre packs add http-otel --into ../dovre-home
-pnpm --dir ../dovre packs add custom-app --into ../dovre-home
+# Copies the pack (only what git keeps: no build output) and lists it in packs.ts:
+node ../dovre/src/packs/new.ts add cf-health --into .
+node ../dovre/src/packs/new.ts add http-otel --into .
+node ../dovre/src/packs/new.ts add custom-app --into .
 ```
+
+(`pnpm --dir ../dovre packs …` fails when the instance's pnpm is older than Dovre's pinned one.)
 
 Or import directly from a sibling `dovre-packs` checkout in your instance's `crates.ts` / `packs.ts`.
 
