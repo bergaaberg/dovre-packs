@@ -207,6 +207,8 @@ test("linear: the comment act re-checks the issue, refuses closed ones, and logs
   const ctx = testContext({ env: { LINEAR_API_KEY: "k" }, db });
   const comment = pack.acts!(ctx)[1]!;
   assert.equal(comment.kind, "comment");
+  // The card posts what it shows: a box per field.
+  assert.match(String(comment.inputs({ issue: "ENG-7" }, undefined, ctx)), /name="issue" value="ENG-7".*name="text"/s);
   const done = await comment.run({ issue: "eng-7", text: "On it" }, {}, ctx);
   assert.ok(done.ok, JSON.stringify(done));
   assert.equal(inserts[0]!.binds[1], "linear.comment");

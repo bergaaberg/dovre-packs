@@ -151,6 +151,7 @@ test("slack: the send act re-checks the channel, posts, and logs without the bod
   const ctx = testContext({ env: ENV, db });
   await pack.refresh!(ctx);
   const act = pack.acts!(ctx)[0]!;
+  assert.match(String(act.inputs({ channel: "general" }, undefined, ctx)), /name="channel" value="general".*name="text".*name="thread"/s);
   // Not a watched channel: refused before anything is sent.
   const refused = await act.run({ channel: "secret-side-channel", text: "hi" }, {}, ctx);
   assert.equal(refused.ok, false);

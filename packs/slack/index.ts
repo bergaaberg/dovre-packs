@@ -4,7 +4,7 @@
  */
 import { html } from "hono/html";
 import { type Pack, PACK_API, type PackNeed } from "dovre/packs/types.ts";
-import { logAction } from "dovre/actions/deploys.ts";
+import { writeAct } from "dovre/packs/acts.ts";
 import { addTodo } from "dovre/todo/store.ts";
 import { checkChannel, type SlackKept, readSlack, sendSlack } from "./data.ts";
 import { slackCard, slackDock, slackPage } from "./view.ts";
@@ -106,7 +106,8 @@ export function createSlackPack(opts: { fetchFn?: typeof fetch } = {}): Pack & {
     acts(ctx) {
       const token = () => (ctx.env.SLACK_TOKEN ?? "").trim();
       return [
-        {
+        writeAct<{ id: string; name: string; text: string; thread?: string }, string>({
+          pack: "slack",
           kind: "send",
           title: "A Slack message",
           when: "I want to say something in one of the watched Slack channels, optionally as a reply in a thread.",
@@ -118,33 +119,27 @@ export function createSlackPack(opts: { fetchFn?: typeof fetch } = {}): Pack & {
           button: "Send",
           hint: "Sends the message from you in that channel.",
           question: "Send this Slack message?",
-          inputs: (act) => html`${act.channel ?? ""}`,
-          async run(form) {
-            const key = token();
+          ready: () => (token() ? undefined : "Set SLACK_TOKEN."),
+          read(form) {
             const name = (form.channel ?? "").trim().replace(/^#/, "");
             const text = (form.text ?? "").trim().slice(0, 4000);
-            const thread = (form.thread ?? "").trim();
-            if (!key || !name || !text) return { ok: false, error: "Set SLACK_TOKEN, and give a channel and a message." };
-            // Re-check: the channel must be one we watch, and Slack must still know it.
+            if (!name || !text) return "Give a channel and a message.";
+            // Only a channel we watch.
             const watched = kept?.channels.find((c) => c.id === name || c.name.toLowerCase() === name.toLowerCase());
-            if (!watched) return { ok: false, error: `"${name}" is not a watched channel; add it to SLACK_CHANNELS first.` };
-            const target = `#${watched.name}`;
-            try {
-              const chan = await checkChannel(key, watched.id, fetchFn);
-              if (!chan) {
-                await logAction(ctx.db, { kind: "slack.send", target, ok: false, error: "channel gone" });
-                return { ok: false, error: `Slack no longer knows ${target}.` };
-              }
-              await sendSlack(key, chan.id, text, /^\d+\.\d+$/.test(thread) ? thread : undefined, fetchFn);
-              await logAction(ctx.db, { kind: "slack.send", target, ok: true }); // never the message body
-              return { ok: true, done: `Sent in ${target}`, href: "/slack" };
-            } catch (e) {
-              const error = String((e as Error)?.message ?? e);
-              await logAction(ctx.db, { kind: "slack.send", target, ok: false, error });
-              return { ok: false, error };
-            }
+            if (!watched) return `"${name}" is not a watched channel; add it to SLACK_CHANNELS first.`;
+            const thread = (form.thread ?? "").trim();
+            return { target: `#${watched.name}`, value: { id: watched.id, name: watched.name, text, ...(/^\d+\.\d+$/.test(thread) ? { thread } : {}) } };
           },
-        },
+          // Slack must still know it.
+          async check(v) {
+            const chan = await checkChannel(token(), v.id, fetchFn);
+            return chan ? chan.id : { refuse: `Slack no longer knows #${v.name}.`, log: "channel gone" };
+          },
+          async write(v, id) {
+            await sendSlack(token(), id, v.text, v.thread, fetchFn);
+            return { done: `Sent in #${v.name}`, href: "/slack" };
+          },
+        }),
       ];
     },
   };

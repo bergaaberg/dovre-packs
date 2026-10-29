@@ -6,9 +6,8 @@
  * PR pills (`pr.lead`, `pr.facts`) wait for core: those slots are told only the repo, so a pill
  * would land on every PR in it, not the one that names the issue (bergaaberg/dovre#15).
  */
-import { html } from "hono/html";
 import { type Pack, PACK_API, type RefRule } from "dovre/packs/types.ts";
-import { logAction } from "dovre/actions/deploys.ts";
+import { commentAct, createAct } from "dovre/packs/acts.ts";
 import { checkIssue, commentIssue, createIssue, type LinearIssue, type LinearKept, PRIORITY, readLinear } from "./data.ts";
 import { linearCard, linearPage } from "./view.ts";
 
@@ -92,89 +91,35 @@ export function createLinearPack(
     },
     acts(ctx) {
       const apiKey = () => (ctx.env.LINEAR_API_KEY ?? "").trim();
+      const ready = () => (apiKey() ? undefined : "Set LINEAR_API_KEY.");
+      const href = (key: string, url: string) => opts.issueHref?.(key) ?? (url || "/linear");
+      const upper = (s: string) => s.trim().toUpperCase();
       return [
-        {
-          kind: "create",
-          title: "A Linear issue",
+        createAct({
+          pack: "linear", app: "Linear", thing: "issue", ready,
           when: "I want a new issue in one of my Linear teams, with a title and optional description.",
-          fields: [
-            { name: "team", about: "the team key, e.g. ENG", required: true, max: 20 },
-            { name: "title", about: "the issue's title", required: true, max: 200 },
-            { name: "description", about: "what it's about, in a few lines", max: 4000, text: true },
-          ],
-          button: "Create",
-          hint: "Creates the issue and links it here.",
-          question: "Create this Linear issue?",
-          inputs: (act) => html`${act.title ?? act.team ?? ""}`,
-          async run(form) {
-            const team = (form.team ?? "").trim().toUpperCase();
-            const title = (form.title ?? "").trim().slice(0, 200);
-            const key = apiKey();
-            if (!key || !team || !title) return { ok: false, error: "Set LINEAR_API_KEY, and give a team key and a title." };
-            const target = `${team} issue`;
-            try {
-              const r = await createIssue(key, team, title, (form.description ?? "").trim().slice(0, 4000), fetchFn);
-              if (r === null) {
-                await logAction(ctx.db, { kind: "linear.create", target, ok: false, error: "no such team" });
-                return { ok: false, error: `Linear has no team "${team}".` };
-              }
-              if ("error" in r) {
-                await logAction(ctx.db, { kind: "linear.create", target, ok: false, error: r.error });
-                return { ok: false, error: r.error };
-              }
-              await logAction(ctx.db, { kind: "linear.create", target, detail: title, ok: true });
-              kept = await read(ctx);
-              ctx.publish(["linear"]);
-              return { ok: true, done: `Created ${r.key}`, href: opts.issueHref?.(r.key) ?? (r.url || "/linear") };
-            } catch (e) {
-              const error = String((e as Error)?.message ?? e);
-              await logAction(ctx.db, { kind: "linear.create", target, ok: false, error });
-              return { ok: false, error };
-            }
+          where: { name: "team", about: "the team key, e.g. ENG", pattern: /[A-Z][A-Z0-9]{0,9}/, max: 20, normalize: upper },
+          async create(team, title, description) {
+            const r = await createIssue(apiKey(), team, title, description, fetchFn);
+            if (r === null) return null;
+            if ("error" in r) return { refuse: r.error };
+            kept = await read(ctx);
+            ctx.publish(["linear"]);
+            return { label: r.key, href: href(r.key, r.url) };
           },
-        },
-        {
-          kind: "comment",
-          title: "A comment on a Linear issue",
-          when: "I want to add a comment to a Linear issue I can name by its key, e.g. ENG-123.",
-          fields: [
-            { name: "issue", about: "the issue key, e.g. ENG-123", required: true, max: 30 },
-            { name: "text", about: "the comment", required: true, max: 4000, text: true },
-          ],
-          button: "Comment",
-          hint: "Adds the comment from you.",
-          question: "Post this comment on Linear?",
-          inputs: (act) => html`${act.issue ?? ""}`,
-          async run(form) {
-            const issueKey = (form.issue ?? "").trim().toUpperCase();
-            const text = (form.text ?? "").trim().slice(0, 4000);
-            const key = apiKey();
-            if (!key || !/^[A-Z][A-Z0-9]{0,9}-\d{1,7}$/.test(issueKey) || !text) return { ok: false, error: "Set LINEAR_API_KEY, and give an issue key and a comment." };
-            const target = `${issueKey} comment`;
-            try {
-              const issue = await checkIssue(key, issueKey, fetchFn);
-              if (!issue) {
-                await logAction(ctx.db, { kind: "linear.comment", target, ok: false, error: "no such issue" });
-                return { ok: false, error: `Linear has no issue ${issueKey}.` };
-              }
-              if (!issue.open) {
-                await logAction(ctx.db, { kind: "linear.comment", target, ok: false, error: `${issue.state}` });
-                return { ok: false, error: `${issueKey} is ${issue.state}; let it be.` };
-              }
-              const r = await commentIssue(key, issue.id, text, fetchFn);
-              if (r !== true) {
-                await logAction(ctx.db, { kind: "linear.comment", target, ok: false, error: r.error });
-                return { ok: false, error: r.error };
-              }
-              await logAction(ctx.db, { kind: "linear.comment", target, ok: true });
-              return { ok: true, done: `Commented on ${issue.key}`, href: opts.issueHref?.(issue.key) ?? (issue.url || "/linear") };
-            } catch (e) {
-              const error = String((e as Error)?.message ?? e);
-              await logAction(ctx.db, { kind: "linear.comment", target, ok: false, error });
-              return { ok: false, error };
-            }
+        }),
+        commentAct({
+          pack: "linear", app: "Linear", thing: "issue", ready,
+          ref: { name: "issue", about: "the issue key, e.g. ENG-123", pattern: /[A-Z][A-Z0-9]{0,9}-\d{1,7}/, max: 30, normalize: upper },
+          async find(key) {
+            const i = await checkIssue(apiKey(), key, fetchFn);
+            return i && { ...i, label: i.key, href: href(i.key, i.url) };
           },
-        },
+          comment: async (issue, text) => {
+            const r = await commentIssue(apiKey(), issue.id, text, fetchFn);
+            return r === true ? true : { refuse: r.error };
+          },
+        }),
       ];
     },
   };
