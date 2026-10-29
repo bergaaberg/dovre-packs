@@ -242,3 +242,63 @@ export async function commentIssue(apiKey: string, issueId: string, body: string
   if (!r.ok) return { error: r.error };
   return r.data.commentCreate?.success ? true : { error: "Linear didn't add the comment" };
 }
+
+// ── Lookups (Bino, and agents' tools): read-only, plain text for a model ──────
+
+const LOOK_ISSUE = `query DovreLinearLook($key: String!) {
+  issue(id: $key) {
+    identifier title description priority url
+    state { name } team { key } assignee { name } project { name } cycle { number } dueDate
+    comments(first: 5, orderBy: createdAt) { nodes { body createdAt user { name } } }
+  }
+}`;
+const LOOK_SEARCH = `query DovreLinearSearch($q: String!) {
+  issues(first: 15, filter: { title: { containsIgnoreCase: $q } }, orderBy: updatedAt) {
+    nodes { identifier title priority state { name } assignee { name } }
+  }
+}`;
+export const ISSUE_KEY = /^[A-Z][A-Z0-9]{0,9}-\d{1,7}$/;
+
+const oneLine = (v: unknown, max: number) => cut(v, max).replace(/\s+/g, " ").trim();
+const para = (v: unknown, max: number) => {
+  const t = cut(v, max + 1).replace(/\r\n?/g, "\n").trim();
+  return t.length > max ? `${t.slice(0, max)}…` : t;
+};
+
+/** One issue as Bino reads it: its facts, its description and its latest comments, cut to size. */
+export async function lookIssue(apiKey: string, key: string, fetchFn: typeof fetch): Promise<string> {
+  const k = key.trim().toUpperCase();
+  if (!ISSUE_KEY.test(k)) return `${key} isn't an issue key (like ENG-123).`;
+  type Raw = { identifier?: string; title?: string; description?: string; priority?: number; state?: { name?: string }; team?: { key?: string }; assignee?: { name?: string } | null; project?: { name?: string } | null; cycle?: { number?: number } | null; dueDate?: string | null; comments?: { nodes?: { body?: string; createdAt?: string; user?: { name?: string } | null }[] } };
+  const r = await gql<{ issue?: Raw | null }>(apiKey, LOOK_ISSUE, { key: k }, fetchFn);
+  if (!r.ok) return `Linear didn't answer: ${r.error}`;
+  const i = r.data.issue;
+  if (!i?.identifier) return `There's no issue ${k} in Linear.`;
+  const facts = [
+    `State: ${oneLine(i.state?.name, 60) || "?"}`,
+    `priority: ${PRIORITY[i.priority ?? 0] ?? "?"}`,
+    `assignee: ${oneLine(i.assignee?.name, 80) || "nobody"}`,
+    i.project?.name ? `project: ${oneLine(i.project.name, 80)}` : "",
+    typeof i.cycle?.number === "number" ? `cycle ${i.cycle.number}` : "",
+    i.dueDate ? `due ${oneLine(i.dueDate, 10)}` : "",
+  ].filter(Boolean);
+  const comments = (i.comments?.nodes ?? []).slice(-5).map((c) => `- ${oneLine(c.user?.name, 60) || "someone"} (${oneLine(c.createdAt, 10)}): ${para(c.body, 300)}`);
+  return [
+    `${oneLine(i.identifier, 20)}: ${oneLine(i.title, 200)}`,
+    `${facts.join(", ")}.`,
+    i.description ? `Description:\n${para(i.description, 2000)}` : "No description.",
+    comments.length ? `Latest comments:\n${comments.join("\n")}` : "",
+  ].filter(Boolean).join("\n\n");
+}
+
+/** Issues whose title has the words, newest first: one line each. */
+export async function searchIssues(apiKey: string, q: string, fetchFn: typeof fetch): Promise<string> {
+  const term = oneLine(q, 100);
+  if (term.length < 2) return "Say at least two characters to search for.";
+  type Raw = { identifier?: string; title?: string; priority?: number; state?: { name?: string }; assignee?: { name?: string } | null };
+  const r = await gql<{ issues?: { nodes?: Raw[] } }>(apiKey, LOOK_SEARCH, { q: term }, fetchFn);
+  if (!r.ok) return `Linear didn't answer: ${r.error}`;
+  const rows = (r.data.issues?.nodes ?? []).filter((n) => n.identifier).map((n) => `- ${oneLine(n.identifier, 20)} [${oneLine(n.state?.name, 40) || "?"}] ${oneLine(n.title, 160)}${n.assignee?.name ? ` (${oneLine(n.assignee.name, 60)})` : ""}`);
+  return rows.length ? `Issues with "${term}" in the title:\n${rows.join("\n")}` : `No issue has "${term}" in its title.`;
+}
+

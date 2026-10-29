@@ -1,14 +1,14 @@
 /**
  * Linear Pack (`linear`): assigned open issues, active cycle progress, un-triaged team issues,
- * `TEAM-123` reference linking, Today's glance and opening line, and Bino acts (create an issue,
- * comment on one).
+ * `TEAM-123` reference linking, Today's glance and opening line, Bino lookups (an issue by key,
+ * a title search; agents get them as tools too) and Bino acts (create an issue, comment on one).
  *
  * PR pills (`pr.lead`, `pr.facts`) wait for core: those slots are told only the repo, so a pill
  * would land on every PR in it, not the one that names the issue (bergaaberg/dovre#15).
  */
 import { type Pack, PACK_API, type RefRule } from "dovre/packs/types.ts";
 import { commentAct, createAct } from "dovre/packs/acts.ts";
-import { checkIssue, commentIssue, createIssue, type LinearIssue, type LinearKept, PRIORITY, readLinear } from "./data.ts";
+import { checkIssue, commentIssue, createIssue, type LinearIssue, type LinearKept, lookIssue, PRIORITY, readLinear, searchIssues } from "./data.ts";
 import { linearCard, linearPage } from "./view.ts";
 
 /** The keys this Dovre links: the configured team, else every team key seen in the data. */
@@ -88,6 +88,24 @@ export function createLinearPack(
         if (t.untriaged.length) lines.push(`${t.key}: ${t.untriaged.length} un-triaged.`);
       }
       return lines.join("\n");
+    },
+    lookups(ctx) {
+      const apiKey = (ctx.env.LINEAR_API_KEY ?? "").trim();
+      if (!apiKey) return [];
+      return [
+        {
+          kind: "issue",
+          when: "One Linear issue by its key (ENG-123): its state, priority, assignee, description and latest comments.",
+          fields: [{ name: "key", about: "the issue key, e.g. ENG-123", required: true, max: 30 }],
+          run: (a) => lookIssue(apiKey, a.key ?? "", fetchFn),
+        },
+        {
+          kind: "search",
+          when: "Linear issues whose title has some words, newest first (15 at most): key, state, title, assignee.",
+          fields: [{ name: "q", about: "words in the title", required: true, max: 100 }],
+          run: (a) => searchIssues(apiKey, a.q ?? "", fetchFn),
+        },
+      ];
     },
     acts(ctx) {
       const apiKey = () => (ctx.env.LINEAR_API_KEY ?? "").trim();
