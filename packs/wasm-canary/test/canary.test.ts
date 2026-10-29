@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { assertInert, packApp } from "dovre/packs/testing.ts";
 import { createWasmCanaryPack, diffWasm } from "../index.ts";
-import { DIFF_GLUE } from "../diff.wasm.ts";
+import { DIFF_GLUE, DIFF_SHA256 } from "../diff.wasm.ts";
 
 /** What the page's script does, under Node: the same glue, the same module. */
 function diffIn(a: string, b: string): string[] {
@@ -26,7 +26,7 @@ test("the canary's page: its module is served as WebAssembly, the page names it,
   const page = await res.text();
   assertInert("canary page", page);
   const path = page.match(/data-wasm="([^"]+)"/)?.[1];
-  assert.match(path ?? "", /^\/assets\/wasm\/wasm-canary\.diff\.[a-z0-9]+\.wasm$/);
+  assert.equal(path, `/assets/wasm/wasm-canary.diff.${DIFF_SHA256}.wasm`, "a file kept out of the bundle, at the hash build.sh wrote");
   const wasm = await get(path!);
   assert.equal(wasm.headers.get("Content-Type"), "application/wasm");
   assert.ok(WebAssembly.validate(new Uint8Array(await wasm.arrayBuffer())));

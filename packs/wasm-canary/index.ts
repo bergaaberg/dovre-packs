@@ -2,14 +2,16 @@
  * WASM canary (`wasm-canary`): a line diff written in Rust (rust/, built by build.sh), compiled to
  * WebAssembly (no `unsafe`; wasm-bindgen carries the strings) and run in the browser. It proves the path a heavier pack takes (a syntax-aware
  * diff, tree-sitter, a formatter): core serves the module (`Pack.wasm`), the page's script
- * compiles it, and the server never runs it. Nothing typed here leaves the browser.
+ * compiles it, and the server never runs it. The module is a file (diff.wasm) kept out of the Worker
+ * bundle: core serves it locally from `load`, hosted from the static assets its build step writes. Nothing typed here leaves the browser.
  */
+import { readFileSync } from "node:fs";
 import { html } from "hono/html";
 import { type Pack, PACK_API } from "dovre/packs/types.ts";
-import { DIFF_GLUE, DIFF_WASM } from "./diff.wasm.ts";
+import { DIFF_GLUE, DIFF_SHA256 } from "./diff.wasm.ts";
 
-/** The module's bytes, from the base64 build.sh writes. */
-export const diffWasm = (): Uint8Array => Uint8Array.from(atob(DIFF_WASM), (ch) => ch.charCodeAt(0));
+/** The module's bytes, from diff.wasm beside this file. Under Node only: the Worker never reads it. */
+export const diffWasm = (): Uint8Array => new Uint8Array(readFileSync(new URL("./diff.wasm", import.meta.url)));
 
 const OLD = `name: dovre
 compatibility_date: 2026-10-06
@@ -77,7 +79,7 @@ export function createWasmCanaryPack(): Pack {
     },
     styles,
     script,
-    wasm: { diff: diffWasm() },
+    wasm: { diff: { sha256: DIFF_SHA256, load: diffWasm } },
     pages: () => [{ title: "WASM canary", href: "/wasm-canary", icon: "±", about: "A line diff in Rust, run as WebAssembly in your browser", also: ["wasm", "webassembly", "rust", "diff"] }],
     about: (_ctx, path) => (path.startsWith("/wasm-canary") ? "The WASM canary (what's typed here stays in the browser)" : undefined),
     routes(app, ctx) {
