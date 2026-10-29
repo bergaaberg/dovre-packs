@@ -281,7 +281,7 @@ test("save: replacing a request is a Confirm, re-checked against the file as it 
   assert.equal(first.status, 200);
   const q = await first.text();
   assert.match(q, /This replaces <strong>GET two<\/strong>/);
-  assert.match(q, /<details class="confirm">/);
+  assert.match(q, /<form class="post" method="post" action="\/http\/save">/, "one click on this page by default (dovre#104)");
   assert.deepEqual(httpPack.writes, [{ kind: "replace", label: "Replace a saved request in a .http file" }], "Settings → Writes can make it one click (dovre#104)");
   assert.match(q, /name="confirm" value="1"/);
   assert.ok(readFileSync(file, "utf8").includes("GET {{baseUrl}}/2"));
