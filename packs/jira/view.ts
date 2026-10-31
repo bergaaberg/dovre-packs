@@ -1,6 +1,6 @@
 /** Jira Pack (`jira`) views. */
 import { html } from "hono/html";
-import { Ago, safeUrl } from "dovre/pages/parts.ts";
+import { Ago, Link, safeUrl } from "dovre/pages/parts.ts";
 import { Card, Empty, Item, List, Notice, PageHeader, Panel, Pill, Post } from "dovre/ui/kit.ts";
 import type { JiraIssue, JiraKept, JiraSetup } from "./data.ts";
 
@@ -52,3 +52,9 @@ export function jiraCard(k: JiraKept) {
       : html`<p class="t2">${k.ok ? "No open issues assigned to you" : k.setup === "waiting" ? "Asking Jira…" : (k.error ?? "Jira unavailable")}</p>`,
   });
 }
+
+/** A PR's "pr.lead" slot: the ticket its branch or title names, with its status. */
+export const prLead = (i: JiraIssue | undefined) => (i ? html` ${Pill({ tone: tone(i), children: `${i.key} ${i.status}`, title: i.summary })}` : "");
+
+/** A PR's "pr.facts" slot: one row linking the ticket its branch or title names. */
+export const prFacts = (i: JiraIssue | undefined, href: string): [string, ReturnType<typeof html>][] => (i ? [["Jira", html`${Link(href, `${i.key} ${i.summary}`)}`]] : []);

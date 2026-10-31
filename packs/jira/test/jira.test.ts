@@ -223,3 +223,30 @@ test("jira (mcp): Read now asks at once, past the cadence, and goes back to the 
   await new Promise((r) => setTimeout(r, 10));
   assert.equal(jobs.length, 2);
 });
+
+// ── PR pills ──
+
+test("jira: a PR's branch or title naming a kept ticket gets a pill and a Jira row; otherwise nothing", async () => {
+  const issue = (key: string, summary: string, category: string) => ({ key, fields: { summary, status: { name: "In Progress", statusCategory: { key: category } } } });
+  const pack = createJiraPack({ fetchFn: async () => new Response(JSON.stringify({ issues: [issue("PLAT-42", "Add D1 migration check", "indeterminate")] }), { status: 200 }) });
+  const ctx = testContext({ env: { JIRA_SITE: SITE, JIRA_TOKEN: "tok" } });
+  const pr = (branch: string, title: string) => ({ repo: "shop-api", number: 7, branch, title, url: "https://ghe/shop-api/pull/7" });
+  const sl = pack.slots!(ctx);
+  const lead = (branch: string, title = "x") => String(sl["pr.lead"]!(pr(branch, title)));
+  const facts = (branch: string, title = "x") => sl["pr.facts"]!(pr(branch, title));
+
+  assert.equal(lead("feature/plat-42-migration"), "", "no data yet: nothing");
+  assert.deepEqual(facts("feature/plat-42-migration"), []);
+
+  await pack.refresh!(ctx);
+  assert.match(lead("feature/plat-42-migration"), /PLAT-42 In Progress/);
+  assert.match(lead("feature/plat-42-migration"), /Add D1 migration check/, "the summary is the title");
+  const [[label, link]] = facts("feature/plat-42-migration");
+  assert.equal(label, "Jira");
+  assert.match(String(link), new RegExp(`https://${SITE}/browse/PLAT-42`));
+  assert.match(String(link), /PLAT-42 Add D1 migration check/);
+  assert.match(lead("main", "PLAT-42: check migrations"), /PLAT-42/, "a key in the title");
+  assert.equal(lead("feature/plat-99-other", "other"), "", "a ticket the pack doesn't keep: nothing");
+  assert.deepEqual(facts("feature/plat-99-other", "other"), []);
+  assert.equal(lead("feature/xplat-42"), "", "not the key by itself");
+});

@@ -23,7 +23,7 @@ import { type Agent, JiraSetupError, loadViaMcp } from "./mcp.ts";
 import { createFiling, type Filed, SCREEN_MS } from "./filing.ts";
 import { draftPrompt, emptyTicket, first, MAX_SUMMARY, nameOf, ticketFields, ticketProjectsOf, ticketValid, validateTicket } from "./tickets.ts";
 import { doneBody, failedBody, formBody, loadingBody, NEW, newHref, noProjectsBody, pickProjectBody, previewBody, problemBody, projectsPanel, workingBody } from "./tickets.view.ts";
-import { jiraCard, jiraPage } from "./view.ts";
+import { jiraCard, jiraPage, prFacts, prLead } from "./view.ts";
 
 const everyMsOf = (env: Record<string, string | undefined>) => {
   const min = Number(env.JIRA_EVERY_MIN);
@@ -61,6 +61,18 @@ export function createJiraPack(
   type Job = { state: "working"; project: string; summary: string } | { state: "done"; key: string; warning?: string } | { state: "failed"; problem: string; again: Parameters<typeof previewBody>[0] };
   const jobs = new Map<string, Job>();
   const isNonce = (s: string) => /^[0-9a-f-]{36}$/.test(s);
+  /** The kept ticket a PR's branch or title names (any case), if the pack keeps it; nothing is fetched. */
+  const ticketOf = ({ branch, title }: { branch: string; title: string }) => {
+    if (!kept?.ok) return undefined;
+    const have = new Map<string, JiraKept["mine"][number]>();
+    for (const i of [...kept.mine, ...kept.moving]) if (!have.has(i.key.toUpperCase())) have.set(i.key.toUpperCase(), i);
+    for (const text of [branch, title])
+      for (const m of text.matchAll(/(?<![A-Za-z0-9_])[A-Za-z][A-Za-z0-9_]{1,9}-\d{1,9}(?![A-Za-z0-9])/g)) {
+        const i = have.get(m[0].toUpperCase());
+        if (i) return i;
+      }
+    return undefined;
+  };
   const pending = html`<meta name="u-topics" content="jira">`;
 
   async function readMcp(ctx: PackContext): Promise<void> {
@@ -289,6 +301,11 @@ export function createJiraPack(
     acts: (ctx) => (ticketProjectsOf(ctx.env).length && !ctx.hosted ? [ticketAct(ctx)] : []),
     slots: (ctx) => ({
       "work.new": () => projectsPanel(ticketProjectsOf(ctx.env)),
+      "pr.lead": (pr) => prLead(ticketOf(pr)),
+      "pr.facts": (pr) => {
+        const i = ticketOf(pr);
+        return i ? prFacts(i, `https://${siteOf(ctx.env)}/browse/${encodeURIComponent(i.key)}`) : [];
+      },
       "actions.what": ({ kind }) => (kind === "ticket.create" ? "Created a Jira ticket" : undefined),
     }),
   };
