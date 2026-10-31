@@ -99,5 +99,5 @@ export function linearLead(issue: LinearIssue): Html {
 export function linearFact(issue: LinearIssue): Html {
   const label = `${issue.key} ${issue.title}`;
   const href = safeUrl(issue.url);
-  return href ? Link(href, label) : html`${label}`;
+  return href === "#" ? html`${label}` : Link(href, label);
 }

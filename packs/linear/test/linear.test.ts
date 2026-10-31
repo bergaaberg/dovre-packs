@@ -329,12 +329,12 @@ test("linear: PR pills: with no data yet they draw nothing", async () => {
   assert.equal(calls.length, 0);
 });
 
-test("linear: PR pills: an unsafe issue url is not linked, and the row keeps its text", async () => {
+test("linear: PR pills: an unsafe issue url links to the issue on linear.app instead, and the text is escaped", async () => {
   const { pr, facts } = await pillsPack();
   const rows = facts(pr("someone/ops-3-thing", "x"));
   assert.equal(rows.length, 1);
   const out = String(rows[0]![1]);
   assert.ok(!out.includes("javascript:"), "javascript: inert");
-  assert.ok(!out.includes("<a "), "not linked");
+  assert.match(out, /href="https:\/\/linear\.app\/acme\/issue\/OPS-3"/, "the safe link the data keeps");
   assert.ok(!out.includes("<script>"), "escaped");
 });
