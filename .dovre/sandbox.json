@@ -1,0 +1,4 @@
+{
+  "allow": ["registry.npmjs.org", "codeload.github.com"],
+  "siblings": ["bergaaberg/dovre"]
+}
