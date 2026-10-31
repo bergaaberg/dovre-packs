@@ -375,7 +375,9 @@ test("topo detail panel: run and component rows wrap inside the card", async () 
   assert.match(rule(".topo-envs"), /max-width: 100%/);
   assert.match(rule(".topo-envs"), /margin-left: auto/);
   assert.match(rule(".topo-comps li"), /flex-wrap: wrap/);
+  assert.match(rule(".topo-owns"), /min-width: 0/);
   assert.match(rule(".topo-owns"), /overflow-wrap: anywhere/);
+  assert.match(rule(".topo-gi"), /flex: none/);
 });
 
 test("topo detail panel: the card's markup carries the wrapping classes", () => {
@@ -383,4 +385,12 @@ test("topo detail panel: the card's markup carries the wrapping classes", () => 
   const out = String(topoPage({ entries, hosted: true }));
   assert.match(out, /<li><strong>web<\/strong> <span class="topo-owns[^"]*">owns apps\/web<\/span><span class="topo-envs"><a href="[^"]*">Focus agent<\/a><\/span><\/li>/);
   assert.match(out, /<ul class="topo-runs"><li><svg class="topo-gi"[\s\S]*?<\/svg><span class="topo-rn">[\s\S]*?<\/span><span class="topo-envs">/);
+});
+
+test("topo detail panel: an unclaimed run's Claim or delete link sits in a wrapping .topo-envs", () => {
+  const entries: TopoEntry[] = [{ repo: "quill", dir: "/x/quill", file: "peak.yaml", peak: { version: 1, name: "Quill", tier: "active", components: [], docs: {}, health: { workers: [] }, uses: [], environments: {} } }];
+  const drift = { configured: true, declares: true, drift: { missing: [], orphans: [{ kind: "workers", name: "quill-stray" }] } } as unknown as Parameters<typeof topoPage>[0]["drift"];
+  const out = String(topoPage({ entries, drift, at: "quill" }));
+  assert.match(out, /Unclaimed, looks like this repo/);
+  assert.match(out, /<ul class="topo-runs"><li><svg class="topo-gi"[\s\S]*?<\/svg><span class="topo-rn">[\s\S]*?<\/span><span class="topo-envs"><a href="[^"]*">Claim or delete<\/a><\/span><\/li>/);
 });
