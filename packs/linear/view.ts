@@ -1,7 +1,7 @@
 /** Linear Pack (`linear`) views. */
 import { html } from "hono/html";
 import { type Html, Card, Empty, Gauge, Item, List, Notice, PageHeader, Panel, Pill } from "dovre/ui/kit.ts";
-import { safeUrl } from "dovre/pages/parts.ts";
+import { Link, safeUrl } from "dovre/pages/parts.ts";
 import { type LinearIssue, type LinearKept, PRIORITY } from "./data.ts";
 
 const stateTone = (i: LinearIssue): "ok" | "warn" | "accent" | "neutral" => {
@@ -93,4 +93,11 @@ export function linearCard(k: LinearKept) {
 /** The pill a PR's row shows when its branch or title names a Linear issue we know. */
 export function linearLead(issue: LinearIssue): Html {
   return Pill({ tone: stateTone(issue), children: `${issue.key} ${issue.state}`, title: `${issue.title} · ${PRIORITY[issue.priority] ?? "No priority"}` });
+}
+
+/** The Linear row of a PR's facts: the issue, its key and title linked. */
+export function linearFact(issue: LinearIssue): Html {
+  const label = `${issue.key} ${issue.title}`;
+  const href = safeUrl(issue.url);
+  return href ? Link(href, label) : html`${label}`;
 }

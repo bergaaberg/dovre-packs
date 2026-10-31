@@ -3,13 +3,14 @@
  * `TEAM-123` reference linking, Today's glance and opening line, Bino lookups (an issue by key,
  * a title search; agents get them as tools too) and Bino acts (create an issue, comment on one).
  *
- * PR pills (`pr.lead`, `pr.facts`) wait for core: those slots are told only the repo, so a pill
- * would land on every PR in it, not the one that names the issue (bergaaberg/dovre#15).
+ * PR pills (`pr.lead`, `pr.facts`): a PR whose branch or title names an issue the pack keeps (assigned
+ * to you, or un-triaged in a team) gets that issue's pill and a Linear row. Keys match in any case,
+ * for Linear's own lower-case branch names (`someone/eng-123-fix-it`). An issue not kept draws nothing.
  */
 import { type Pack, PACK_API, type RefRule } from "dovre/packs/types.ts";
 import { commentAct, createAct } from "dovre/packs/acts.ts";
 import { checkIssue, commentIssue, createIssue, type LinearIssue, type LinearKept, lookIssue, PRIORITY, readLinear, searchIssues } from "./data.ts";
-import { linearCard, linearPage } from "./view.ts";
+import { linearCard, linearFact, linearLead, linearPage } from "./view.ts";
 
 /** The keys this Dovre links: the configured team, else every team key seen in the data. */
 function refPattern(envTeam: string | undefined, kept: LinearKept | undefined): RegExp | null {
@@ -18,6 +19,20 @@ function refPattern(envTeam: string | undefined, kept: LinearKept | undefined): 
   const uniq = [...new Set(keys)];
   if (!uniq.length) return null;
   return new RegExp(`\\b(?:${uniq.join("|")})-\\d{1,7}\\b`, "g");
+}
+
+/** The kept issue a PR's branch or title names (the key in any case), if the pack keeps it. */
+function issueFor(kept: LinearKept | undefined, envTeam: string | undefined, pr: { branch?: string; title?: string }): LinearIssue | undefined {
+  const pattern = refPattern(envTeam, kept);
+  if (!kept?.ok || !pattern) return undefined;
+  const all = [...kept.mine, ...kept.teams.flatMap((t) => t.untriaged)];
+  for (const text of [pr.branch, pr.title]) {
+    for (const m of (text ?? "").toUpperCase().matchAll(pattern)) {
+      const found = all.find((i) => i.key.toUpperCase() === m[0]);
+      if (found) return found;
+    }
+  }
+  return undefined;
 }
 
 /** Each issue's link through `href`, when one is given. */
@@ -56,6 +71,16 @@ export function createLinearPack(
       kept = await read(ctx);
       ctx.publish(["linear", "snapshot"]);
     },
+    slots: (ctx) => ({
+      "pr.lead": (pr) => {
+        const issue = issueFor(kept, ctx.env.LINEAR_TEAM, pr);
+        return issue ? linearLead(issue) : "";
+      },
+      "pr.facts": (pr) => {
+        const issue = issueFor(kept, ctx.env.LINEAR_TEAM, pr);
+        return issue ? [["Linear", linearFact(issue)]] : [];
+      },
+    }),
     nav: () => [{ href: "/linear", title: "Linear", icon: "ticket", group: "Code" }],
     pages: () => [{ title: "Linear", href: "/linear", icon: "🎫", about: "Assigned Linear issues", also: ["issues", "cycle"] }],
     routes(app, ctx) {

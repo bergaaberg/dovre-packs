@@ -272,3 +272,32 @@ test("linear: lookups read one issue (description and latest comments, cut) and 
   assert.equal(await search!.run({ q: "certs" }, ctx), 'Issues with "certs" in the title:\n- ENG-3 [Todo] Certs renew');
   assert.match(await search!.run({ q: "x" }, ctx), /at least two/);
 });
+
+test("linear: PR pills name the kept issue in a branch (any case) or title; unknown keys and no data draw nothing", async () => {
+  const { fetchFn } = fakeLinear([{ match: /viewer/, body: READ }]);
+  const pack = createLinearPack({ fetchFn });
+  const ctx = testContext({ env: { LINEAR_API_KEY: "k" } });
+  const slots = pack.slots!(ctx);
+  const pr = (branch: string, title: string) => ({ repo: "acme/app", number: 1, branch, title, url: "https://example.test/pr/1" });
+  const lead = (a: ReturnType<typeof pr>) => String(slots["pr.lead"]!(a));
+  const facts = (a: ReturnType<typeof pr>) => slots["pr.facts"]!(a) as [string, unknown][];
+
+  // No data yet.
+  assert.equal(lead(pr("someone/eng-7-ship", "x")), "");
+  assert.deepEqual(facts(pr("someone/eng-7-ship", "x")), []);
+
+  await pack.refresh!(ctx);
+  // A lower-case key in the branch.
+  assert.match(lead(pr("someone/eng-7-ship-the-pack", "Ship")), /ENG-7 In Progress/);
+  const rows = facts(pr("someone/eng-7-ship-the-pack", "Ship"));
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]![0], "Linear");
+  assert.match(String(rows[0]![1]), /ENG-7 Ship the pack/);
+  // A key in the title, and an un-triaged issue.
+  assert.match(lead(pr("fix", "ENG-7: ship it")), /ENG-7/);
+  assert.match(lead(pr("fix", "Fix ENG-9")), /ENG-9/);
+  // An unknown key: nothing, and nothing fetched.
+  assert.equal(lead(pr("someone/eng-99-other", "ENG-98 other")), "");
+  assert.deepEqual(facts(pr("someone/eng-99-other", "ENG-98 other")), []);
+  assert.equal(lead(pr("main", "no key")), "");
+});
