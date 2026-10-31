@@ -18,12 +18,12 @@ import type { AppEnv } from "dovre/env.ts";
 import type { ActKind, FindItem, Pack, PackContext } from "dovre/packs/types.ts";
 import { PACK_API } from "dovre/packs/types.ts";
 import { type Html, Notice } from "dovre/ui/kit.ts";
-import { type JiraKept, projectsOf, readJira, siteOf, siteOk, viaOf } from "./data.ts";
+import { browseHref, type JiraKept, projectsOf, readJira, siteOf, siteOk, viaOf } from "./data.ts";
 import { type Agent, JiraSetupError, loadViaMcp } from "./mcp.ts";
 import { createFiling, type Filed, SCREEN_MS } from "./filing.ts";
 import { draftPrompt, emptyTicket, first, MAX_SUMMARY, nameOf, ticketFields, ticketProjectsOf, ticketValid, validateTicket } from "./tickets.ts";
 import { doneBody, failedBody, formBody, loadingBody, NEW, newHref, noProjectsBody, pickProjectBody, previewBody, problemBody, projectsPanel, workingBody } from "./tickets.view.ts";
-import { jiraCard, jiraPage } from "./view.ts";
+import { jiraCard, jiraPage, prFacts, prLead } from "./view.ts";
 
 const everyMsOf = (env: Record<string, string | undefined>) => {
   const min = Number(env.JIRA_EVERY_MIN);
@@ -61,6 +61,23 @@ export function createJiraPack(
   type Job = { state: "working"; project: string; summary: string } | { state: "done"; key: string; warning?: string } | { state: "failed"; problem: string; again: Parameters<typeof previewBody>[0] };
   const jobs = new Map<string, Job>();
   const isNonce = (s: string) => /^[0-9a-f-]{36}$/.test(s);
+  /** The kept ticket a PR's branch or title names (any case), if the pack keeps it; nothing is fetched. */
+  const ticketOf = (env: Record<string, string | undefined>, { branch, title }: { branch: string; title: string }) => {
+    if (!kept?.ok) return undefined;
+    const have = new Map<string, JiraKept["mine"][number]>();
+    for (const i of [...kept.mine, ...kept.moving]) if (!have.has(i.key.toUpperCase())) have.set(i.key.toUpperCase(), i);
+    const projects = new Set([...projectsOf(env), ...ticketProjectsOf(env), ...[...have.keys()].map((k) => k.slice(0, k.lastIndexOf("-")))]);
+    if (!projects.size) return undefined;
+    const names = [...projects].map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+    // Only letters and digits border a key: `bugfix_plat-42` and `feature/plat-42-x` name PLAT-42.
+    const pattern = new RegExp(`(?<![A-Za-z0-9])(?:${names})-\\d{1,9}(?![A-Za-z0-9])`, "gi");
+    for (const text of [branch, title])
+      for (const m of text.matchAll(pattern)) {
+        const i = have.get(m[0].toUpperCase());
+        if (i) return i;
+      }
+    return undefined;
+  };
   const pending = html`<meta name="u-topics" content="jira">`;
 
   async function readMcp(ctx: PackContext): Promise<void> {
@@ -275,7 +292,7 @@ export function createJiraPack(
       if (!siteOk(site)) return [];
       const projects = new Set([...projectsOf(ctx.env), ...ticketProjectsOf(ctx.env), ...(kept?.mine ?? []).map((i) => i.project)]);
       const pattern = projects.size ? new RegExp(`\\b(?:${[...projects].join("|")})-\\d{1,9}\\b`, "g") : /\b[A-Z][A-Z0-9_]{1,9}-\d{1,6}\b/g;
-      return [{ pattern, href: (m) => `https://${site}/browse/${encodeURIComponent(m)}` }];
+      return [{ pattern, href: (m) => browseHref(site, m) }];
     },
     bino: (ctx) => {
       const filed = ticketProjectsOf(ctx.env);
@@ -289,6 +306,11 @@ export function createJiraPack(
     acts: (ctx) => (ticketProjectsOf(ctx.env).length && !ctx.hosted ? [ticketAct(ctx)] : []),
     slots: (ctx) => ({
       "work.new": () => projectsPanel(ticketProjectsOf(ctx.env)),
+      "pr.lead": (pr) => prLead(ticketOf(ctx.env, pr)),
+      "pr.facts": (pr) => {
+        const i = ticketOf(ctx.env, pr);
+        return i ? prFacts(i, browseHref(siteOf(ctx.env), i.key)) : [];
+      },
       "actions.what": ({ kind }) => (kind === "ticket.create" ? "Created a Jira ticket" : undefined),
     }),
   };

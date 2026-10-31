@@ -38,6 +38,8 @@ export type JiraKept = {
 };
 
 export const siteOf = (env: Record<string, string | undefined>) => (env.JIRA_SITE ?? "").replace(/^https?:\/\//i, "").replace(/\/+$/, "").trim();
+/** The link to a ticket on a site (a bare host): what `refs` and the PR slots both use. */
+export const browseHref = (site: string, key: string) => `https://${site}/browse/${encodeURIComponent(key)}`;
 export const siteOk = (site: string) => /^[a-z0-9.-]+\.[a-z]{2,}$/i.test(site);
 
 /** JIRA_VIA as set; unset, a token means REST, otherwise off. */
