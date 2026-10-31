@@ -5,6 +5,7 @@ Same process as core: follow **[bergaaberg/dovre CONTRIBUTING.md](https://github
 These rules are specific to this repo:
 
 - **The gate here** is `pnpm check` (typecheck and every `packs/*/test/*.test.ts`). It needs a sibling `../dovre` checkout. If the typecheck fails on `dovre/...` imports, the `node_modules/dovre` link is stale: `ln -sfn "$(cd ../dovre && pwd)" node_modules/dovre`.
+- **In a Dovre sandbox** (`/siblings/dovre` exists), set up `../dovre` before the gate: `cp -a /siblings/dovre/. /dovre/ && pnpm -C /dovre install --frozen-lockfile && pnpm install`.
 - **One pack per folder:** `packs/<id>/` with an `index.ts` that exports the Pack, and tests in `packs/<id>/test/`. Start from `packs/custom-app/` as a template.
 - **The Pack contract** is `PACK_API = 1` in core's `src/packs/types.ts`. Reads (`nav`, `today`, `brief`, `glance`, `bino`, `routes`) are synchronous and read only the state that `refresh()` filled in. `refresh()` is time-boxed and must fail softly: a down upstream must never break Today or another pack.
 - **Hostile-input test:** every pack's tests feed `<script>alert(1)</script>` and `javascript:alert(1)` through its upstream data and check that the rendered HTML is inert. Every external URL goes through `safeUrl()`.
