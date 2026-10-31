@@ -60,9 +60,22 @@ function avKeep(from, to) {
     if (next && img.dataset.mood && Date.now() < avHold) { next.dataset.mood = img.dataset.mood; next.setAttribute("src", avSrc(next, img.dataset.mood)); }
   }
 }
-async function avatarChange(c) {
+// What can move the avatar: its own topic, the snapshot its mood reads, the machines. Other changes
+// (a pack's refresh, an agent's stream, "synced" ticks) don't ask /avatar/now: every open tab would.
+const AV_TOPICS = ["avatar", "snapshot", "mac"];
+let avBusy = false, avAgain = false, avHidden = false;
+function avatarChange(c) {
   if (!document.querySelector("img[data-av]")) return;
   for (const n of (c?.notes || []).slice(-1)) avSay(n.title, { href: n.url, mood: n.kind === "agent-ask" ? "ask" : n.kind === "agent-done" ? "done" : "pop", tone: n.kind === "ci" ? "bad" : n.kind === "deploy" ? "warn" : "" });
+  if (c && !(c.notes || []).length && !(c.topics || []).some((t) => AV_TOPICS.includes(t))) return;
+  // A tab out of sight asks once it's shown again; changes while one ask is out share the next.
+  if (document.hidden) { avHidden = true; return; }
+  if (avBusy) { avAgain = true; return; }
+  avBusy = true;
+  avAsk().finally(() => { avBusy = false; if (avAgain) { avAgain = false; avatarChange(); } });
+}
+document.addEventListener("visibilitychange", () => { if (!document.hidden && avHidden) { avHidden = false; avatarChange(); } });
+async function avAsk() {
   let now;
   try { now = await (await fetch("/avatar/now", { headers: { accept: "application/json" } })).json(); } catch { return; }
   const wasKey = avNow?.key;
@@ -139,5 +152,5 @@ document.addEventListener("pointerover", (e) => {
 document.addEventListener("submit", (e) => { if (e.target.matches?.("form[data-av-ctl]")) avControl(e, e.target); }, true);
 document.addEventListener("dovre:swap", (e) => avKeep(e.detail.from, e.detail.to));
 document.addEventListener("dovre:change", (e) => avatarChange(e.detail));
-if (document.querySelector("img[data-av]") && window.top === window) setTimeout(() => avatarChange({}), 400);
+if (document.querySelector("img[data-av]") && window.top === window) setTimeout(() => avatarChange(), 400);
 `;
