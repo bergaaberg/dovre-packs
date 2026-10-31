@@ -116,8 +116,12 @@ export async function readSlack(ctx: PackContext, fetchFn: typeof fetch = fetch,
     // Each watched channel's recent history: only messages naming me are kept.
     const mentions: SlackMsg[] = [];
     const needle = `<@${me}>`;
-    for (const c of channels.slice(0, 8)) {
-      const h = await call("conversations.history", { channel: c.id, limit: "50", oldest: String(Math.floor((now - sinceMs) / 1000)) }, token, fetchFn);
+    // Asked at once (8 at most), read in the channels' order.
+    const watched = channels.slice(0, 8);
+    const oldest = String(Math.floor((now - sinceMs) / 1000));
+    const histories = await Promise.all(watched.map((c) => call("conversations.history", { channel: c.id, limit: "50", oldest }, token, fetchFn)));
+    for (const [i, c] of watched.entries()) {
+      const h = histories[i]!;
       for (const row of Array.isArray(h.messages) ? h.messages : []) {
         if (typeof row === "object" && row !== null && typeof (row as { text?: unknown }).text === "string") {
           if (((row as { text: string }).text as string).includes(needle)) {

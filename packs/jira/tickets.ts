@@ -151,8 +151,6 @@ export const ticketProjectsOf = (env: Record<string, string | undefined>) =>
   [...new Set((env.TICKET_PROJECTS ?? "").split(",").map((k) => k.trim().toUpperCase()).filter((k) => /^[A-Z][A-Z0-9_]{0,19}$/.test(k)))];
 
 /** The work type a card names, by name (any case), else the project's first. */
-export const typeNamed = (types: CreateType[], name: string) => types.find((t) => t.name.toLowerCase() === name.trim().toLowerCase()) ?? types[0];
-
 /** What an agent gets to file a ticket from a rough note; it's shown before the agent starts. */
 export const draftPrompt = (site: string, project: string, note: string) =>
   `Create a Jira ticket in project ${project} on ${site} with the Atlassian MCP, from my note below. Pick the work type the project offers (a story, a bug, an improvement) and fill the fields it asks for. Ask me what's missing, show me the draft, and wait for my go before you create anything.
