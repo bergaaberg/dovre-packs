@@ -360,3 +360,33 @@ test("the peak.yaml prompts: draft one from the repo, fix one with every problem
   assert.doesNotMatch(fix, /rename/);
   assert.match(fixPrompt({ file: "peak.yml", problems: ['Unknown key "x" (ignored).'], warnings: true }), /^peak\.yml in this repo has warnings .* until it passes with no warnings\.$/);
 });
+
+test("topo: All repos folds unclaimed and off-the-map rows by kind and name prefix", () => {
+  const orphan = (kind: "workers" | "databases" | "queues", name: string) => ({ kind, name });
+  const orphans = [
+    ...["a", "b", "c"].map((n) => orphan("databases", `skribb-cms-${n}`)),
+    orphan("databases", "two-a"), orphan("databases", "two-b"), orphan("databases", "plain"),
+    orphan("workers", "api-one"), orphan("workers", "api-two"),
+    orphan("queues", "jobs"),
+  ];
+  const out = String(topoPage({ entries: [], coverage: [{ repo: "plain-repo", dir: "/x/plain-repo", kind: "uncataloged" as const, lines: [] }], drift: { configured: true, declares: true, drift: { missing: [], orphans } } }));
+  assert.doesNotMatch(out, /no file claims it<\/span><\/td>/, "no row each");
+  assert.match(out, /<details class="topo-quiet"><summary>D1 databases: 6 unclaimed<\/summary>/, "closed group with a count");
+  assert.match(out, /<summary>Workers: 2 unclaimed<\/summary>/);
+  assert.match(out, /<summary>Queues: 1 unclaimed<\/summary>/);
+  assert.match(out, /<summary><code>skribb-cms-\*<\/code> · 3 D1 databases<\/summary>/, "3 share a prefix: one row");
+  assert.doesNotMatch(out, /two-\*|api-\*/, "2 sharing a prefix stay separate");
+  for (const n of ["two-a", "two-b", "api-one", "api-two", "plain", "jobs"]) assert.match(out, new RegExp(`>${n}</a>`));
+  assert.match(out, /<summary>Off the map: 1 off the map<\/summary>/, "off-the-map rows are their own group");
+});
+
+test("topo: folded and unfolded rows keep hostile names inert", () => {
+  const names = ["<script>alert(1)</script>", "javascript:alert(1)"];
+  const orphans = [
+    ...names.flatMap((n) => [1, 2, 3].map((i) => ({ kind: "databases" as const, name: `${n}-${i}` }))),
+    ...names.map((n) => ({ kind: "workers" as const, name: n })),
+  ];
+  const out = String(topoPage({ entries: [], coverage: [], drift: { configured: true, declares: true, drift: { missing: [], orphans } }, at: names[0] }));
+  assert.match(out, /<code>[^<]*-\*<\/code> · 3 D1 databases/);
+  assertInert("topo folded", out);
+});
