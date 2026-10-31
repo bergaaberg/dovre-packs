@@ -4,7 +4,7 @@
  * a hop and a line when something rings (ask when an agent needs me, done when one finished, pop
  * otherwise); the scene follows /avatar/now. Text goes in with textContent; links only to this
  * app's paths or what a notification already carries. It hears the core on `document`
- * (`dovre:change`, `dovre:swap`).
+ * (`dovreOn`, and `dovre:swap` on `document`).
  */
 export const AVATAR_JS = String.raw`
 // Still when the system asks for less motion, unless Settings → Look → Motion says Always.
@@ -60,21 +60,13 @@ function avKeep(from, to) {
     if (next && img.dataset.mood && Date.now() < avHold) { next.dataset.mood = img.dataset.mood; next.setAttribute("src", avSrc(next, img.dataset.mood)); }
   }
 }
-// What can move the avatar: its own topic, the snapshot its mood reads, the machines. Other changes
-// (a pack's refresh, an agent's stream, "synced" ticks) don't ask /avatar/now: every open tab would.
-const AV_TOPICS = ["avatar", "snapshot", "mac"];
-let avBusy = false, avAgain = false, avHidden = false;
-function avatarChange(c) {
+// What can move the avatar: its own topic, the snapshot its mood reads, the machines, and a note
+// (dovreOn, src/ui/on.js.ts in core: one ask at a time, none while the tab is hidden).
+async function avatarChange(c) {
   if (!document.querySelector("img[data-av]")) return;
   for (const n of (c?.notes || []).slice(-1)) avSay(n.title, { href: n.url, mood: n.kind === "agent-ask" ? "ask" : n.kind === "agent-done" ? "done" : "pop", tone: n.kind === "ci" ? "bad" : n.kind === "deploy" ? "warn" : "" });
-  if (c && !(c.notes || []).length && !(c.topics || []).some((t) => AV_TOPICS.includes(t))) return;
-  // A tab out of sight asks once it's shown again; changes while one ask is out share the next.
-  if (document.hidden) { avHidden = true; return; }
-  if (avBusy) { avAgain = true; return; }
-  avBusy = true;
-  avAsk().finally(() => { avBusy = false; if (avAgain) { avAgain = false; avatarChange(); } });
+  await avAsk();
 }
-document.addEventListener("visibilitychange", () => { if (!document.hidden && avHidden) { avHidden = false; avatarChange(); } });
 async function avAsk() {
   let now;
   try { now = await (await fetch("/avatar/now", { headers: { accept: "application/json" } })).json(); } catch { return; }
@@ -151,6 +143,6 @@ document.addEventListener("pointerover", (e) => {
 // Before the core's own submit handler (it runs on the bubble): the choice goes in the background.
 document.addEventListener("submit", (e) => { if (e.target.matches?.("form[data-av-ctl]")) avControl(e, e.target); }, true);
 document.addEventListener("dovre:swap", (e) => avKeep(e.detail.from, e.detail.to));
-document.addEventListener("dovre:change", (e) => avatarChange(e.detail));
+dovreOn(["avatar", "snapshot", "mac"], avatarChange, { notes: true });
 if (document.querySelector("img[data-av]") && window.top === window) setTimeout(() => avatarChange(), 400);
 `;

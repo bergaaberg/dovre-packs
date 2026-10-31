@@ -14,6 +14,7 @@ import { openDb } from "dovre/db.ts";
 import { needsOf } from "dovre/home/needs.ts";
 import { AVATAR_CSS, AVATAR_PAGE_CSS } from "../style.ts";
 import { AVATAR_JS } from "../script.ts";
+import { ON_JS } from "dovre/ui/on.js.ts";
 import { resetWhen, setWhen } from "dovre/when.ts";
 import { HOSTILE as H, assertInert, packApp, testDeploy as deploy, testPr as pr, testSession as session, testSnapshot as snapshot } from "dovre/packs/testing.ts";
 
@@ -285,7 +286,7 @@ test("the pack: the image with its cache rules, what's going on now, Today and t
   const js = today.match(/<script type="module" src="(\/assets\/packs\.[0-9a-z]+\.js)">/)?.[1];
   assert.ok(js, "the packs' script is linked");
   const body = await (await get(js)).text();
-  assert.match(body, /^\/\/ avatar\n\{\n[^]*addEventListener\("dovre:change"/);
+  assert.match(body, /^\/\/ avatar\n\{\n[^]*dovreOn\(\["avatar"/);
   const face = pack.slots!({} as never)["bino.face"]!;
   assert.match(String(face({ place: "dock" })), /^<span class="av-face" data-scene="calm"><img [^>]*data-av="dock"/, "the Bino button's face");
   assert.match(String(face({ place: "mini", thinking: true })), /href="\/avatar"[^]*data-mood="working"/, "at work while Bino answers");
@@ -387,8 +388,10 @@ test("the avatar's script asks /avatar/now only for changes that move it, not wh
     asked++;
     return new Promise((res) => (answer = () => res({ json: async () => ({ key: "k", why: [] }) })));
   };
-  const run = new Function("document", "fetch", "matchMedia", "sessionStorage", "location", "window", "setTimeout", AVATAR_JS);
-  run(doc, fetch, () => ({ matches: false }), { getItem: () => null, setItem() {} }, { href: "https://d.test/" }, {}, () => 0);
+  const win: { dovreOn?: unknown } = {};
+  new Function("window", "document", ON_JS)(win, doc);
+  const run = new Function("document", "fetch", "matchMedia", "sessionStorage", "location", "window", "setTimeout", "dovreOn", AVATAR_JS);
+  run(doc, fetch, () => ({ matches: false }), { getItem: () => null, setItem() {} }, { href: "https://d.test/" }, {}, () => 0, win.dovreOn);
   const change = (detail: unknown) => on.get("dovre:change")!.forEach((f) => f({ detail }));
   const settle = () => new Promise((r) => setImmediate(r));
 
@@ -400,6 +403,7 @@ test("the avatar's script asks /avatar/now only for changes that move it, not wh
   change({ topics: ["snapshot"] });
   change({ topics: ["avatar"] });
   change({ topics: ["mac"] });
+  await settle();
   assert.equal(asked, 1, "one ask out at a time");
   answer();
   await settle();
@@ -416,5 +420,6 @@ test("the avatar's script asks /avatar/now only for changes that move it, not wh
   assert.equal(asked, 2, "a hidden tab waits");
   doc.hidden = false;
   on.get("visibilitychange")!.forEach((f) => f({}));
+  await settle();
   assert.equal(asked, 3, "and asks once when shown");
 });
