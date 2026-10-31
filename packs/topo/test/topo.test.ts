@@ -360,3 +360,19 @@ test("the peak.yaml prompts: draft one from the repo, fix one with every problem
   assert.doesNotMatch(fix, /rename/);
   assert.match(fixPrompt({ file: "peak.yml", problems: ['Unknown key "x" (ignored).'], warnings: true }), /^peak\.yml in this repo has warnings .* until it passes with no warnings\.$/);
 });
+
+test("topo detail panel: run and component rows wrap inside the card", async () => {
+  const { CSS } = await import("../style.ts");
+  const rule = (sel: string) => {
+    const m = CSS.match(new RegExp("^" + sel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + " \\{([^}]*)\\}", "m"));
+    assert.ok(m, `${sel} is styled`);
+    return m[1];
+  };
+  assert.match(rule(".topo-runs li"), /display: flex/);
+  assert.match(rule(".topo-runs li"), /flex-wrap: wrap/);
+  assert.match(rule(".topo-rn"), /min-width: 12ch/);
+  assert.match(rule(".topo-envs"), /flex-wrap: wrap/);
+  assert.match(rule(".topo-envs"), /max-width: 100%/);
+  assert.match(rule(".topo-comps li"), /flex-wrap: wrap/);
+  assert.match(rule(".topo-owns"), /min-width: 0/);
+});
