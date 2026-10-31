@@ -98,13 +98,14 @@ a.topo-pchip:hover { background: var(--hover); }
 .topo-sev.ok { background: var(--ok-soft); color: var(--ok); }
 .topo-none { margin: 0; font-size: var(--fs-s); color: var(--ink-3); }
 .topo-runs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; font-size: var(--fs-s); }
-.topo-runs li { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; gap: 6px; align-items: center; }
-.topo-rn { overflow-wrap: anywhere; }
-.topo-envs { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; }
+.topo-runs li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
+.topo-rn { flex: 1 1 12ch; min-width: 12ch; overflow-wrap: anywhere; }
+.topo-envs { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; max-width: 100%; }
+.topo-runs li .topo-envs, .topo-comps li .topo-envs { margin-left: auto; }
 .topo-comps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: var(--fs-s); }
 .topo-comps li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
-.topo-comps .topo-envs { margin-left: auto; }
-.topo-env { font-size: var(--fs-xs); padding: 0 6px; border-radius: 5px; background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-2); }
+.topo-owns { min-width: 0; overflow-wrap: anywhere; }
+.topo-env { min-width: 0; max-width: 100%; overflow-wrap: anywhere; font-size: var(--fs-xs); padding: 0 6px; border-radius: 5px; background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-2); }
 .topo-env.miss { background: var(--bad-soft); border-color: var(--bad); color: var(--bad); }
 
 .topo-tw { overflow-x: auto; }
