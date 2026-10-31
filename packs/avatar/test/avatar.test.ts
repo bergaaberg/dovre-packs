@@ -371,3 +371,50 @@ test("every class its views use is styled, by its own stylesheet or the core's",
   }
   assert.deepEqual(missing, []);
 });
+
+test("the avatar's script asks /avatar/now only for changes that move it, not while hidden, and one at a time", async () => {
+  const on = new Map<string, ((e: { detail?: unknown }) => void)[]>();
+  const doc = {
+    hidden: false,
+    documentElement: { dataset: {} },
+    querySelector: (s: string) => (s === "img[data-av]" ? {} : null),
+    querySelectorAll: () => [],
+    addEventListener: (t: string, f: (e: { detail?: unknown }) => void) => on.set(t, [...(on.get(t) ?? []), f]),
+  };
+  let asked = 0;
+  let answer: () => void = () => {};
+  const fetch = () => {
+    asked++;
+    return new Promise((res) => (answer = () => res({ json: async () => ({ key: "k", why: [] }) })));
+  };
+  const run = new Function("document", "fetch", "matchMedia", "sessionStorage", "location", "window", "setTimeout", AVATAR_JS);
+  run(doc, fetch, () => ({ matches: false }), { getItem: () => null, setItem() {} }, { href: "https://d.test/" }, {}, () => 0);
+  const change = (detail: unknown) => on.get("dovre:change")!.forEach((f) => f({ detail }));
+  const settle = () => new Promise((r) => setImmediate(r));
+
+  change({ topics: [] });
+  change({ topics: ["packs"] });
+  change({ topics: ["run:abc", "bino:1"] });
+  assert.equal(asked, 0, "a pack's refresh, a stream or a synced tick asks nothing");
+
+  change({ topics: ["snapshot"] });
+  change({ topics: ["avatar"] });
+  change({ topics: ["mac"] });
+  assert.equal(asked, 1, "one ask out at a time");
+  answer();
+  await settle();
+  await settle();
+  assert.equal(asked, 2, "changes while it was out share one ask after it");
+  answer();
+  await settle();
+  await settle();
+  assert.equal(asked, 2);
+
+  doc.hidden = true;
+  change({ topics: ["snapshot"] });
+  change({ topics: ["snapshot"] });
+  assert.equal(asked, 2, "a hidden tab waits");
+  doc.hidden = false;
+  on.get("visibilitychange")!.forEach((f) => f({}));
+  assert.equal(asked, 3, "and asks once when shown");
+});
