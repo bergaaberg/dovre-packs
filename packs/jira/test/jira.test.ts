@@ -6,7 +6,8 @@ import { testContext } from "dovre/packs/testing.ts";
 import { viaOf } from "../data.ts";
 import { createJiraPack } from "../index.ts";
 import { agentArgs, type Agent, readStream, type RunOff, SEARCH, searches, WRITES } from "../mcp.ts";
-import { jiraPage } from "../view.ts";
+import { Pill } from "dovre/ui/kit.ts";
+import { jiraPage, tone } from "../view.ts";
 
 const H = `<script>alert(1)</script><img src=x onerror=alert(1)>`;
 const SITE = "acme.atlassian.net";
@@ -226,27 +227,68 @@ test("jira (mcp): Read now asks at once, past the cadence, and goes back to the 
 
 // ── PR pills ──
 
-test("jira: a PR's branch or title naming a kept ticket gets a pill and a Jira row; otherwise nothing", async () => {
-  const issue = (key: string, summary: string, category: string) => ({ key, fields: { summary, status: { name: "In Progress", statusCategory: { key: category } } } });
-  const pack = createJiraPack({ fetchFn: async () => new Response(JSON.stringify({ issues: [issue("PLAT-42", "Add D1 migration check", "indeterminate")] }), { status: 200 }) });
+/** A pack that has read PLAT-42 (in progress) and PLAT-50 (done). */
+async function packWithTickets() {
+  const issue = (key: string, summary: string, status: string, category: string) => ({ key, fields: { summary, status: { name: status, statusCategory: { key: category } } } });
+  const pack = createJiraPack({
+    fetchFn: async () =>
+      new Response(JSON.stringify({ issues: [issue("PLAT-42", "Add D1 migration check", "In Progress", "indeterminate"), issue("PLAT-50", "Ship it", "Done", "done")] }), { status: 200 }),
+  });
   const ctx = testContext({ env: { JIRA_SITE: SITE, JIRA_TOKEN: "tok" } });
-  const pr = (branch: string, title: string) => ({ repo: "shop-api", number: 7, branch, title, url: "https://ghe/shop-api/pull/7" });
   const sl = pack.slots!(ctx);
-  const lead = (branch: string, title = "x") => String(sl["pr.lead"]!(pr(branch, title)));
-  const facts = (branch: string, title = "x") => sl["pr.facts"]!(pr(branch, title));
+  const pr = (branch: string, title: string) => ({ repo: "shop-api", number: 7, branch, title, url: "https://ghe/shop-api/pull/7" });
+  return {
+    pack,
+    ctx,
+    lead: (branch: string, title = "x") => String(sl["pr.lead"]!(pr(branch, title))),
+    facts: (branch: string, title = "x") => sl["pr.facts"]!(pr(branch, title)),
+  };
+}
 
-  assert.equal(lead("feature/plat-42-migration"), "", "no data yet: nothing");
-  assert.deepEqual(facts("feature/plat-42-migration"), []);
-
+test("jira pr slots: a lower-case key in the branch gets a pill and a Jira row", async () => {
+  const { pack, ctx, lead, facts } = await packWithTickets();
   await pack.refresh!(ctx);
   assert.match(lead("feature/plat-42-migration"), /PLAT-42 In Progress/);
   assert.match(lead("feature/plat-42-migration"), /Add D1 migration check/, "the summary is the title");
   const [[label, link]] = facts("feature/plat-42-migration");
   assert.equal(label, "Jira");
-  assert.match(String(link), new RegExp(`https://${SITE}/browse/PLAT-42`));
+  assert.match(String(link), new RegExp(`${pack.refs!(ctx)[0]!.href("PLAT-42")}`));
   assert.match(String(link), /PLAT-42 Add D1 migration check/);
-  assert.match(lead("main", "PLAT-42: check migrations"), /PLAT-42/, "a key in the title");
-  assert.equal(lead("feature/plat-99-other", "other"), "", "a ticket the pack doesn't keep: nothing");
+});
+
+test("jira pr slots: a key after an underscore is found", async () => {
+  const { pack, ctx, lead } = await packWithTickets();
+  await pack.refresh!(ctx);
+  assert.match(lead("bugfix_PLAT-42"), /PLAT-42/);
+  assert.match(lead("user_plat-42-foo"), /PLAT-42/);
+});
+
+test("jira pr slots: a key in the title", async () => {
+  const { pack, ctx, lead } = await packWithTickets();
+  await pack.refresh!(ctx);
+  assert.match(lead("main", "PLAT-42: check migrations"), /PLAT-42/);
+});
+
+test("jira pr slots: the pill is toned as the ticket's status is", async () => {
+  const { pack, ctx, lead } = await packWithTickets();
+  await pack.refresh!(ctx);
+  const [open, done] = pack.kept()!.mine;
+  const pill = (i: typeof open) => String(Pill({ tone: tone(i!), children: `${i!.key} ${i!.status}`, title: i!.summary }));
+  assert.equal(lead("plat-42").trim(), pill(open).trim());
+  assert.equal(lead("plat-50").trim(), pill(done).trim());
+  assert.notEqual(tone(open!), tone(done!), "the two statuses are toned differently");
+});
+
+test("jira pr slots: a ticket the pack doesn't keep, or a key inside a word, draws nothing", async () => {
+  const { pack, ctx, lead, facts } = await packWithTickets();
+  await pack.refresh!(ctx);
+  assert.equal(lead("feature/plat-99-other", "other"), "");
   assert.deepEqual(facts("feature/plat-99-other", "other"), []);
   assert.equal(lead("feature/xplat-42"), "", "not the key by itself");
+});
+
+test("jira pr slots: no data yet draws nothing", async () => {
+  const { lead, facts } = await packWithTickets();
+  assert.equal(lead("feature/plat-42-migration"), "");
+  assert.deepEqual(facts("feature/plat-42-migration"), []);
 });

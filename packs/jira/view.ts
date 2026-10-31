@@ -1,10 +1,10 @@
 /** Jira Pack (`jira`) views. */
 import { html } from "hono/html";
 import { Ago, Link, safeUrl } from "dovre/pages/parts.ts";
-import { Card, Empty, Item, List, Notice, PageHeader, Panel, Pill, Post } from "dovre/ui/kit.ts";
+import { Card, Empty, type Html, Item, List, Notice, PageHeader, Panel, Pill, Post } from "dovre/ui/kit.ts";
 import type { JiraIssue, JiraKept, JiraSetup } from "./data.ts";
 
-const tone = (i: JiraIssue) => (i.category === "done" ? "ok" : i.category === "indeterminate" ? "warn" : undefined);
+export const tone = (i: JiraIssue) => (i.category === "done" ? "ok" : i.category === "indeterminate" ? "warn" : undefined);
 
 const issueItem = (i: JiraIssue, showAssignee: boolean) =>
   Item({
@@ -57,4 +57,4 @@ export function jiraCard(k: JiraKept) {
 export const prLead = (i: JiraIssue | undefined) => (i ? html` ${Pill({ tone: tone(i), children: `${i.key} ${i.status}`, title: i.summary })}` : "");
 
 /** A PR's "pr.facts" slot: one row linking the ticket its branch or title names. */
-export const prFacts = (i: JiraIssue | undefined, href: string): [string, ReturnType<typeof html>][] => (i ? [["Jira", html`${Link(href, `${i.key} ${i.summary}`)}`]] : []);
+export const prFacts = (i: JiraIssue | undefined, href: string): [string, Html][] => (i ? [["Jira", html`${Link(href, `${i.key} ${i.summary}`)}`]] : []);
