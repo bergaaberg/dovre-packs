@@ -103,7 +103,7 @@ a.topo-pchip:hover { background: var(--hover); }
 .topo-envs { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; margin-left: auto; max-width: 100%; }
 .topo-comps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: var(--fs-s); }
 .topo-comps li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
-.topo-owns { min-width: 0; overflow-wrap: anywhere; }
+.topo-owns { overflow-wrap: anywhere; }
 .topo-env { font-size: var(--fs-xs); padding: 0 6px; border-radius: 5px; background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-2); }
 .topo-env.miss { background: var(--bad-soft); border-color: var(--bad); color: var(--bad); }
 

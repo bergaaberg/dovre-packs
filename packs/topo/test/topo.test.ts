@@ -373,6 +373,14 @@ test("topo detail panel: run and component rows wrap inside the card", async () 
   assert.match(rule(".topo-rn"), /min-width: 12ch/);
   assert.match(rule(".topo-envs"), /flex-wrap: wrap/);
   assert.match(rule(".topo-envs"), /max-width: 100%/);
+  assert.match(rule(".topo-envs"), /margin-left: auto/);
   assert.match(rule(".topo-comps li"), /flex-wrap: wrap/);
-  assert.match(rule(".topo-owns"), /min-width: 0/);
+  assert.match(rule(".topo-owns"), /overflow-wrap: anywhere/);
+});
+
+test("topo detail panel: the card's markup carries the wrapping classes", () => {
+  const entries: TopoEntry[] = [{ repo: "quill", dir: "/x/quill", file: "peak.yaml", peak: { version: 1, name: "Quill", tier: "active", components: [{ name: "web", owns: ["apps/web"] }], docs: {}, health: { workers: ["quill-web"] }, uses: [], environments: {} } }];
+  const out = String(topoPage({ entries, hosted: true }));
+  assert.match(out, /<li><strong>web<\/strong> <span class="topo-owns[^"]*">owns apps\/web<\/span><span class="topo-envs"><a href="[^"]*">Focus agent<\/a><\/span><\/li>/);
+  assert.match(out, /<ul class="topo-runs"><li><svg class="topo-gi"[\s\S]*?<\/svg><span class="topo-rn">[\s\S]*?<\/span><span class="topo-envs">/);
 });
