@@ -377,7 +377,7 @@ test("topo: All repos folds unclaimed and off-the-map rows by kind and name pref
   assert.match(out, /<summary><code>skribb-cms-\*<\/code> · 3 D1 databases<\/summary>/, "3 share a prefix: one row");
   assert.doesNotMatch(out, /two-\*|api-\*/, "2 sharing a prefix stay separate");
   for (const n of ["two-a", "two-b", "api-one", "api-two", "plain", "jobs"]) assert.match(out, new RegExp(`>${n}</a>`));
-  assert.match(out, /<summary>Off the map: 1 off the map<\/summary>/, "off-the-map rows are their own group");
+  assert.match(out, /<summary>Off the map: 1 repo<\/summary>/, "off-the-map rows are their own group");
 });
 
 test("foldNames: a prefix folds only the names that land on it; stragglers stay single", () => {
