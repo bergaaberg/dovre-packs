@@ -68,6 +68,10 @@ function fakeDb() {
 
 const ENV = { SLACK_TOKEN: "xoxp-fake", SLACK_CHANNELS: "general" };
 
+test("slack: manifest is private, so no page reaches Bino", () => {
+  assert.equal(createSlackPack().manifest.private, true);
+});
+
 test("slack: snippet turns Slack markup into plain inert text", () => {
   assert.equal(snippet(`hey <@${ME}|Andreas> see <#C1|general> and <https://x.example|this>`), "hey Andreas see general and this");
   assert.equal(snippet(H).includes("<"), false);

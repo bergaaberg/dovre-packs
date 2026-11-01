@@ -108,6 +108,7 @@ export function createDuckDbPack(opts: CreateDuckDbPackOpts = {}): Pack & {
       description: "Agentic analytics on local DuckDB databases, Parquet, CSV, and JSON lines files.",
       domain: "general",
       execution: "local-only",
+      private: true, // query results are not for a model: nothing its pages show goes to Bino
       requiredBinaries: ["duckdb"],
       everyMs: 5 * 60_000,
       settings: [

@@ -70,6 +70,7 @@ test("duckdb: manifest adheres to PACK_API and declares settings", () => {
   assert.equal(duckdbPack.manifest.api, PACK_API);
   assert.equal(duckdbPack.manifest.id, "duckdb");
   assert.equal(duckdbPack.manifest.execution, "local-only");
+  assert.equal(duckdbPack.manifest.private, true);
   assert.deepEqual(duckdbPack.manifest.requiredBinaries, ["duckdb"]);
 
   const settingsKeys = duckdbPack.manifest.settings?.map((s) => s.key);

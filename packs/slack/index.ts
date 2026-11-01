@@ -22,6 +22,7 @@ export function createSlackPack(opts: { fetchFn?: typeof fetch } = {}): Pack & {
       description: "Direct mentions in watched channels and saved items from Slack, with a dock beside Bino's and proposals for My list.",
       domain: "work",
       execution: "any",
+      private: true, // chats are not for a model: nothing its pages show goes to Bino
       everyMs: 3 * 60_000,
       settings: [
         { key: "SLACK_TOKEN", label: "Slack token", secret: true, required: true, help: "A user (xoxp-) or bot (xoxb-) token" },
