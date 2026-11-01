@@ -395,6 +395,7 @@ test("topo detail panel: an unclaimed run's Claim or delete link sits in a wrapp
   const out = String(topoPage({ entries, drift, at: "quill" }));
   assert.match(out, /Unclaimed, looks like this repo/);
   assert.match(out, /<ul class="topo-runs">(?:(?!<\/ul>)[\s\S])*<span class="topo-envs">\s*<a [^>]*>Claim or delete<\/a>/);
+});
 
 test("topo: All repos folds unclaimed and off-the-map rows by kind and name prefix", () => {
   const orphan = (kind: "workers" | "databases" | "queues", name: string) => ({ kind, name });
