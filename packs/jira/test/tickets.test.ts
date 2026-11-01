@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Hono } from "hono";
+import { contextStorage } from "hono/context-storage";
 import { html } from "hono/html";
 import { recentActions } from "dovre/actions/deploys.ts";
 import { openDb } from "dovre/db.ts";
@@ -9,6 +10,7 @@ import { testContext } from "dovre/packs/testing.ts";
 import type { PackContext } from "dovre/packs/types.ts";
 import { listTodos } from "dovre/todo/store.ts";
 import { createJiraPack } from "../index.ts";
+import { previewBody } from "../tickets.view.ts";
 import { type Agent, CREATE, createInput, FIELDS, type RunOff, TYPES } from "../mcp.ts";
 import { adf, readTicket, ticketFields, ticketPayload, validateTicket } from "../tickets.ts";
 
@@ -376,4 +378,23 @@ test("tickets: Bino's card asks before it creates, files through the same checks
   assert.match((epic as { error: string }).error, /Jira requires Team for a Epic/);
   assert.equal(rest.calls.filter((c) => c.method === "POST").length, 1, "nothing more was created");
   assert.deepEqual(mounted({ env: restOn, hosted: true }).pack.acts!(mounted({ env: restOn, hosted: true }).ctx), [], "hosted, Bino proposes nothing");
+});
+
+test("tickets: the manifest lists the write kind; the preview's Create is one click by default and asks twice when Settings says so (dovre#104)", async () => {
+  assert.deepEqual(createJiraPack().writes, [{ kind: "ticket-create", label: "File a Jira ticket" }]);
+  const ticket = { project: "DEV", type: { id: "10001", name: "Story", description: "" }, values: { summary: "Hei" } };
+  const fields = [{ id: "summary", name: "Summary", kind: "line", required: true, default: "" }] as unknown as Parameters<typeof previewBody>[0]["fields"];
+  const draw = async (clicks: Map<string, "once" | "twice">) => {
+    const app = new Hono();
+    app.use(contextStorage());
+    app.use("*", async (c, next) => (c.set("clicks" as never, clicks as never), next()));
+    app.get("/p", (c) => c.html(previewBody({ ticket, fields, nonce: "0".repeat(36) })));
+    return (await app.request("/p")).text();
+  };
+  const once = await draw(new Map());
+  assert.doesNotMatch(once, /<details class="confirm">/);
+  assert.match(once, /<button type="submit" class="primary">Create ticket<\/button>/);
+  const twice = await draw(new Map([["jira.ticket-create", "twice"]]));
+  assert.match(twice, /<details class="confirm"><summary>Create ticket…/);
+  assert.match(twice, /name="nonce"/);
 });

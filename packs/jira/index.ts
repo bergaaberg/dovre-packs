@@ -168,6 +168,7 @@ export function createJiraPack(
         { key: "TICKET_PROJECTS", label: "File tickets in", help: "Jira keys, comma-separated: where New work, search and Bino can create a ticket. Empty: none." },
       ],
     },
+    writes: [{ kind: "ticket-create", label: "File a Jira ticket" }],
     available: (ctx) => {
       const via = viaOf(ctx.env);
       if (via === "off" || !siteOk(siteOf(ctx.env))) return false;
