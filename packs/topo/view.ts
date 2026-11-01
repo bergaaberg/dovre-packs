@@ -367,6 +367,62 @@ function findingsCell(fs: RepoFinding[]): Html {
   return fs.length ? html`<span class="topo-sev ${worst(fs)}">${fs.length} ${fs.length === 1 ? "finding" : "findings"}</span>` : html`<span class="topo-sev ok">clear</span>`;
 }
 
+/** Names folded by a shared prefix ending in `-`: each name goes under its longest prefix that 3 or more names end up in; the rest stay single. */
+export function foldNames<T>(items: T[], nameOf: (t: T) => string): { prefix?: string; items: T[] }[] {
+  const prefixes = (n: string) => [...n.matchAll(/-/g)].map((m) => n.slice(0, m.index! + 1)).filter((p) => p.length > 1 && p.length < n.length);
+  const count = new Map<string, number>();
+  for (const t of items) for (const p of prefixes(nameOf(t))) count.set(p, (count.get(p) ?? 0) + 1);
+  const live = new Set([...count].filter(([, n]) => n >= 3).map(([p]) => p));
+  const pick = (t: T) => prefixes(nameOf(t)).reverse().find((x) => live.has(x));
+  // A prefix that fewer than 3 names actually land on is dissolved, and its names move to the next shorter one.
+  for (let again = true; again; ) {
+    again = false;
+    const members = new Map<string, number>();
+    for (const t of items) {
+      const p = pick(t);
+      if (p) members.set(p, (members.get(p) ?? 0) + 1);
+    }
+    for (const p of live) if ((members.get(p) ?? 0) < 3) (live.delete(p), (again = true));
+  }
+  const rows: { prefix?: string; items: T[] }[] = [];
+  const at = new Map<string, { prefix?: string; items: T[] }>();
+  for (const t of items) {
+    const p = pick(t);
+    if (!p) rows.push({ items: [t] });
+    else if (at.has(p)) at.get(p)!.items.push(t);
+    else {
+      const r = { prefix: p, items: [t] };
+      at.set(p, r);
+      rows.push(r);
+    }
+  }
+  return rows;
+}
+
+/** The unclaimed and off-the-map rows, a closed group per kind; shared prefixes fold into one row. */
+function offGroups(off: Off[], at: string): Html {
+  const groups = new Map<string, { label: string; noun: string; offs: Off[] }>();
+  for (const o of off) {
+    const [id, label, noun] = o.what === "orphan" ? [`cf:${o.orphan.kind}`, CF_NAMES[o.orphan.kind][1], CF_NAMES[o.orphan.kind][1]] : ["off", "Off the map", "repos"];
+    const g = groups.get(id) ?? { label, noun, offs: [] };
+    g.offs.push(o);
+    groups.set(id, g);
+  }
+  const link = (o: Off) => html`<a href="${atHref(o.key)}">${offName(o)}</a>`;
+  const cells = (o: Off) =>
+    o.what === "orphan"
+      ? html`<td>unclaimed</td><td>${CF_NAMES[o.orphan.kind][0]}</td><td>–</td><td><span class="topo-sev warn">no file claims it</span></td>`
+      : html`<td>off the map</td><td>?</td><td>?</td><td><span class="topo-sev ${o.what === "bare" ? "warn" : "bad"}">${o.what === "bare" ? "no peak.yaml" : "unreadable"}</span></td>`;
+  const rowOf = (o: Off) => html`<tr class="${o.key === at ? "on" : ""}"><th scope="row">${o.what === "orphan" ? html`<code>${link(o)}</code>` : link(o)}</th>${cells(o)}</tr>`;
+  return html`${[...groups.values()].map(
+    (g) => html`<details class="topo-quiet"${g.offs.some((o) => o.key === at) ? " open" : ""}><summary>${g.label}: ${g.offs.length} ${g.offs[0]!.what === "orphan" ? "unclaimed" : g.offs.length === 1 ? "repo" : g.noun}</summary><div class="topo-tw"><table class="topo-table"><tbody>${foldNames(g.offs, offName).map((r) =>
+      r.prefix
+        ? html`<tr><td colspan="5"><details class="topo-quiet"${r.items.some((o) => o.key === at) ? " open" : ""}><summary><code>${r.prefix}*</code> · ${r.items.length} ${g.noun}</summary><p class="topo-chips">${r.items.map((o) => html`<a class="topo-pchip${o.key === at ? " on" : ""}" href="${atHref(o.key)}">${offName(o)}</a>`)}</p></details></td></tr>`
+        : rowOf(r.items[0]!),
+    )}</tbody></table></div></details>`,
+  )}`;
+}
+
 function listPanel(model: TopoModel, at: string, folded: Place[]): Html {
   const shown = model.places.filter((p) => !folded.includes(p));
   const runs = (p: Place) => Math.max(0, ...["production", ...Object.keys(p.entry.peak.environments ?? {})].map((env) => KINDS.reduce((n, k) => n + (runsIn(p.entry.peak, env)[k]?.length ?? 0), 0)));
@@ -379,12 +435,7 @@ function listPanel(model: TopoModel, at: string, folded: Place[]): Html {
     flush: true,
     children: html`<div class="topo-tw"><table class="topo-table"><thead><tr><th scope="col">Repo</th><th scope="col">Tier</th><th scope="col">Runs</th><th scope="col">Uses · used by</th><th scope="col">Findings</th></tr></thead><tbody>
 ${shown.map((p) => row(p.key, p.entry.repo, p.entry.peak.tier, runs(p) || "–", `${p.uses.length + p.services.length} · ${p.usedBy.length}`, findingsCell(p.findings)))}
-${model.off.map((o) =>
-  o.what === "orphan"
-    ? row(o.key, html`<code>${offName(o)}</code>`, "unclaimed", CF_NAMES[o.orphan.kind][0], "–", html`<span class="topo-sev warn">no file claims it</span>`)
-    : row(o.key, o.repo.full ?? o.repo.repo, "off the map", "?", "?", html`<span class="topo-sev ${o.what === "bare" ? "warn" : "bad"}">${o.what === "bare" ? "no peak.yaml" : "unreadable"}</span>`),
-)}
-</tbody></table></div>${
+</tbody></table></div>${offGroups(model.off, at)}${
       folded.length
         ? html`<details class="topo-quiet"><summary>${folded.length} quiet repos: no links, no findings</summary><p class="topo-chips">${folded.map((p) => html`<a class="topo-pchip" href="${atHref(p.key)}">${p.entry.repo}</a>`)}</p></details>`
         : ""
