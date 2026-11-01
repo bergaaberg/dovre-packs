@@ -283,10 +283,10 @@ test("the pack: the image with its cache rules, what's going on now, Today and t
   assert.match(today, /class="av-hero"/);
   assert.match(today, /data-av="hero"/);
   // Its script comes beside the core's, in a block of its own.
-  const js = today.match(/<script type="module" src="(\/assets\/packs\.[0-9a-z]+\.js)">/)?.[1];
+  const js = today.match(/<script type="module" src="(\/assets\/pack\.avatar\.[0-9a-z]+\.js)">/)?.[1];
   assert.ok(js, "the packs' script is linked");
   const body = await (await get(js)).text();
-  assert.match(body, /^\/\/ avatar\n\{\n[^]*dovreOn\(\["avatar"/);
+  assert.match(body, /^\/\/ avatar\ntry \{\n[^]*dovreOn\(\["avatar"/);
   const face = pack.slots!({} as never)["bino.face"]!;
   assert.match(String(face({ place: "dock" })), /^<span class="av-face" data-scene="calm"><img [^>]*data-av="dock"/, "the Bino button's face");
   assert.match(String(face({ place: "mini", thinking: true })), /href="\/avatar"[^]*data-mood="working"/, "at work while Bino answers");
