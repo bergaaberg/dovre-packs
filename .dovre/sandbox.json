@@ -1,4 +1,5 @@
 {
   "allow": ["registry.npmjs.org", "codeload.github.com"],
-  "siblings": ["bergaaberg/dovre"]
+  "siblings": ["bergaaberg/dovre"],
+  "setup": "cp -a /siblings/dovre/. /dovre/ && pnpm -C /dovre install --frozen-lockfile && pnpm install --frozen-lockfile"
 }
