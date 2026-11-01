@@ -360,3 +360,39 @@ test("the peak.yaml prompts: draft one from the repo, fix one with every problem
   assert.doesNotMatch(fix, /rename/);
   assert.match(fixPrompt({ file: "peak.yml", problems: ['Unknown key "x" (ignored).'], warnings: true }), /^peak\.yml in this repo has warnings .* until it passes with no warnings\.$/);
 });
+
+test("topo detail panel: run and component rows wrap inside the card", async () => {
+  const { CSS } = await import("../style.ts");
+  const rule = (sel: string) => {
+    const m = CSS.match(new RegExp("^" + sel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + " \\{([^}]*)\\}", "m"));
+    assert.ok(m, `${sel} is styled`);
+    return m[1];
+  };
+  assert.match(rule(".topo-runs li"), /display: flex/);
+  assert.match(rule(".topo-runs li"), /flex-wrap: wrap/);
+  assert.match(rule(".topo-rn"), /min-width: 12ch/);
+  assert.match(rule(".topo-envs"), /flex-wrap: wrap/);
+  assert.match(rule(".topo-envs"), /max-width: 100%/);
+  assert.match(rule(".topo-runs li .topo-envs, .topo-comps li .topo-envs"), /margin-left: auto/);
+  assert.match(rule(".topo-env"), /overflow-wrap: anywhere/);
+  assert.match(rule(".topo-comps li"), /flex-wrap: wrap/);
+  assert.match(rule(".topo-owns"), /min-width: 0/);
+  assert.match(rule(".topo-owns"), /overflow-wrap: anywhere/);
+  // Not changed by this PR, but the icon is now a flex item of the row and must not shrink.
+  assert.match(rule(".topo-gi"), /flex: none/);
+});
+
+test("topo detail panel: the card's markup carries the wrapping classes", () => {
+  const entries: TopoEntry[] = [{ repo: "quill", dir: "/x/quill", file: "peak.yaml", peak: { version: 1, name: "Quill", tier: "active", components: [{ name: "web", owns: ["apps/web"] }], docs: {}, health: { workers: ["quill-web"] }, uses: [], environments: {} } }];
+  const out = String(topoPage({ entries, hosted: true }));
+  assert.match(out, /<li><strong>web<\/strong> <span class="topo-owns[^"]*">owns apps\/web<\/span><span class="topo-envs"><a href="[^"]*">Focus agent<\/a><\/span><\/li>/);
+  assert.match(out, /<ul class="topo-runs">[\s\S]*?<span class="topo-rn">[\s\S]*?<span class="topo-envs">/);
+});
+
+test("topo detail panel: an unclaimed run's Claim or delete link sits in a wrapping .topo-envs", () => {
+  const entries: TopoEntry[] = [{ repo: "quill", dir: "/x/quill", file: "peak.yaml", peak: { version: 1, name: "Quill", tier: "active", components: [], docs: {}, health: { workers: [] }, uses: [], environments: {} } }];
+  const drift = { configured: true, declares: true, drift: { missing: [], orphans: [{ kind: "workers", name: "quill-stray" }] } } as unknown as Parameters<typeof topoPage>[0]["drift"];
+  const out = String(topoPage({ entries, drift, at: "quill" }));
+  assert.match(out, /Unclaimed, looks like this repo/);
+  assert.match(out, /<ul class="topo-runs">(?:(?!<\/ul>)[\s\S])*<span class="topo-envs">\s*<a [^>]*>Claim or delete<\/a>/);
+});

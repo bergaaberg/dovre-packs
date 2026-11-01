@@ -283,7 +283,7 @@ function repoCard(p: Place, model: TopoModel, hosted: boolean, pr?: PrOpts): Htm
       ? section(
           "Components",
           html`<ul class="topo-comps">${peak.components.map(
-            (c) => html`<li><strong>${c.name}</strong> <span class="mono sm t3">owns ${c.owns.join(", ")}${c.rules ? html` · rules: ${c.rules}` : ""}</span>${
+            (c) => html`<li><strong>${c.name}</strong> <span class="topo-owns mono sm t3">owns ${c.owns.join(", ")}${c.rules ? html` · rules: ${c.rules}` : ""}</span>${
               agentable(entry, hosted) ? html`<span class="topo-envs"><a href="${agentHref(entry, focusPrompt(peak, c))}">Focus agent</a></span>` : ""
             }</li>`,
           )}</ul>`,
