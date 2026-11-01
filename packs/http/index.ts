@@ -24,6 +24,9 @@
  *    each request's `# @expect` checks, sending nothing; one click on POST /http/run sends them one
  *    after the other (each an ordinary send, re-checked against the file as it was shown), and the
  *    results fill in over the hub. Logged as `http.run` (the file, how many passed).
+ *  - Running a story (story.ts, runner.ts, stories-routes.ts): GET /http/story shows its steps,
+ *    sending nothing; one click runs them with their setups, re-checked against every file as shown.
+ *    Logged as `http.run`; the newest runs of each story are kept without values or responses.
  *  - A span on otel-sink's trace page (core's "span.actions" slot, trace.ts) opens in the editor
  *    from what the trace kept (method, route, a query-less URL): nothing is sent.
  *  - Importing curl, an OpenAPI spec (openapi.ts) or a Postman / Bruno collection (collections.ts)
@@ -45,6 +48,7 @@ import { confirmSavePage, fileOk, homeHref, importPage, noWhere, openapiPage, ru
 import { createResults, type Results } from "./cases.ts";
 import { blanksOfForm, fillBlanks } from "./quick.ts";
 import { createQuick } from "./quick-routes.ts";
+import { createStories } from "./stories-routes.ts";
 import { quickHref, quickStyles } from "./quick-view.ts";
 import type { Child, Tone } from "dovre/ui/kit.ts";
 import { fileNameOf, fromOpenApi, MAX_SPEC } from "./openapi.ts";
@@ -61,7 +65,7 @@ import { createRuns, failedSteps, MAX_RUN, passed, type Run } from "./run.ts";
 /** How a response's body is shown, or `diff` against the send before it. */
 const VIEWS = ["pretty", "tree", "raw", "diff"] as const;
 
-export type CreateHttpPackOpts = { fetchFn?: typeof fetch; now?: () => number; timeoutMs?: number };
+export type CreateHttpPackOpts = { fetchFn?: typeof fetch; now?: () => number; timeoutMs?: number; /** How a story's until: waits between tries (tests pass a quick one). */ wait?: (ms: number) => Promise<void> };
 
 const str = (v: unknown, max = 200) => (typeof v === "string" ? v.slice(0, max) : "");
 
@@ -164,6 +168,16 @@ export function createHttpPack(opts: CreateHttpPackOpts = {}): Pack & { history(
     targetOf,
     prepare: (ctx, r, w, refs) => prepare(r, varsFor(ctx, w).vars, secretsOf(ctx), now(), refs),
     start,
+  });
+
+  const stories = createStories({
+    history,
+    now,
+    secretsOf,
+    varsFor,
+    prepare: (ctx, r, w, refs) => prepare(r, varsFor(ctx, w).vars, secretsOf(ctx), now(), refs),
+    start,
+    wait: opts.wait,
   });
 
   /** A repo's .http file and its requests, for a run. */
@@ -313,7 +327,7 @@ export function createHttpPack(opts: CreateHttpPackOpts = {}): Pack & { history(
     about: (_ctx, path) => (path.startsWith("/http") ? "The HTTP client (requests and responses aren't shared)." : undefined),
 
     slots: () => ({
-      "actions.what": ({ kind }) => (kind === "http.send" ? "Sent an HTTP request" : kind === "http.run" ? "Ran a .http file as a smoke test" : kind === "http.save" ? "Saved an HTTP request to a repo" : undefined),
+      "actions.what": ({ kind }) => (kind === "http.send" ? "Sent an HTTP request" : kind === "http.run" ? "Ran HTTP requests as a test (a file, cases or a story)" : kind === "http.save" ? "Saved an HTTP request to a repo" : undefined),
       "span.actions": spanActions,
     }),
 
@@ -329,6 +343,7 @@ export function createHttpPack(opts: CreateHttpPackOpts = {}): Pack & { history(
       app.use("/http/*", strictOrigin);
 
       quick.mount(app, ctx);
+      stories.mount(app, ctx);
 
       app.get("/http/import", (c) => draw(ctx, c, blankReq(), noWhere(), { curl: "", spec: "" }));
 
