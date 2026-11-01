@@ -5,7 +5,7 @@ import { Hono } from "hono";
 import { html } from "hono/html";
 import { recentActions } from "dovre/actions/deploys.ts";
 import { openDb } from "dovre/db.ts";
-import { testContext } from "dovre/packs/testing.ts";
+import { packApp, testContext } from "dovre/packs/testing.ts";
 import type { PackContext } from "dovre/packs/types.ts";
 import { listTodos } from "dovre/todo/store.ts";
 import { createJiraPack } from "../index.ts";
@@ -376,4 +376,20 @@ test("tickets: Bino's card asks before it creates, files through the same checks
   assert.match((epic as { error: string }).error, /Jira requires Team for a Epic/);
   assert.equal(rest.calls.filter((c) => c.method === "POST").length, 1, "nothing more was created");
   assert.deepEqual(mounted({ env: restOn, hosted: true }).pack.acts!(mounted({ env: restOn, hosted: true }).ctx), [], "hosted, Bino proposes nothing");
+});
+
+test("tickets: the pack lists its write kind; the preview's Create is one click by default and asks twice when Settings says so (#104)", async () => {
+  const pack = createJiraPack({ fetchFn: fakeRest(devRest({})).fetchFn, kept: { get: () => undefined, set: () => {} } });
+  assert.deepEqual(pack.writes, [{ kind: "ticket-create", label: "File a Jira ticket" }]);
+  const { get, post } = packApp([pack], { env: { JIRA_SITE: SITE, TICKET_PROJECTS: "DEV", ...restOn } });
+  assert.match(await (await get("/settings/writes")).text(), /value="jira.ticket-create"/);
+  await landed(get, "/jira/new?project=DEV&type=10255");
+  const preview = async () => (await post("/jira/new/preview", { project: "DEV", type: "10255", j_summary: "Hei", j_priority: "10006", j_customfield_10476: "10597" })).text();
+  const once = await preview();
+  assert.doesNotMatch(once, /<details class="confirm">/);
+  assert.match(once, /<button type="submit" class="primary">Create ticket<\/button>/);
+  assert.equal((await post("/settings/writes", "twice=jira.ticket-create")).status, 303);
+  const twice = await preview();
+  assert.match(twice, /<details class="confirm"><summary>Create ticket…<\/summary>.*Create this ticket in DEV in Jira\?.*<button type="submit" class="primary">Create ticket<\/button><\/div><\/details>/s);
+  assert.match(twice, /name="nonce"/);
 });
