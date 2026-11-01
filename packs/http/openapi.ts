@@ -104,7 +104,7 @@ function serverOf(spec: Obj, v2: boolean): string {
   return isObj(s) ? one(s.url, 500) : "";
 }
 
-type Param = { name: string; in: string; required: boolean; example: Json | undefined; schema: Json | undefined };
+type Param = { name: string; in: string; required: boolean; example: Json | undefined; schema: Json | undefined; about: string };
 
 function paramsOf(root: Json, list: Json | undefined): Param[] {
   if (!Array.isArray(list)) return [];
@@ -112,7 +112,7 @@ function paramsOf(root: Json, list: Json | undefined): Param[] {
     const p = deref(root, x);
     if (!isObj(p) || typeof p.name !== "string" || typeof p.in !== "string") return [];
     const ex = p.example !== undefined ? p.example : isObj(p.examples) ? (Object.values(p.examples).map((e) => deref(root, e)).find(isObj)?.value as Json | undefined) : undefined;
-    return [{ name: p.name.slice(0, 100), in: p.in, required: p.required === true || p.in === "path", example: ex, schema: p.schema ?? (p.type !== undefined ? p : undefined) }];
+    return [{ name: p.name.slice(0, 100), in: p.in, required: p.required === true || p.in === "path", example: ex, schema: p.schema ?? (p.type !== undefined ? p : undefined), about: one(p.description, 300) }];
   });
 }
 
@@ -175,6 +175,26 @@ function bodyOf(root: Json, op: Obj, params: Param[], v2: boolean): Pick<Req, "m
   return { mode: "raw", body: "", type: one(types[0], 100) || undefined };
 }
 
+/** One operation as a request: `{{baseUrl}}` + its path, required parameters and auth as placeholders, a sample body. */
+function opReq(spec: Obj, v2: boolean, path: string, item: Obj, method: Method, op: Obj): Req {
+  const shared = paramsOf(spec, item.parameters);
+  // An operation's own parameter replaces the path's of the same name and place.
+  const own = paramsOf(spec, op.parameters);
+  const params = [...shared.filter((s) => !own.some((o) => o.name === s.name && o.in === s.in)), ...own];
+  const url = `{{baseUrl}}${path.replace(/[\s]+/g, "").replace(/\{([^}/]{1,100})\}/g, (_, n: string) => {
+    const p = params.find((x) => x.in === "path" && x.name === n);
+    return p && p.example !== undefined && typeof p.example !== "object" ? encodeURIComponent(String(p.example)) : `{{${varName(n)}}}`;
+  })}`.slice(0, MAX_URL);
+  const auth = authHeaders(spec, spec, op, v2);
+  const query = [...params.filter((p) => p.in === "query" && p.required).map((p) => `${encodeURIComponent(p.name)}=${valueOf(p)}`), ...auth.query];
+  const headers: [string, string][] = [...params.filter((p) => p.in === "header" && p.required && HEADER_NAME.test(p.name)).map((p): [string, string] => [p.name, valueOf(p, false)]), ...auth.headers];
+  const body = bodyOf(spec, op, params, v2);
+  if (body.type && !headers.some(([k]) => k.toLowerCase() === "content-type")) headers.push(["Content-Type", body.type]);
+  if (body.body.length > MAX_BODY_IN) body.body = "";
+  const name = one(op.operationId, MAX_NAME) || one(op.summary, MAX_NAME) || `${method} ${path}`.slice(0, MAX_NAME);
+  return { name: name.replace(/^#+/, "").trim(), method, url, headers, query, mode: body.mode, body: body.body };
+}
+
 export function fromOpenApi(text: string): Imported {
   const r = read(text);
   if (!r.ok) return r;
@@ -190,7 +210,6 @@ export function fromOpenApi(text: string): Imported {
   for (const [path, rawItem] of Object.entries(spec.paths)) {
     const item = deref(spec, rawItem);
     if (!isObj(item) || !path.startsWith("/")) continue;
-    const shared = paramsOf(spec, item.parameters);
     for (const [m, rawOp] of Object.entries(item)) {
       const method = m.toUpperCase() as Method;
       if (!(METHODS as readonly string[]).includes(method)) {
@@ -203,21 +222,7 @@ export function fromOpenApi(text: string): Imported {
         skipped++;
         continue;
       }
-      // An operation's own parameter replaces the path's of the same name and place.
-      const own = paramsOf(spec, op.parameters);
-      const params = [...shared.filter((s) => !own.some((o) => o.name === s.name && o.in === s.in)), ...own];
-      const url = `{{baseUrl}}${path.replace(/[\s]+/g, "").replace(/\{([^}/]{1,100})\}/g, (_, n: string) => {
-        const p = params.find((x) => x.in === "path" && x.name === n);
-        return p && p.example !== undefined && typeof p.example !== "object" ? encodeURIComponent(String(p.example)) : `{{${varName(n)}}}`;
-      })}`.slice(0, MAX_URL);
-      const auth = authHeaders(spec, spec, op, v2);
-      const query = [...params.filter((p) => p.in === "query" && p.required).map((p) => `${encodeURIComponent(p.name)}=${valueOf(p)}`), ...auth.query];
-      const headers: [string, string][] = [...params.filter((p) => p.in === "header" && p.required && HEADER_NAME.test(p.name)).map((p): [string, string] => [p.name, valueOf(p, false)]), ...auth.headers];
-      const body = bodyOf(spec, op, params, v2);
-      if (body.type && !headers.some(([k]) => k.toLowerCase() === "content-type")) headers.push(["Content-Type", body.type]);
-      if (body.body.length > MAX_BODY_IN) body.body = "";
-      const name = one(op.operationId, MAX_NAME) || one(op.summary, MAX_NAME) || `${method} ${path}`.slice(0, MAX_NAME);
-      reqs.push({ name: name.replace(/^#+/, "").trim(), method, url, headers, query, mode: body.mode, body: body.body });
+      reqs.push(opReq(spec, v2, path, item, method, op));
     }
   }
   if (!reqs.length) return { ok: false, error: "The spec has no operations this client can send." };
@@ -253,4 +258,93 @@ export function specOps(text: string): { ok: true; title: string; ops: SpecOp[] 
   }
   const info = isObj(spec.info) ? spec.info : {};
   return { ok: true, title: one(info.title, 120) || "OpenAPI", ops };
+}
+
+/** One operation's reference, for the Quick view: what to send and what comes back. */
+export type SpecDoc = {
+  summary: string;
+  about: string;
+  params: { name: string; in: string; required: boolean; type: string; about: string }[];
+  /** The JSON body's fields, nested ones as `lines[].sku`. */
+  fields: { name: string; type: string; required: boolean; about: string }[];
+  responses: { code: string; about: string }[];
+  /** The request to start from: `{{baseUrl}}` + the path, its blanks as placeholders. */
+  req: Req;
+};
+
+const MAX_FIELDS = 40;
+
+/** A schema's type in a few words: `string (uuid)`, `array`, `one of a, b`. */
+function typeOf(root: Json, schema: Json | undefined): string {
+  const s = deref(root, schema);
+  if (!isObj(s)) return "";
+  if (Array.isArray(s.enum) && s.enum.length) return `one of ${s.enum.slice(0, 6).map((v) => one(String(v), 40)).join(", ")}${s.enum.length > 6 ? ", …" : ""}`;
+  const type = Array.isArray(s.type) ? s.type.filter((t) => t !== "null").join(" or ") : one(s.type, 40);
+  const format = one(s.format, 40);
+  return (type || (isObj(s.properties) ? "object" : "")) + (format ? ` (${format})` : "");
+}
+
+/** A schema's properties as rows, one level of nesting into objects and arrays of objects. */
+function fieldsOf(root: Json, schema: Json | undefined, prefix = "", depth = 0, out: SpecDoc["fields"] = []): SpecDoc["fields"] {
+  let s = deref(root, schema);
+  if (isObj(s) && Array.isArray(s.allOf)) {
+    const parts = s.allOf.map((x) => deref(root, x)).filter(isObj);
+    s = { properties: Object.assign({}, ...parts.map((p) => (isObj(p.properties) ? p.properties : {}))), required: parts.flatMap((p) => (Array.isArray(p.required) ? p.required : [])) };
+  }
+  if (!isObj(s) || !isObj(s.properties) || depth > 1) return out;
+  const required = Array.isArray(s.required) ? s.required : [];
+  for (const [k, raw] of Object.entries(s.properties)) {
+    if (out.length >= MAX_FIELDS) break;
+    const p = deref(root, raw);
+    const name = `${prefix}${one(k, 60)}`;
+    out.push({ name, type: typeOf(root, p), required: required.includes(k), about: isObj(p) ? one(p.description, 300) : "" });
+    if (!isObj(p)) continue;
+    const items = p.type === "array" ? deref(root, p.items) : undefined;
+    if (isObj(items) && isObj(items.properties)) fieldsOf(root, items, `${name}[].`, depth + 1, out);
+    else if (isObj(p.properties)) fieldsOf(root, p, `${name}.`, depth + 1, out);
+  }
+  return out;
+}
+
+/** The reference for `method path` (the path as the spec writes it), or undefined when the spec has no such operation. */
+export function specDoc(text: string, method: Method, path: string): SpecDoc | undefined {
+  const r = read(text);
+  if (!r.ok || !isObj(r.v) || !isObj(r.v.paths)) return undefined;
+  const spec = r.v;
+  const paths = r.v.paths;
+  const v2 = typeof spec.swagger === "string" && spec.swagger.startsWith("2");
+  if (!Object.hasOwn(paths, path)) return undefined;
+  const item = deref(spec, paths[path]);
+  const op = isObj(item) ? deref(spec, item[method.toLowerCase()]) : undefined;
+  if (!isObj(item) || !isObj(op)) return undefined;
+  const own = paramsOf(spec, op.parameters);
+  const params = [...paramsOf(spec, item.parameters).filter((s) => !own.some((o) => o.name === s.name && o.in === s.in)), ...own];
+  let bodySchema: Json | undefined;
+  if (v2) bodySchema = params.find((p) => p.in === "body")?.schema;
+  else {
+    const rb = deref(spec, op.requestBody);
+    const content = isObj(rb) && isObj(rb.content) ? rb.content : undefined;
+    const json = content && Object.keys(content).find((t) => /^application\/(.+\+)?json\b/i.test(t));
+    const m = json ? deref(spec, content[json]) : undefined;
+    bodySchema = isObj(m) ? m.schema : undefined;
+  }
+  const responses = isObj(op.responses)
+    ? Object.entries(op.responses)
+        .slice(0, 20)
+        .map(([code, raw]) => {
+          const x = deref(spec, raw);
+          return { code: one(code, 10), about: isObj(x) ? one(x.description, 300) : "" };
+        })
+    : [];
+  return {
+    summary: one(op.summary, MAX_NAME),
+    about: one(op.description, 1000),
+    params: params
+      .filter((p) => p.in !== "body")
+      .slice(0, MAX_FIELDS)
+      .map((p) => ({ name: one(p.name, 100), in: one(p.in, 20), required: p.required, type: typeOf(spec, p.schema), about: p.about })),
+    fields: fieldsOf(spec, bodySchema),
+    responses,
+    req: opReq(spec, v2, path, item, method, op),
+  };
 }

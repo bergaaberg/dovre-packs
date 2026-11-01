@@ -121,7 +121,7 @@ export function readStoryFile(root: string, kind: StoryKind, file: unknown): { n
 
 export const hashOf = (text: string) => createHash("sha256").update(text).digest("hex").slice(0, 20);
 
-export type FileInfo = { name: string; reqs: Parsed["reqs"]; error?: string };
+export type FileInfo = { name: string; reqs: Parsed["reqs"]; /** The text's hash, to re-check it against before a run or a write. */ hash?: string; error?: string };
 
 /** The repo's .http files with the requests in each (bad or large ones listed with why). */
 export function listFiles(root: string): FileInfo[] {
@@ -144,7 +144,8 @@ export function listFiles(root: string): FileInfo[] {
   }
   return names.map((name) => {
     try {
-      return { name, reqs: parseHttp(readFile(root, name).text).reqs };
+      const f = readFile(root, name);
+      return { name, reqs: parseHttp(f.text).reqs, hash: f.hash };
     } catch (e) {
       return { name, reqs: [], error: (e as Error).message };
     }
@@ -221,4 +222,34 @@ export function writeFile(root: string, file: unknown, text: string, expect: str
     return { ok: false, error: `Couldn't write ${f.name}.` };
   }
   return { ok: true, created: false, hash: hashOf(text) };
+}
+
+/** Where a repo's OpenAPI spec is looked for, first found wins: its top, then the usual folders. */
+export const SPEC_PLACES = ["", "docs/", "api/", "spec/", "openapi/", ".http/"].flatMap((d) => ["openapi.yaml", "openapi.yml", "openapi.json", "swagger.yaml", "swagger.json"].map((f) => `${d}${f}`));
+const MAX_SPEC_FILE = 1_000_000;
+
+/** The repo's OpenAPI spec, when one is in a usual place: a plain file in a plain folder (no symlinks), not too large. */
+export function findSpec(root: string): { name: string; text: string } | undefined {
+  for (const name of SPEC_PLACES) {
+    const parts = name.split("/");
+    // Each folder on the way, and the file, checked without following a link.
+    let at = root;
+    let safe = true;
+    for (const [i, part] of parts.entries()) {
+      at = join(at, part);
+      const st = lst(at);
+      if (!st || st.isSymbolicLink() || (i < parts.length - 1 ? !st.isDirectory() : !st.isFile())) {
+        safe = false;
+        break;
+      }
+    }
+    if (!safe) continue;
+    if (lst(at)!.size > MAX_SPEC_FILE) continue;
+    try {
+      return { name, text: readFileSync(at, "utf8") };
+    } catch {
+      // Unreadable: the next place.
+    }
+  }
+  return undefined;
 }
