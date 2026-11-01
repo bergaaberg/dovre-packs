@@ -16,7 +16,7 @@ const packs = Object.entries(index)
   .map(([name, pack]) => ({ name, pack: pack as Pack }));
 
 test("index.ts exports the packs", () => {
-  assert.ok(packs.length >= 20, `found only ${packs.length} packs`);
+  assert.equal(packs.length, 20, `expected 20 packs, found ${packs.length}: ${packs.map((p) => p.name).join(", ")}`);
 });
 
 test("ids are lowercase and unique", () => {
@@ -45,19 +45,40 @@ test("each write kind and ring kind is declared once", () => {
   }
 });
 
+const skipped: string[] = [];
+let checked = 0;
+
 for (const { name, pack } of packs) {
   test(`${name}: styles are scoped to its own classes`, () => {
     assertScoped(pack);
   });
 
-  test(`${name}: Today cards that render without its app are markup core accepts`, async () => {
+  test(`${name}: Today cards that render without its app are markup core accepts`, async (t) => {
     if (!pack.today) return;
     let cards;
     try {
       cards = await pack.today(testContext());
-    } catch {
-      return; // needs its app: the pack's own tests cover it
+    } catch (e) {
+      // No signal tells "needs its app" from a bug, so record the skip; the last test bounds them.
+      skipped.push(name);
+      t.diagnostic(`skipped, today() threw: ${e instanceof Error ? e.message : String(e)}`);
+      return; // the pack's own tests cover it
     }
-    for (const card of cards) assertFragment(`${name} card ${card.id}`, String(card.render));
+    for (const card of cards) {
+      let html: unknown;
+      try {
+        html = typeof card.render === "function" ? await card.render() : card.render;
+      } catch (e) {
+        t.diagnostic(`card ${card.id} skipped, render threw: ${e instanceof Error ? e.message : String(e)}`);
+        continue;
+      }
+      assert.equal(typeof html, "string", `${name} card ${card.id}: render gave ${typeof html}, not markup`);
+      assertFragment(`${name} card ${card.id}`, html as string);
+      checked++;
+    }
   });
 }
+
+test("the cards check is not empty", () => {
+  assert.ok(checked > 0, `no card was checked; today() threw for: ${skipped.join(", ")}`);
+});
