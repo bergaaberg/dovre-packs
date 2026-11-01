@@ -23,7 +23,7 @@ export const MODES = ["none", "raw", "json", "form"] as const;
 export type BodyMode = (typeof MODES)[number];
 
 /** `expect`: the request's checks for a run (checks.ts), kept as `# @expect …` lines in its block. */
-export type Req = { name: string; method: Method; url: string; headers: [string, string][]; query: string[]; mode: BodyMode; body: string; expect?: string[] };
+export type Req = { name: string; method: Method; url: string; headers: [string, string][]; query: string[]; mode: BodyMode; body: string; expect?: string[]; /** `# @given` setups this case needs (story.ts). */ given?: string[] };
 
 /** Longest URL, header block, body and name the editor takes. */
 export const MAX_URL = 8_000;
@@ -107,6 +107,11 @@ const VAR_LINE = /^@([A-Za-z_][\w.-]{0,63})\s*=\s*(.*)$/;
 const COMMENT = /^(#|\/\/)/;
 const NAME_COMMENT = /^(?:#|\/\/)\s*@name\s+(.+)$/;
 const EXPECT_COMMENT = /^(?:#|\/\/)\s*@expect\s+(.+)$/;
+const GIVEN_COMMENT = /^(?:#|\/\/)\s*@given\s+(.+)$/;
+/** Most setups a case or story names. */
+export const MAX_GIVEN = 10;
+/** `fresh db, one customer` as setup names: trimmed, no blanks or repeats, kept to size. */
+export const givenList = (s: string) => [...new Set(s.split(",").map((x) => x.replace(/[\r\n]/g, " ").trim().slice(0, 60)).filter(Boolean))].slice(0, MAX_GIVEN);
 const REQUEST_LINE = /^(?:([A-Z]+)\s+)?(\S+)(?:\s+HTTP\/[\d.]+)?\s*$/;
 
 function modeOf(headers: [string, string][], body: string): BodyMode {
@@ -139,10 +144,13 @@ export function parseHttp(text: string): Parsed {
     let i = SEP.test(all[from] ?? "") ? from + 1 : from;
     let firstContent = -1;
     const expect: string[] = [];
+    let given: string[] = [];
     const expected = (l: string) => {
+      const g = GIVEN_COMMENT.exec(l);
+      if (g) given = givenList([...given, g[1]!].join(","));
       const e = EXPECT_COMMENT.exec(l);
       if (e && expect.length < MAX_CHECKS) expect.push(e[1]!.trim().slice(0, MAX_CHECK));
-      return !!e;
+      return !!e || !!g;
     };
     // Before the request line: blanks, comments (# @name), file variables.
     for (; i < to; i++) {
@@ -188,6 +196,7 @@ export function parseHttp(text: string): Parsed {
       mode,
       body: mode === "form" ? body.split(/\n|&/).map((x) => x.trim()).filter(Boolean).join("\n") : body,
       ...(expect.length ? { expect } : {}),
+      ...(given.length ? { given } : {}),
       span: [SEP.test(all[from] ?? "") ? from : Math.max(0, firstContent), to],
     });
   }
@@ -196,7 +205,7 @@ export function parseHttp(text: string): Parsed {
 
 /** One request as a `.http` block (from its `###` line). */
 export function serializeReq(r: Req): string {
-  const out = [`### ${r.name.replace(/[\r\n]/g, " ").trim()}`.trimEnd(), ...(r.expect ?? []).map((e) => `# @expect ${e.replace(/[\r\n]/g, " ").trim()}`), `${r.method} ${fullUrl(r)}`];
+  const out = [`### ${r.name.replace(/[\r\n]/g, " ").trim()}`.trimEnd(), ...(r.given?.length ? [`# @given ${givenList(r.given.join(",")).join(", ")}`] : []), ...(r.expect ?? []).map((e) => `# @expect ${e.replace(/[\r\n]/g, " ").trim()}`), `${r.method} ${fullUrl(r)}`];
   for (const [k, v] of sentHeaders(r)) out.push(`${k}: ${v}`);
   const body = r.mode === "none" ? "" : r.mode === "form" ? lines(r.body).map((l, i) => (i ? `&${l.replace(/^&/, "")}` : l)).join("\n") : r.body.replace(/\s+$/, "");
   // A body line that starts with ### would end the request when it's read back.

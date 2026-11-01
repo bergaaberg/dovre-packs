@@ -72,6 +72,53 @@ function filePath(root: string, file: unknown): { dir: string | undefined; path:
   return { dir, path, name: file };
 }
 
+export const STORY_RE = /^[a-z0-9][a-z0-9-]{0,59}\.story$/;
+export type StoryKind = "stories" | "setups";
+
+/** `.http/stories/<name>.story` or `.http/setups/<name>.story`: a plain folder and a plain file, or refused. */
+function storyPath(root: string, kind: StoryKind, file: unknown): { path: string | undefined; name: string } {
+  if (kind !== "stories" && kind !== "setups") throw new Error("Stories are in stories/ or setups/.");
+  if (typeof file !== "string" || !STORY_RE.test(file)) throw new Error("A story file is a plain lower-case name ending in .story.");
+  const dir = httpDir(root);
+  if (!dir) return { path: undefined, name: file };
+  const sub = join(dir, kind);
+  const st = lst(sub);
+  if (!st) return { path: undefined, name: file };
+  if (st.isSymbolicLink() || !st.isDirectory()) throw new Error(`${DIR}/${kind} isn't a plain folder.`);
+  const path = join(sub, file);
+  const fst = lst(path);
+  if (fst && (fst.isSymbolicLink() || !fst.isFile())) throw new Error(`${file} isn't a plain file.`);
+  return { path: fst ? path : undefined, name: file };
+}
+
+/** The story files of a kind, by name (none when the folder isn't there; refused when it's unsafe). */
+export function listStories(root: string, kind: StoryKind): string[] {
+  try {
+    const dir = httpDir(root);
+    if (!dir) return [];
+    const sub = join(dir, kind);
+    const st = lst(sub);
+    if (!st || st.isSymbolicLink() || !st.isDirectory()) return [];
+    return readdirSync(sub, { withFileTypes: true })
+      .filter((d) => d.isFile() && STORY_RE.test(d.name))
+      .map((d) => d.name)
+      .sort()
+      .slice(0, MAX_FILES);
+  } catch {
+    return [];
+  }
+}
+
+/** A story file's text, or undefined when it isn't there. Throws when it's unsafe or too large. */
+export function readStoryFile(root: string, kind: StoryKind, file: unknown): { name: string; text: string; hash: string } | undefined {
+  const f = storyPath(root, kind, file);
+  if (!f.path) return undefined;
+  const st = lst(f.path)!;
+  if (st.size > MAX_FILE) throw new Error(`${f.name} is larger than ${MAX_FILE / 1000} kB.`);
+  const text = readFileSync(f.path, "utf8");
+  return { name: f.name, text, hash: hashOf(text) };
+}
+
 export const hashOf = (text: string) => createHash("sha256").update(text).digest("hex").slice(0, 20);
 
 export type FileInfo = { name: string; reqs: Parsed["reqs"]; error?: string };

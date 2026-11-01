@@ -228,3 +228,29 @@ export function fromOpenApi(text: string): Imported {
 
 /** A file name for the spec's requests: its title as a plain name. */
 export const fileNameOf = (title: string) => `${title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "openapi"}.http`;
+
+/** One operation as the catalog lists it: the path as the spec writes it (`/orders/{id}`). */
+export type SpecOp = { method: Method; path: string; summary: string; tag: string };
+
+/** A spec's operations for the catalog (catalog.ts), without building requests. */
+export function specOps(text: string): { ok: true; title: string; ops: SpecOp[] } | { ok: false; error: string } {
+  const r = read(text);
+  if (!r.ok) return r;
+  const spec = r.v;
+  if (!isObj(spec) || !isObj(spec.paths)) return { ok: false, error: "That isn't an OpenAPI spec: it has no paths." };
+  const ops: SpecOp[] = [];
+  for (const [path, rawItem] of Object.entries(spec.paths)) {
+    const item = deref(spec, rawItem);
+    if (!isObj(item) || !path.startsWith("/") || path.length > 500 || /[\s\r\n]/.test(path)) continue;
+    for (const [m, rawOp] of Object.entries(item)) {
+      const method = m.toUpperCase() as Method;
+      if (!(METHODS as readonly string[]).includes(method)) continue;
+      const op = deref(spec, rawOp);
+      if (!isObj(op) || ops.length >= MAX_OPS) continue;
+      const tags = Array.isArray(op.tags) ? op.tags : [];
+      ops.push({ method, path, summary: one(op.summary, MAX_NAME) || one(op.operationId, MAX_NAME), tag: one(tags[0], 60) });
+    }
+  }
+  const info = isObj(spec.info) ? spec.info : {};
+  return { ok: true, title: one(info.title, 120) || "OpenAPI", ops };
+}
