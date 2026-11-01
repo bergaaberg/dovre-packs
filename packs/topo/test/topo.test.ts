@@ -445,3 +445,23 @@ test("topo: folded and unfolded rows keep hostile names inert", () => {
   assert.doesNotMatch(out, /href="javascript:/, "no name becomes a link target");
   assert.match(out, /&lt;script&gt;alert\(1\)&lt;\/script&gt;<\/a>/, "the unfolded worker row shows the name as text");
 });
+
+test("topo: a refused Cloudflare read says which token to edit, what to add, and where it lives here (#79)", () => {
+  const read = { at: 1, account: "a", have: { workers: [] }, failed: [
+    { what: "stores" as const, why: "HTTP 401 (does the token have Workers KV Storage Read?)", scope: "Workers KV Storage Read" },
+    { what: "buckets" as const, why: "HTTP 403 (does the token have Workers R2 Storage Read?)", scope: "Workers R2 Storage Read" },
+    { what: "queues" as const, why: "HTTP 500" },
+  ] };
+  const drift = { configured: true, read, declares: true };
+  const local = String(topoPage({ entries: [], drift }));
+  assert.match(local, /edit the token in <code>CF_API_TOKEN<\/code> at <a [^>]*href="https:\/\/dash\.cloudflare\.com\/profile\/api-tokens"/);
+  assert.match(local, /add <strong>Workers KV Storage Read<\/strong> and <strong>Workers R2 Storage Read<\/strong> \(Account, Read\)/);
+  assert.match(local, /Settings → Topo/);
+  assert.doesNotMatch(local, /wrangler secret put/);
+  const hosted = String(topoPage({ entries: [], drift, hosted: true }));
+  assert.match(hosted, /<code>wrangler secret put CF_API_TOKEN<\/code>/);
+  // A failure that isn't a refusal names no permission to add.
+  const down = String(topoPage({ entries: [], drift: { ...drift, read: { ...read, failed: [read.failed[2]!] } } }));
+  assert.match(down, /Couldn(&#39;|')t read from Cloudflare/);
+  assert.doesNotMatch(down, /CF_API_TOKEN/);
+});
