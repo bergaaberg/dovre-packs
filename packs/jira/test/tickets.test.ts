@@ -2,15 +2,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Hono } from "hono";
-import { contextStorage } from "hono/context-storage";
 import { html } from "hono/html";
 import { recentActions } from "dovre/actions/deploys.ts";
 import { openDb } from "dovre/db.ts";
-import { testContext } from "dovre/packs/testing.ts";
+import { packApp, testContext } from "dovre/packs/testing.ts";
 import type { PackContext } from "dovre/packs/types.ts";
 import { listTodos } from "dovre/todo/store.ts";
 import { createJiraPack } from "../index.ts";
-import { previewBody } from "../tickets.view.ts";
 import { type Agent, CREATE, createInput, FIELDS, type RunOff, TYPES } from "../mcp.ts";
 import { adf, readTicket, ticketFields, ticketPayload, validateTicket } from "../tickets.ts";
 
@@ -380,21 +378,18 @@ test("tickets: Bino's card asks before it creates, files through the same checks
   assert.deepEqual(mounted({ env: restOn, hosted: true }).pack.acts!(mounted({ env: restOn, hosted: true }).ctx), [], "hosted, Bino proposes nothing");
 });
 
-test("tickets: the manifest lists the write kind; the preview's Create is one click by default and asks twice when Settings says so (dovre#104)", async () => {
-  assert.deepEqual(createJiraPack().writes, [{ kind: "ticket-create", label: "File a Jira ticket" }]);
-  const ticket = { project: "DEV", type: { id: "10001", name: "Story", description: "" }, values: { summary: "Hei" } };
-  const fields = [{ id: "summary", name: "Summary", kind: "line", required: true, default: "" }] as unknown as Parameters<typeof previewBody>[0]["fields"];
-  const draw = async (clicks: Map<string, "once" | "twice">) => {
-    const app = new Hono();
-    app.use(contextStorage());
-    app.use("*", async (c, next) => (c.set("clicks" as never, clicks as never), next()));
-    app.get("/p", (c) => c.html(previewBody({ ticket, fields, nonce: "0".repeat(36) })));
-    return (await app.request("/p")).text();
-  };
-  const once = await draw(new Map());
+test("tickets: the pack lists its write kind; the preview's Create is one click by default and asks twice when Settings says so (#104)", async () => {
+  const pack = createJiraPack({ fetchFn: fakeRest(devRest({})).fetchFn, kept: { get: () => undefined, set: () => {} } });
+  assert.deepEqual(pack.writes, [{ kind: "ticket-create", label: "File a Jira ticket" }]);
+  const { get, post } = packApp([pack], { env: { JIRA_SITE: SITE, TICKET_PROJECTS: "DEV", ...restOn } });
+  assert.match(await (await get("/settings/writes")).text(), /value="jira.ticket-create"/);
+  await landed(get, "/jira/new?project=DEV&type=10255");
+  const preview = async () => (await post("/jira/new/preview", { project: "DEV", type: "10255", j_summary: "Hei", j_priority: "10006", j_customfield_10476: "10597" })).text();
+  const once = await preview();
   assert.doesNotMatch(once, /<details class="confirm">/);
   assert.match(once, /<button type="submit" class="primary">Create ticket<\/button>/);
-  const twice = await draw(new Map([["jira.ticket-create", "twice"]]));
-  assert.match(twice, /<details class="confirm"><summary>Create ticket…/);
+  assert.equal((await post("/settings/writes", "twice=jira.ticket-create")).status, 303);
+  const twice = await preview();
+  assert.match(twice, /<details class="confirm"><summary>Create ticket…<\/summary>.*Create this ticket in DEV in Jira\?.*<button type="submit" class="primary">Create ticket<\/button><\/div><\/details>/s);
   assert.match(twice, /name="nonce"/);
 });
