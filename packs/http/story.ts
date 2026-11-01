@@ -424,7 +424,8 @@ export function runValueCheck(text: string, values: Values): Outcome {
 
 /** A setup by its given name: the story, or why it can't be had (missing, has errors). */
 export type LoadSetup = (name: string) => Story | { error: string };
-export type Plan = { steps: Step[]; always: Send[]; setups: string[] };
+/** `stepFrom`/`alwaysFrom`: the setup each step comes from, by index ("" for the story's own). */
+export type Plan = { steps: Step[]; always: Send[]; setups: string[]; stepFrom: string[]; alwaysFrom: string[] };
 
 /**
  * The steps a run takes in `env`: each setup's own setups first, each setup once, then the story.
@@ -459,16 +460,19 @@ export function planStory(story: Story, env: string, load: LoadSetup): { ok: tru
   const steps = [...order.flatMap((o) => o.s.steps), ...story.steps];
   const always = [...story.always, ...order.toReversed().flatMap((o) => o.s.always)];
   if (steps.length + always.length > MAX_STEPS) return { ok: false, error: `With its setups the story has ${steps.length + always.length} steps, more than ${MAX_STEPS}` };
-  return { ok: true, plan: { steps, always, setups: order.map((o) => o.name) } };
+  const stepFrom = [...order.flatMap((o) => o.s.steps.map(() => o.name)), ...story.steps.map(() => "")];
+  const alwaysFrom = [...story.always.map(() => ""), ...order.toReversed().flatMap((o) => o.s.always.map(() => o.name))];
+  return { ok: true, plan: { steps, always, setups: order.map((o) => o.name), stepFrom, alwaysFrom } };
 }
 
-/** Setups read from a checkout's `.http/setups/` (the one place here that reads files). */
+/** Setups read from a checkout's `.http/setups/` (the one place here that reads files); `onRead` hears each file and its hash. */
 export const setupLoader =
-  (root: string): LoadSetup =>
+  (root: string, onRead?: (file: string, hash: string) => void): LoadSetup =>
   (name) => {
     const file = `${setupFile(name)}.story`;
     try {
       const f = readStoryFile(root, "setups", file);
+      onRead?.(file, f?.hash ?? "missing");
       if (!f) return { error: `there's no .http/setups/${file}` };
       const p = parseStory(f.text);
       return p.errors.length ? { error: `line ${p.errors[0]!.line}: ${p.errors[0]!.message}` } : p.story;

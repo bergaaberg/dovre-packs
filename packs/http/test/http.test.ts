@@ -241,7 +241,7 @@ test("hostile input: response body, headers, status text, URLs, names and file n
 });
 
 test("every class the views use is styled by core's stylesheet or the pack's own", () => {
-  const src = ["view.ts", "index.ts", "quick-view.ts"].map((f) => readFileSync(new URL(`../${f}`, import.meta.url), "utf8")).join("\n");
+  const src = ["view.ts", "index.ts", "quick-view.ts", "stories-view.ts"].map((f) => readFileSync(new URL(`../${f}`, import.meta.url), "utf8")).join("\n");
   const styled = STYLE + (httpPack.styles ?? "");
   const missing = new Set<string>();
   for (const m of src.matchAll(/class="([^"]*)"/g))
@@ -1090,4 +1090,128 @@ test("quick view: hostile spec, file names, case names and responses come out in
   inert(await landed(m.get, "/http?repo=shop&env=dev"));
   inert(await (await m.post("/http/line", { repo: "shop", line: H })).text().catch(() => ""));
   inert(await (await m.get("/http/import")).text());
+});
+
+// ── Stories (H-04) ────────────────────────────────────────────────────────────────────────────
+
+const STORY = `# A customer orders and cancels
+given: one customer
+
+step: Order
+  case: orders.http#Order
+  take: order.id = $.id
+
+step: Cancel
+  POST {{baseUrl}}/orders/\${order.id}/cancel
+  expect: $.status == cancelled
+
+always: Clean up
+  DELETE {{baseUrl}}/customers/\${customer.id}
+`;
+const SETUP = "step: Customer\n  POST {{baseUrl}}/customers\n  take: customer.id = $.id\n";
+const ORDER_CASE = "### Order\n# @expect status 201\nPOST {{baseUrl}}/orders\nContent-Type: application/json\n\n{\"buns\": 2}\n";
+
+function storyRepo(m: ReturnType<typeof mounted>, story = STORY) {
+  const dir = join(m.code, "shop", ".http");
+  mkdirSync(join(dir, "stories"), { recursive: true });
+  mkdirSync(join(dir, "setups"), { recursive: true });
+  writeFileSync(join(dir, "stories", "cancel.story"), story);
+  writeFileSync(join(dir, "setups", "one-customer.story"), SETUP);
+  writeFileSync(join(dir, "orders.http"), ORDER_CASE);
+}
+const shopApi = (url: string) => {
+  const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+  if (url.endsWith("/customers")) return json(201, { id: "c7" });
+  if (url.endsWith("/orders")) return json(201, { id: "o9" });
+  if (url.endsWith("/cancel")) return json(200, { status: "cancelled" });
+  return json(200, {});
+};
+
+test("stories: the story page sends nothing; one click runs it, values flow, always runs; logged and kept", async () => {
+  const fake = fakeFetch(shopApi);
+  const m = mounted({ fetchFn: fake.fetchFn });
+  storyRepo(m);
+  const page = await (await m.get(`/http/story?${qs({ repo: "shop", story: "cancel.story", env: "dev" })}`)).text();
+  assert.equal(fake.calls.length, 0);
+  assert.match(page, /A customer orders and cancels/);
+  assert.match(page, /Given · one customer/);
+  assert.match(page, /POST \{\{baseUrl\}\}\/orders/);
+  assert.match(page, /Run the story/);
+  assert.equal(checkHtml(page.replace(/^<meta[^>]*>/, "")), undefined);
+
+  const res = await m.post("/http/story/run", { repo: "shop", story: "cancel.story", env: "dev", hash: hashIn(page) });
+  assert.equal(res.status, 303);
+  const at = res.headers.get("location")!;
+  assert.match(at, /^\/http\/story\/run\/[0-9a-f-]{36}$/);
+  const done = await landed(m.get, at);
+  assert.match(done, /It passed: all 4 passed/);
+  assert.equal(checkHtml(done.replace(/^<meta[^>]*>/, "")), undefined);
+  assert.deepEqual(
+    fake.calls.map((c) => `${c.init.method} ${c.url}`),
+    ["POST https://api.example.com/customers", "POST https://api.example.com/orders", "POST https://api.example.com/orders/o9/cancel", "DELETE https://api.example.com/customers/c7"],
+  );
+  // The case's own check came along; the values show on the live run.
+  assert.match(done, /status 201/);
+  assert.match(done, /order\.id/);
+  for (let i = 0; i < 50 && !(await m.actions()).some((a) => a.kind === "http.run"); i++) await tick();
+  const run = (await m.actions()).find((a) => a.kind === "http.run")!;
+  assert.deepEqual({ ...run }, { kind: "http.run", target: "shop/.http/stories/cancel.story", detail: "all 4 passed · dev", ok: 1, error: null });
+  assert.equal((await m.actions()).filter((a) => a.kind === "http.send").length, 4);
+  const kept = await m.db.DB.prepare("SELECT story, ok, record FROM http_story_runs").all<{ story: string; ok: number; record: string }>();
+  assert.equal(kept.results.length, 1);
+  assert.ok(!kept.results[0]!.record.includes("o9"), "a taken value was kept");
+
+  const list = await (await m.get("/http/stories?repo=shop")).text();
+  assert.match(list, /A customer orders and cancels/);
+  assert.match(list, /passed/);
+  assert.equal(checkHtml(list.replace(/^<meta[^>]*>/, "")), undefined);
+  const again = await (await m.get(`/http/story?${qs({ repo: "shop", story: "cancel.story", env: "dev" })}`)).text();
+  assert.match(again, /Earlier runs/);
+  assert.match(again, /all 4 passed/);
+});
+
+test("stories: a run re-checks every file it reads; a pin, bad lines and another site are refused; nothing is sent", async () => {
+  const fake = fakeFetch(shopApi);
+  const m = mounted({ fetchFn: fake.fetchFn });
+  storyRepo(m);
+  const page = await (await m.get(`/http/story?${qs({ repo: "shop", story: "cancel.story", env: "dev" })}`)).text();
+  const body = { repo: "shop", story: "cancel.story", env: "dev", hash: hashIn(page) };
+  // The setup changes after the page showed it.
+  writeFileSync(join(m.code, "shop", ".http", "setups", "one-customer.story"), SETUP.replace("customers", "people"));
+  const changed = await m.post("/http/story/run", body);
+  assert.equal(changed.status, 409);
+  assert.match(await changed.text(), /changed since it was shown/);
+  // So does the case's file.
+  writeFileSync(join(m.code, "shop", ".http", "setups", "one-customer.story"), SETUP);
+  writeFileSync(join(m.code, "shop", ".http", "orders.http"), ORDER_CASE.replace("201", "200"));
+  assert.equal((await m.post("/http/story/run", body)).status, 409);
+  assert.equal((await m.post("/http/story/run", body, { origin: ORIGIN, "sec-fetch-site": "cross-site" })).status, 404);
+  assert.equal((await m.post("/http/story/run", { ...body, story: "../x.story" })).status, 400);
+
+  storyRepo(m, `only: local\n${STORY}`);
+  const pinned = await (await m.get(`/http/story?${qs({ repo: "shop", story: "cancel.story", env: "dev" })}`)).text();
+  assert.match(pinned, /only runs in local, not dev/);
+  assert.doesNotMatch(pinned, /Run the story/);
+  assert.equal((await m.post("/http/story/run", body)).status, 400);
+
+  storyRepo(m, "step: Broken\n  nonsense here\n");
+  const broken = await (await m.get(`/http/story?${qs({ repo: "shop", story: "cancel.story" })}`)).text();
+  assert.match(broken, /line 2/);
+  assert.equal(fake.calls.length, 0);
+});
+
+test("stories: hostile titles, steps, file names and repos come out inert", async () => {
+  const m = mounted({ fetchFn: fakeFetch(() => new Response(H, { status: 200 })).fetchFn });
+  storyRepo(m, `# ${H}\n# ${H}\nstep: ${H}\n  GET {{baseUrl}}/x?q=${encodeURIComponent(H)}\n  expect: header x-y contains ${H}\n`);
+  const page = await (await m.get(`/http/story?${qs({ repo: "shop", story: "cancel.story", env: "dev" })}`)).text();
+  inert(page);
+  assert.equal(checkHtml(page.replace(/^<meta[^>]*>/, "")), undefined);
+  const res = await m.post("/http/story/run", { repo: "shop", story: "cancel.story", env: "dev", hash: hashIn(page) });
+  const done = await landed(m.get, res.headers.get("location")!);
+  inert(done);
+  assert.equal(checkHtml(done.replace(/^<meta[^>]*>/, "")), undefined);
+  for (const p of [`/http/story?${qs({ repo: H, story: H })}`, `/http/stories?${qs({ repo: JS_URL })}`, `/http/story/run/${encodeURIComponent(H)}`]) {
+    const r = await m.get(p);
+    inert(await r.text());
+  }
 });

@@ -226,6 +226,9 @@ test("story: a plan runs setups first (each once), pins hold, and loops are refu
     assert.deepEqual(p.plan.setups, ["fresh db", "one customer"]);
     assert.deepEqual(p.plan.steps.map((s) => (s.t === "send" ? s.title : s.text)).slice(0, 3), ["Reset", "Customer", "The customer orders two cinnamon buns"]);
     assert.deepEqual(p.plan.always.map((s) => s.title), ["Remove the customer", "Bye", "Drop"]);
+    assert.deepEqual(p.plan.stepFrom.slice(0, 3), ["fresh db", "one customer", ""]);
+    assert.equal(p.plan.stepFrom.length, p.plan.steps.length);
+    assert.deepEqual(p.plan.alwaysFrom, ["", "one customer", "fresh db"]);
   }
   assert.match((planStory(story, "prod", load) as { error: string }).error, /only runs in local, test, not prod/);
   assert.match((planStory(story, "test", load) as { error: string }).error, /Setup fresh db only runs in local/);
