@@ -41,7 +41,12 @@ import { blankReq, CREDENTIAL_HEADERS, headerLines, MAX_URL, envNames, fromCurl,
 import { createHistory, failure, type History, type Sent, sendOnce } from "./send.ts";
 import { previous } from "./compare.ts";
 import { styles as jsonStyles } from "../json/view.ts";
-import { confirmSavePage, fileOk, homeHref, type HomeOpts, homePage, noWhere, openapiPage, runPage, runPageHref, runPlanPage, sentHref, sentPage, type Where } from "./view.ts";
+import { confirmSavePage, fileOk, homeHref, importPage, noWhere, openapiPage, runPage, runPageHref, runPlanPage, sentHref, sentPage, type Where } from "./view.ts";
+import { createResults, type Results } from "./cases.ts";
+import { blanksOfForm, fillBlanks } from "./quick.ts";
+import { createQuick } from "./quick-routes.ts";
+import { quickHref, quickStyles } from "./quick-view.ts";
+import type { Child, Tone } from "dovre/ui/kit.ts";
 import { fileNameOf, fromOpenApi, MAX_SPEC } from "./openapi.ts";
 import { fromCollection, varLines } from "./collections.ts";
 import type { Refs } from "./chain.ts";
@@ -64,9 +69,10 @@ function whereOf(f: Record<string, unknown>): Where {
   return { env: str(f.env, 64), repo: str(f.repo, 100), file: str(f.file, 85).trim(), opened: str(f.opened, 85), n: /^\d{1,4}$/.test(str(f.n)) ? str(f.n) : "", hash: /^[0-9a-f]{1,64}$/.test(str(f.hash)) ? str(f.hash) : "" };
 }
 
-export function createHttpPack(opts: CreateHttpPackOpts = {}): Pack & { history(): History } {
+export function createHttpPack(opts: CreateHttpPackOpts = {}): Pack & { history(): History; results(): Results } {
   const history = createHistory();
   const runs = createRuns();
+  const results = createResults();
   const now = opts.now ?? Date.now;
 
   const secretsOf = (ctx: PackContext) => parseSecrets(ctx.env.HTTP_SECRETS, ctx.env);
@@ -96,7 +102,7 @@ export function createHttpPack(opts: CreateHttpPackOpts = {}): Pack & { history(
   }
 
   /** Where it would go, worked out without sending: the URL masked, or why it won't go. */
-  function targetOf(ctx: PackContext, r: Req, w: Where, refs: Refs = sentRefs(w)): HomeOpts["target"] {
+  function targetOf(ctx: PackContext, r: Req, w: Where, refs: Refs = sentRefs(w)): { ok: boolean; text: string } | undefined {
     if (!r.url) return undefined;
     const secrets = secretsOf(ctx);
     const p = prepare(r, varsFor(ctx, w).vars, secrets, now(), refs);
@@ -104,22 +110,13 @@ export function createHttpPack(opts: CreateHttpPackOpts = {}): Pack & { history(
     return p.ok ? { ok: true, text: masker(secrets)(p.url).replace(/%7B%7B(.*?)%7D%7D/gi, "{{$1}}") } : { ok: false, text: p.error };
   }
 
-  function draw(ctx: PackContext, c: Context<AppEnv>, r: Req, w: Where, extra: Partial<HomeOpts> = {}, status = 200) {
-    const codeDir = codeDirOf(ctx.env);
-    const root = w.repo ? repoRoot(codeDir, w.repo) : null;
-    const body = homePage({
-      // A secret's value typed in shows as its {{NAME}}: it's never drawn back.
-      req: placeholdSecrets(r, secretsOf(ctx)),
-      where: w,
-      envs: varsFor(ctx, w).envs,
-      repos: listRepos(codeDir),
-      secrets: secretsOf(ctx),
-      target: targetOf(ctx, r, w),
-      files: root ? listFiles(root) : undefined,
-      history: history.list(),
-      ...extra,
-    });
-    return ctx.page(c, { title: "HTTP client", body, current: "/http" }).then((res) => (status === 200 ? res : new Response(res.body, { status, headers: res.headers })));
+  /** A page for a request that came back (refused, imported, opened): the Quick view, or the import page for pasted text. */
+  function draw(ctx: PackContext, c: Context<AppEnv>, r: Req, w: Where, extra: { flash?: { tone: Tone; text: Child }; curl?: string; spec?: string; curlOut?: string; blanks?: Map<string, string>; ep?: string } = {}, status = 200) {
+    if (extra.curl !== undefined || extra.spec !== undefined) {
+      const body = importPage({ flash: extra.flash, curl: extra.curl, spec: extra.spec });
+      return ctx.page(c, { title: "Import requests", body, current: "/http" }).then((res) => (status === 200 ? res : new Response(res.body, { status, headers: res.headers })));
+    }
+    return quick.render(ctx, c, { where: w, ep: extra.ep, req: r.url ? r : undefined, blanks: extra.blanks, flash: extra.flash, curlOut: extra.curlOut, status });
   }
 
   /** Sends in the background; the page it redirects to fills in when the answer is here. */
@@ -156,6 +153,18 @@ export function createHttpPack(opts: CreateHttpPackOpts = {}): Pack & { history(
       .finally(() => ctx.publish(["http", `http-sent:${id}`]));
     return { s, settled };
   }
+
+  const quick = createQuick({
+    history,
+    results,
+    now,
+    secretsOf,
+    varsFor,
+    sentRefs,
+    targetOf,
+    prepare: (ctx, r, w, refs) => prepare(r, varsFor(ctx, w).vars, secretsOf(ctx), now(), refs),
+    start,
+  });
 
   /** A repo's .http file and its requests, for a run. */
   function loadRun(ctx: PackContext, repo: string, file: string) {
@@ -251,8 +260,9 @@ export function createHttpPack(opts: CreateHttpPackOpts = {}): Pack & { history(
 
   return {
     history: () => history,
+    results: () => results,
     // The JSON tools' tree and diff classes, for a response body shown as a tree or compared.
-    styles: jsonStyles,
+    styles: jsonStyles + quickStyles,
     manifest: {
       api: PACK_API,
       id: "http",
@@ -318,39 +328,26 @@ export function createHttpPack(opts: CreateHttpPackOpts = {}): Pack & { history(
       app.use("/http", strictOrigin);
       app.use("/http/*", strictOrigin);
 
-      app.get("/http", async (c) => {
-        const q = c.req.query();
-        const w: Where = { ...noWhere(), env: str(q.env, 64), repo: str(q.repo, 100) };
-        let r = blankReq();
-        let flash: HomeOpts["flash"];
-        const file = str(q.file, 85);
-        if (w.repo && file) {
-          const root = repoRoot(codeDirOf(ctx.env), w.repo);
-          try {
-            if (!root) throw new Error("That repo isn't a checkout in your code folder.");
-            const f = readFile(root, file);
-            const n = /^\d{1,4}$/.test(q.n ?? "") ? Number(q.n) : 0;
-            const found = parseHttp(f.text).reqs[n];
-            if (!found) throw new Error(`${file} has no request #${n + 1}.`);
-            const { span: _span, ...req } = found;
-            r = req;
-            Object.assign(w, { file: f.name, opened: f.name, n: String(n), hash: f.hash });
-          } catch (e) {
-            flash = { tone: "warn", text: (e as Error).message };
-          }
-        }
-        if (q.saved === "1" && !flash) flash = { tone: "ok", text: html`Saved in <code>${w.repo}/.http/${w.file}</code>.` };
-        return draw(ctx, c, r, w, { flash });
-      });
+      quick.mount(app, ctx);
+
+      app.get("/http/import", (c) => draw(ctx, c, blankReq(), noWhere(), { curl: "", spec: "" }));
 
       app.post("/http/send", async (c) => {
         const f = await c.req.parseBody();
-        const r = reqOfForm(f);
+        const typed = reqOfForm(f);
         const w = whereOf(f);
+        // From the Quick view: its blanks go in as typed, and it comes back to the same view.
+        const fromQuick = f.back === "quick";
+        const blanks = blanksOfForm(f);
+        const ep = str(f.ep, 600);
+        const filled = fillBlanks(typed, blanks);
+        if (!filled.ok) return draw(ctx, c, typed, w, { flash: { tone: "warn", text: filled.error }, blanks, ep }, 400);
+        const r = filled.req;
         const p = prepare(r, varsFor(ctx, w).vars, secretsOf(ctx), now(), sentRefs(w));
-        if (!p.ok) return draw(ctx, c, r, w, { flash: { tone: "warn", text: p.error } }, 400);
+        if (!p.ok) return draw(ctx, c, typed, w, { flash: { tone: "warn", text: p.error }, blanks, ep }, 400);
+        if (w.repo) quick.remember(w.repo, blanks);
         const { s } = start(ctx, r, w, p);
-        return c.redirect(sentHref(s.id), 303);
+        return c.redirect(fromQuick ? quickHref({ repo: w.repo, env: w.env, ep, file: w.opened, n: w.n }) : sentHref(s.id), 303);
       });
 
       app.get("/http/r/:id", async (c) => {
@@ -363,7 +360,7 @@ export function createHttpPack(opts: CreateHttpPackOpts = {}): Pack & { history(
           title: s.req.name || "HTTP response",
           current: "/http",
           head: html`<meta name="u-topics" content="http http-sent:${s.id}">`,
-          body: sentPage({ sent: s, view: VIEWS.find((v) => v === c.req.query("view")) ?? "pretty", prev: previous(history.list(), s), req: s.req, where: w, envs: varsFor(ctx, w).envs, repos: listRepos(codeDir), secrets: secretsOf(ctx), history: history.list() }),
+          body: sentPage({ sent: s, view: VIEWS.find((v) => v === c.req.query("view")) ?? "pretty", prev: previous(history.list(), s), req: s.req, where: w, envs: varsFor(ctx, w).envs, repos: listRepos(codeDir), secrets: secretsOf(ctx) }),
         });
       });
 
@@ -414,9 +411,13 @@ export function createHttpPack(opts: CreateHttpPackOpts = {}): Pack & { history(
 
       app.post("/http/curl", async (c) => {
         const f = await c.req.parseBody();
-        const r = reqOfForm(f);
+        const typed = reqOfForm(f);
         const w = whereOf(f);
-        return draw(ctx, c, r, w, { curlOut: r.url ? toCurl(r, varsFor(ctx, w).vars, secretsOf(ctx), now()) : "" });
+        const blanks = blanksOfForm(f);
+        const filled = fillBlanks(typed, blanks);
+        if (!filled.ok) return draw(ctx, c, typed, w, { flash: { tone: "warn", text: filled.error }, blanks, ep: str(f.ep, 600) }, 400);
+        const r = filled.req;
+        return draw(ctx, c, typed, w, { curlOut: r.url ? toCurl(r, varsFor(ctx, w).vars, secretsOf(ctx), now()) : "", blanks, ep: str(f.ep, 600) });
       });
 
       app.post("/http/import", async (c) => {
@@ -484,9 +485,14 @@ export function createHttpPack(opts: CreateHttpPackOpts = {}): Pack & { history(
 
       app.post("/http/save", async (c) => {
         const f = await c.req.parseBody();
-        const r = reqOfForm(f);
+        const typed = reqOfForm(f);
         const w = whereOf(f);
-        const refuse = (text: string) => draw(ctx, c, r, w, { flash: { tone: "warn", text } }, 400);
+        // The Quick view's blanks are saved as typed: a case is the request with its values in.
+        const blanks = blanksOfForm(f);
+        const filled = fillBlanks(typed, blanks);
+        const r = filled.ok ? filled.req : typed;
+        const refuse = (text: string) => draw(ctx, c, r, w, { flash: { tone: "warn", text }, ep: str(f.ep, 600) }, 400);
+        if (!filled.ok) return refuse(filled.error.replace("nothing was sent", "nothing was saved"));
         const root = repoRoot(codeDirOf(ctx.env), w.repo);
         if (!root) return refuse("Pick a repo (a checkout directly in your code folder) to save in.");
         if (!fileOk(w.file)) return refuse("The file is a plain name ending in .http (api.http).");

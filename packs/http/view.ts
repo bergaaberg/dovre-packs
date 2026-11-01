@@ -6,14 +6,14 @@
 import { html } from "hono/html";
 import { safeUrl } from "dovre/pages/parts.ts";
 import { type Child, Confirm, Empty, KeyValues, Notice, PageHeader, Panel, Pill, type Tone } from "dovre/ui/kit.ts";
-import { type FileInfo, FILE_RE } from "./files.ts";
+import { FILE_RE } from "./files.ts";
 import { headersText, MAX_BODY_IN, MAX_HEADERS, MAX_NAME, MAX_URL, METHODS, MODES, type Req, type Secret } from "./model.ts";
 import type { Sent } from "./send.ts";
 import { compare } from "./compare.ts";
 import { parse } from "../json/tools.ts";
 import { changesList, tree } from "../json/view.ts";
 import { type Imported, MAX_SPEC } from "./openapi.ts";
-import { agentHref, debugPrompt, failing, writePrompt } from "./agent.ts";
+import { agentHref, debugPrompt, failing } from "./agent.ts";
 import { MAX_CHECK, MAX_CHECKS } from "./checks.ts";
 import { failedSteps, MAX_RUN, passed, type Run, type Step } from "./run.ts";
 
@@ -120,45 +120,12 @@ ${Panel({
 })}`;
 }
 
-function savedPanel(o: { repos: string[]; repo: string; files: FileInfo[] | undefined; env: string }): Html {
-  const pick = html`<form method="get" action="/http" class="fields"><label class="field"><span class="label">Repo</span><select name="repo">${o.repos.length ? "" : html`<option value="">No checkouts under CODE_DIR</option>`}${options(o.repos, o.repo)}</select></label>${o.env ? html`<input type="hidden" name="env" value="${o.env}">` : ""}<div class="buttons"><button type="submit">Open</button></div></form>`;
-  const list = !o.repo
-    ? ""
-    : !o.files?.length
-      ? Empty({ title: "No .http files yet", children: html`<p>Save a request to start <code>${o.repo}/.http/</code>.</p>` })
-      : html`${o.files.map(
-          (f) =>
-            html`<h3 class="sub-h">${f.name}${f.reqs.length && !f.error ? html` <a class="btn sm ghost" href="${runHref({ repo: o.repo, file: f.name, env: o.env })}" title="Send its requests one after the other and check each response">Run</a>` : ""}</h3>${f.error ? Notice({ tone: "warn", children: f.error }) : ""}<ul class="list">${f.reqs.map(
-              (q, i) =>
-                html`<li class="item"><a href="${homeHref({ repo: o.repo, file: f.name, n: String(i), env: o.env })}"><strong>${q.method}</strong> ${q.name || q.url}</a>${q.name ? html` <span class="t3 mono">${q.url}</span>` : ""}</li>`,
-            )}</ul>`,
-        )}`;
-  const agent = o.repo ? html`<div class="buttons"><a class="btn sm ghost" href="${agentHref(o.repo, writePrompt())}" title="Start an agent session that writes this repo's endpoints as .http requests">Write requests with an agent</a></div>` : "";
-  return Panel({ title: "Saved in repos", children: html`${pick}${list}${agent}` });
-}
-
-function historyPanel(list: Sent[]): Html {
-  return Panel({
-    title: "History",
-    meta: html`<span class="t3">this session, in memory</span>`,
-    children: list.length
-      ? html`<ul class="list">${list.map(
-          (s) =>
-            html`<li class="item"><a href="${sentHref(s.id)}">${s.state === "done" && s.resp ? Pill({ tone: statusTone(s.resp.status), children: String(s.resp.status) }) : Pill({ tone: s.state === "failed" ? "bad" : "neutral", children: s.state === "failed" ? "failed" : "…" })} <strong>${s.out.method}</strong> <span class="mono">${s.out.url}</span>${s.by === "agent" ? html` <span class="t3">by an agent</span>` : ""}</a></li>`,
-        )}</ul>`
-      : Empty({ title: "Nothing sent yet" }),
-  });
-}
-
-export type HomeOpts = EditorOpts & { files?: FileInfo[]; history: Sent[]; flash?: { tone: Tone; text: Child }; curl?: string; curlOut?: string; spec?: string };
-
-export function homePage(o: HomeOpts): Html {
-  return html`${PageHeader({ title: "HTTP client", sub: "Requests from this machine, saved as .http files in your repos", crumbs })}
+/** Pasted text into requests: a curl command, or a spec or collection. Nothing is sent or fetched. */
+export function importPage(o: { flash?: { tone: Tone; text: Child }; curl?: string; spec?: string }): Html {
+  return html`${PageHeader({ title: "Import requests", sub: "Read here: nothing is sent or fetched", crumbs })}
 ${o.flash ? Notice({ tone: o.flash.tone, children: o.flash.text }) : ""}
-${o.curlOut !== undefined ? Panel({ title: "As curl", children: html`<pre class="output" data-copy>${o.curlOut}</pre><p class="notes">Secrets stay shell variables ($NAME): set them in your shell to run it.</p>` }) : ""}
-${editor(o)}
-<div class="grid-2">${savedPanel({ repos: o.repos, repo: o.where.repo, files: o.files, env: o.where.env })}${historyPanel(o.history)}</div>
-<div class="grid-2">${importPanel(o.curl)}${openapiPanel(o.spec)}</div>`;
+<div class="grid-2">${importPanel(o.curl)}${openapiPanel(o.spec)}</div>
+<p><a href="/http">Back to the client</a></p>`;
 }
 
 /** A body for reading: JSON pretty-printed (unless asked raw), anything else as the text it is. */
@@ -241,7 +208,7 @@ ${body}`,
 
 const clock = (at: number) => `${new Date(at).toISOString().slice(11, 19)} UTC`;
 
-export function sentPage(o: HomeOpts & { sent: Sent; view: string; prev?: Sent }): Html {
+export function sentPage(o: EditorOpts & { sent: Sent; view: string; prev?: Sent }): Html {
   return html`${PageHeader({ title: o.sent.req.name || `${o.sent.out.method} request`, sub: html`<span class="mono">${o.sent.out.url}</span>`, crumbs })}
 ${o.view === "diff" ? comparePanel(o.sent, o.prev) : ""}
 ${responseRegion(o.sent, o.view === "diff" ? "pretty" : o.view, o.prev)}

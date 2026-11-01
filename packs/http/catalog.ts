@@ -50,6 +50,20 @@ export function groupOf(path: string, tag = ""): string {
   return segs(path).find((s) => !/^(api|v\d+)$/i.test(s) && !WILD.test(s)) ?? "other";
 }
 
+/** The endpoint a request to `method url` belongs to: an exact path first, then a spec path a placeholder fits, then a saved one. */
+export function endpointFor<E extends Pick<Endpoint, "method" | "path" | "fromSpec">>(endpoints: E[], method: string, url: string): E | undefined {
+  const path = pathOf(url);
+  if (!path) return undefined;
+  return (
+    endpoints.find((e) => e.method === method && e.path === normal(path)) ??
+    endpoints.find((e) => e.fromSpec && e.method === method && fits(e.path, path)) ??
+    endpoints.find((e) => !e.fromSpec && e.method === method && fits(e.path, normal(path)))
+  );
+}
+
+/** An endpoint's key in a URL: `GET /orders/{id}`. */
+export const endpointKey = (e: Pick<Endpoint, "method" | "path">) => `${e.method} ${e.path}`;
+
 export function buildCatalog(spec: string | undefined, files: { name: string; reqs: Req[] }[]): Catalog {
   const notes: string[] = [];
   let ops: SpecOp[] = [];
@@ -71,11 +85,7 @@ export function buildCatalog(spec: string | undefined, files: { name: string; re
         continue;
       }
       const ref: CaseRef = { file: f.name, name: r.name };
-      // An exact path first, then one a placeholder fits.
-      const at =
-        endpoints.find((e) => e.method === r.method && e.path === normal(path)) ??
-        endpoints.find((e) => e.fromSpec && e.method === r.method && fits(e.path, path)) ??
-        endpoints.find((e) => !e.fromSpec && e.method === r.method && fits(e.path, normal(path)));
+      const at = endpointFor(endpoints, r.method, r.url);
       if (at) at.cases.push(ref);
       else endpoints.push({ method: r.method, path: normal(path), group: groupOf(path), summary: "", fromSpec: false, cases: [ref] });
     }

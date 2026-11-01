@@ -36,6 +36,10 @@ export function debugPrompt(s: Sent): string {
 export const writePrompt = () =>
   "Write HTTP requests for this repo's API in .http/ (the VS Code REST Client / JetBrains HTTP Client format: `### Name` above each request, then the request line, headers, a blank line and the body). Find the endpoints from the routes and handlers; group them in a file per area (.http/<area>.http). Start every URL with {{baseUrl}}; path and query parameters as {{name}} or a realistic example; a JSON body shaped like what the handler reads. Auth as placeholders ({{API_TOKEN}}): never a real token, key or password. Leave out endpoints already in .http/, and don't send any requests.";
 
+/** For an endpoint with no cases: draft some, as named requests with checks, in the file they belong in. */
+export const casesPrompt = (ep: { method: string; path: string }, file: string) =>
+  `Write cases for ${ep.method} ${ep.path} in .http/${file} (the VS Code REST Client / JetBrains HTTP Client format). Read the handler first. A case is a named request (\`### Happy path\`) with \`# @expect\` lines above the request line for what a good answer is (status 201, json $.id exists, json $.total == 14800). Cover the happy path, a bad input the handler refuses, and missing or wrong auth if it needs any. URLs start with {{baseUrl}}; secrets as {{NAME}} placeholders, never values. If a case needs data to exist first, say so with \`# @given <setup name>\`. Add them at the end of the file (don't change what's there), and don't send any requests.`;
+
 // ── Sending for an agent (the `send` tool on Dovre's MCP server, #52) ──────────────────────────
 
 /** Hosts an agent may send to without being listed: this machine. */

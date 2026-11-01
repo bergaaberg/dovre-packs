@@ -20,6 +20,8 @@ import { STYLE } from "dovre/ui/style.ts";
 import { readdirSync } from "node:fs";
 import { createHttpPack, httpPack } from "../index.ts";
 import { MAX_RESPONSE } from "../send.ts";
+import { quickStyles } from "../quick-view.ts";
+import { checkHtml } from "dovre/packs/guard.ts";
 
 const H = `<script>alert(1)</script><img src=x onerror=alert(1)>`;
 const JS_URL = "javascript:alert(1)";
@@ -238,12 +240,15 @@ test("hostile input: response body, headers, status text, URLs, names and file n
   inert(await bad.text());
 });
 
-test("every class the views use is styled by core's stylesheet", () => {
-  const src = ["view.ts", "index.ts"].map((f) => readFileSync(new URL(`../${f}`, import.meta.url), "utf8")).join("\n");
+test("every class the views use is styled by core's stylesheet or the pack's own", () => {
+  const src = ["view.ts", "index.ts", "quick-view.ts"].map((f) => readFileSync(new URL(`../${f}`, import.meta.url), "utf8")).join("\n");
+  const styled = STYLE + (httpPack.styles ?? "");
   const missing = new Set<string>();
   for (const m of src.matchAll(/class="([^"]*)"/g))
-    for (const name of m[1]!.replace(/\$\{[^}]*\}/g, " ").split(/\s+/).filter(Boolean)) if (/^[a-z][a-z0-9-]*$/.test(name) && !new RegExp(`\\.${name}(?![a-z0-9-])`).test(STYLE)) missing.add(name);
+    for (const name of m[1]!.replace(/\$\{[^}]*\}/g, " ").split(/\s+/).filter(Boolean)) if (/^[a-z][a-z0-9-]*$/.test(name) && !new RegExp(`\\.${name}(?![a-z0-9-])`).test(styled)) missing.add(name);
   assert.deepEqual([...missing], []);
+  // The pack's own rules style only its own classes: none would be dropped as restyling core.
+  for (const sel of (quickStyles.match(/[^{}]+(?=\{)/g) ?? []).filter((x) => !x.trim().startsWith("@"))) assert.match(sel, /\.http-/, sel);
 });
 
 test("save: a new file is one click, logged; secrets' values are never written", async () => {
@@ -795,4 +800,294 @@ GET {{baseUrl}}/x/{{login.response.body.echo}}
   const gone = await m.post("/http/send", send({ name: "orders", url: "https://api.example.com/o/{{login.response.body.user.id}}" }));
   assert.equal(gone.status, 400);
   assert.match(await gone.text(), /No response from login yet: send it first/);
+});
+
+// ── The Quick view and cases (dovre-packs#65, H-02/H-03) ─────────────────────────────────────
+
+const SHOP_SPEC = `openapi: 3.0.3
+info: { title: Shop API }
+paths:
+  /orders:
+    post:
+      tags: [orders]
+      summary: Create an order
+      requestBody:
+        content:
+          application/json:
+            schema: { type: object, required: [customer], properties: { customer: { type: string, example: "{{customer}}" }, note: { type: string, description: on the receipt } } }
+      responses: { "201": { description: The order } }
+  /orders/{id}:
+    get:
+      tags: [orders]
+      summary: One order
+      parameters: [{ name: id, in: path, schema: { type: string } }]
+      responses: { "200": { description: ok } }
+  /customers/{id}:
+    get:
+      tags: [customers]
+      summary: One customer
+      parameters: [{ name: id, in: path, schema: { type: string } }]
+`;
+
+function shop(m: ReturnType<typeof mounted>, cases?: string) {
+  writeFileSync(join(m.code, "shop", "openapi.yaml"), SHOP_SPEC);
+  mkdirSync(join(m.code, "shop", ".http"), { recursive: true });
+  if (cases !== undefined) writeFileSync(join(m.code, "shop", ".http", "orders.http"), cases);
+}
+const ORDERS = `### Happy path
+# @expect status 200
+# @expect json $.ok == true
+GET {{baseUrl}}/orders/ord_1
+
+### Gone
+# @expect status 404
+GET {{baseUrl}}/orders/ord_gone
+`;
+const EP = "GET /orders/{id}";
+const qs = (o: Record<string, string>) => new URLSearchParams(o).toString();
+const flat = (page: string) => page.replace(/&amp;/g, "&");
+
+test("quick view: the catalog in the sidebar, an endpoint's blanks only, its reference; a GET sends nothing", async () => {
+  const m = mounted();
+  shop(m, ORDERS);
+  const home = await (await m.get("/http?repo=shop&env=dev")).text();
+  assert.match(home, /3 endpoints: 3 from <code>openapi.yaml<\/code>, 0 more from <code>.http\/<\/code>/);
+  assert.match(flat(home), /href="\/http\?repo=shop&env=dev&ep=GET\+%2Forders%2F%7Bid%7D"/);
+  assert.match(home, /<h3 class="sub-h">customers<\/h3>/);
+
+  const page = await (await m.get(`/http?${qs({ repo: "shop", env: "dev", ep: EP })}`)).text();
+  assert.match(page, /aria-current="page"/);
+  assert.match(page, /name="blank\.id"/, "the path parameter is the one blank");
+  assert.ok(!page.includes('name="blank.baseUrl"'), "baseUrl comes from the environment");
+  assert.match(page, /<h2[^>]*>Reference|Reference/);
+  assert.match(page, /One order/);
+  assert.match(page, /Cases/);
+  assert.match(page, /Happy path/);
+  assert.match(page, /Gone/);
+  assert.match(page, /Run all 2/);
+  // Core boxes a pack's page only when its markup is whole.
+  for (const p of [home, page]) assert.equal(checkHtml(p.replace(/^<meta[^>]*>/, "")), undefined);
+
+  const post = await (await m.get(`/http?${qs({ repo: "shop", env: "dev", ep: "POST /orders" })}`)).text();
+  assert.match(post, /name="blank\.customer"/);
+  assert.match(post, /on the receipt/);
+  assert.match(post, /No cases yet/);
+  assert.match(post, /Draft cases with an agent/);
+  // Filter.
+  const f = await (await m.get("/http?repo=shop&q=customers")).text();
+  assert.ok(f.includes("/customers/{id}") && !f.includes(">/orders/{id}<"));
+  assert.equal(m.calls.length, 0);
+});
+
+test("quick view: a send fills its blanks in as typed, comes back to the view, and the card is there; the blank is remembered", async () => {
+  const m = mounted();
+  shop(m);
+  const res = await m.post("/http/send", send({ back: "quick", ep: EP, repo: "shop", env: "dev", url: "{{baseUrl}}/orders/{{id}}", "blank.id": "ord_42" }));
+  assert.equal(res.status, 303);
+  assert.equal(res.headers.get("location"), `/http?${qs({ repo: "shop", env: "dev", ep: EP })}`);
+  await tick();
+  assert.equal(m.calls[0]!.url, "https://api.example.com/orders/ord_42");
+  const page = await landed(m.get, res.headers.get("location")!);
+  assert.match(page, /https:\/\/api.example.com\/orders\/ord_42/);
+  assert.match(page, /Keep as case/);
+  assert.match(page, /name="blank\.id" value="ord_42"/, "the blank starts from what was typed last");
+  assert.equal(checkHtml(page.replace(/^<meta[^>]*>/, "")), undefined);
+  assert.match(page, /<meta name="u-topics" content="http">/);
+  assert.match(page, /data-live id="http-cards"/);
+  // The endpoint's dot says it answered.
+  assert.match(page, /aria-label="last passed"/);
+});
+
+test("quick view: a blank can't smuggle a secret's placeholder, a line break or a masked value in", async () => {
+  const m = mounted();
+  shop(m);
+  for (const v of ["{{API_TOKEN}}", "x\r\nX-Evil: 1", "••••"]) {
+    const res = await m.post("/http/send", send({ back: "quick", ep: EP, repo: "shop", env: "dev", url: "{{baseUrl}}/orders/{{id}}", "blank.id": v }));
+    assert.equal(res.status, 400, v);
+    assert.match(await res.text(), /isn&#39;t put in: nothing was sent/);
+  }
+  // A blank left empty is named as missing.
+  const empty = await m.post("/http/send", send({ back: "quick", ep: EP, repo: "shop", env: "dev", url: "{{baseUrl}}/orders/{{id}}", "blank.id": "" }));
+  assert.equal(empty.status, 400);
+  assert.match(await empty.text(), /No value for \{\{id\}\}/);
+  assert.equal(m.calls.length, 0);
+});
+
+test("keep as case: a send added to the end of the endpoint's file with a check on its status, one click, logged", async () => {
+  const m = mounted();
+  shop(m, ORDERS);
+  const before = readFileSync(join(m.code, "shop", ".http", "orders.http"), "utf8");
+  await m.post("/http/send", send({ back: "quick", ep: EP, repo: "shop", env: "dev", url: "{{baseUrl}}/orders/{{id}}", "blank.id": "ord_7" }));
+  await tick();
+  const page = await landed(m.get, `/http?${qs({ repo: "shop", env: "dev", ep: EP })}`);
+  const id = /name="id" value="([0-9a-f-]{36})"/.exec(page)![1]!;
+  assert.match(page, /name="file" value="orders.http"/, "the endpoint's own file");
+  const res = await m.post("/http/keep", { repo: "shop", env: "dev", ep: EP, id, name: "Seven\r\n### evil", file: "orders.http" });
+  assert.equal(res.status, 303);
+  assert.equal(res.headers.get("location"), `/http?${qs({ repo: "shop", env: "dev", ep: EP, file: "orders.http", n: "2", saved: "1" })}`);
+  const after = readFileSync(join(m.code, "shop", ".http", "orders.http"), "utf8");
+  assert.ok(after.startsWith(before.trimEnd()), "what was there stays");
+  assert.match(after, /### Seven ### evil\n# @expect status 200\nGET \{\{baseUrl\}\}\/orders\/ord_7\n$/);
+  assert.equal(parseHttpCount(after), 3);
+  const opened = await (await m.get(res.headers.get("location")!)).text();
+  assert.match(opened, /Saved in <code>shop\/.http\/orders.http<\/code>/);
+  assert.match(opened, /Run all 3/);
+  assert.match(opened, /Save the case/);
+  assert.deepEqual({ ...(await m.actions()).at(-1) }, { kind: "http.save", target: "shop/.http/orders.http", detail: "kept as a case · GET Seven ### evil", ok: 1, error: null });
+
+  // Refused: no repo, a bad file name, a send that's gone; nothing written.
+  for (const [body, why] of [
+    [{ repo: "", id, file: "orders.http" }, /Pick a repo/],
+    [{ repo: "shop", id, file: "../x.http" }, /plain name/],
+    [{ repo: "shop", id: "nope", file: "orders.http" }, /isn&#39;t in this session/],
+  ] as const) {
+    const r = await m.post("/http/keep", { env: "dev", ep: EP, name: "x", ...body });
+    assert.equal(r.status, 400);
+    assert.match(await r.text(), why);
+  }
+  assert.equal(readFileSync(join(m.code, "shop", ".http", "orders.http"), "utf8"), after);
+});
+const parseHttpCount = (text: string) => text.split(/^###/m).length - 1;
+
+test("cases: run one holds it to its checks; run all runs each in turn and logs http.run; a changed file sends nothing", async () => {
+  const fake = fakeFetch((url) => (url.endsWith("/ord_gone") ? new Response('{"error":"gone"}', { status: 404 }) : new Response('{"ok":true}', { status: 200, headers: { "content-type": "application/json" } })));
+  const m = mounted({ fetchFn: fake.fetchFn });
+  shop(m, ORDERS);
+  const at = `/http?${qs({ repo: "shop", env: "dev", ep: EP })}`;
+  const page = await (await m.get(at)).text();
+  const hash = hashIn(page);
+  assert.equal(fake.calls.length, 0);
+
+  const one = await m.post("/http/case/run", { repo: "shop", env: "dev", ep: EP, file: "orders.http", n: "0", hash });
+  assert.equal(one.status, 303);
+  assert.equal(one.headers.get("location"), at);
+  let after = await landed(m.get, at);
+  assert.equal(fake.calls.length, 1);
+  assert.match(after, /passed \d\d:\d\d:\d\d UTC, dev · 200/);
+  assert.match(after, /json \$.ok == true/);
+
+  const all = await m.post("/http/cases/run", { repo: "shop", env: "dev", ep: EP, hashes: `orders.http:${hash}` });
+  assert.equal(all.status, 303);
+  for (let i = 0; i < 400 && !(await m.actions()).some((a) => a.kind === "http.run"); i++) await tick();
+  after = await landed(m.get, at);
+  assert.deepEqual(fake.calls.slice(1).map((c) => new URL(c.url).pathname), ["/orders/ord_1", "/orders/ord_gone"]);
+  assert.equal(after.match(/passed \d\d:\d\d/g)?.length, 2, "Gone expects its 404");
+  const run = (await m.actions()).find((a) => a.kind === "http.run")!;
+  assert.deepEqual({ ...run }, { kind: "http.run", target: "shop GET /orders/{id}", detail: "2 of 2 cases passed · dev", ok: 1, error: null });
+
+  // The file changes under it: nothing is sent, and what's there now is shown.
+  writeFileSync(join(m.code, "shop", ".http", "orders.http"), ORDERS.replace("ord_1", "ord_2"));
+  const n = fake.calls.length;
+  const stale = await m.post("/http/case/run", { repo: "shop", env: "dev", ep: EP, file: "orders.http", n: "0", hash });
+  assert.equal(stale.status, 409);
+  assert.match(await stale.text(), /changed since it was shown: nothing was sent/);
+  const staleAll = await m.post("/http/cases/run", { repo: "shop", env: "dev", ep: EP, hashes: `orders.http:${hash}` });
+  assert.equal(staleAll.status, 409);
+  for (const bad of [{ file: "../x.http", n: "0" }, { file: "orders.http", n: "9" }, { file: "orders.http", n: "-1" }]) assert.equal((await m.post("/http/case/run", { repo: "shop", env: "dev", ep: EP, hash, ...bad })).status, 400);
+  assert.equal((await m.post("/http/cases/run", { repo: "shop", env: "dev", ep: "GET /nope", hashes: "" })).status, 400);
+  assert.equal(fake.calls.length, n);
+});
+
+test("cases: a failing case says why and offers Debug with an agent; a ${value} case says it needs a story", async () => {
+  const fake = fakeFetch(() => new Response('{"ok":false}', { status: 500 }));
+  const m = mounted({ fetchFn: fake.fetchFn });
+  shop(m, `### Broken\n# @expect status 200\nGET {{baseUrl}}/orders/ord_1\n\n### Needs a value\n# @given one order\nGET {{baseUrl}}/orders/\${order.id}\n`);
+  const at = `/http?${qs({ repo: "shop", env: "dev", ep: EP })}`;
+  const hash = hashIn(await (await m.get(at)).text());
+  await m.post("/http/case/run", { repo: "shop", env: "dev", ep: EP, file: "orders.http", n: "0", hash });
+  await m.post("/http/case/run", { repo: "shop", env: "dev", ep: EP, file: "orders.http", n: "1", hash });
+  const page = await landed(m.get, at);
+  assert.match(page, /failed \d\d:\d\d:\d\d UTC, dev · 500/);
+  assert.match(page, /Debug with an agent/);
+  assert.match(page, /No value order.id yet/);
+  assert.match(page, /Given: one order/);
+  assert.equal(fake.calls.length, 1, "the ${value} case wasn't sent");
+  assert.match(page, /aria-label="last failed"/);
+});
+
+test("the command line: shorthand and curl fill the form and send nothing; Send sends; a sentence goes to an agent", async () => {
+  const m = mounted();
+  shop(m);
+  const fill = await m.post("/http/line", { repo: "shop", env: "dev", line: "POST /orders customer=cus_19 X-Trace:1" });
+  assert.equal(fill.status, 200);
+  const page = await fill.text();
+  assert.match(page, /Filled in from the line: nothing was sent/);
+  assert.match(page, /value="\{\{baseUrl\}\}\/orders"/);
+  assert.match(page, /&quot;customer&quot;: &quot;cus_19&quot;/);
+  assert.match(page, /Goes to <code>https:\/\/api.example.com\/orders<\/code>/);
+  const curl = await (await m.post("/http/line", { repo: "shop", line: `curl https://api.example.com/x -H 'Authorization: Bearer ${SECRET}'` })).text();
+  assert.ok(!curl.includes(SECRET), "a secret pasted in is shown as its placeholder");
+  assert.match(curl, /Bearer \{\{API_TOKEN\}\}/);
+  assert.equal(m.calls.length, 0);
+
+  const go = await m.post("/http/line", { repo: "shop", env: "dev", line: "/orders/ord_3", go: "1" });
+  assert.equal(go.status, 303);
+  await tick();
+  assert.equal(m.calls[0]!.url, "https://api.example.com/orders/ord_3");
+
+  const ask = await m.post("/http/line", { repo: "shop", env: "dev", ep: EP, line: `cancel order ord_3 for me ${SECRET}` });
+  assert.equal(ask.status, 303);
+  const to = new URL(ask.headers.get("location")!, ORIGIN);
+  assert.equal(to.pathname, "/agents/new");
+  assert.equal(to.searchParams.get("repo"), "shop");
+  assert.match(to.searchParams.get("prompt")!, /cancel order ord_3 for me ••••/);
+  assert.match(to.searchParams.get("prompt")!, /GET \/orders\/\{id\}/);
+  assert.equal(m.calls.length, 1);
+  const bad = await m.post("/http/line", { repo: "shop", line: "POST /x a:={" });
+  assert.equal(bad.status, 400);
+});
+
+test("send again: the same request from the same place, one click", async () => {
+  const m = mounted();
+  shop(m);
+  await m.post("/http/send", send({ back: "quick", ep: EP, repo: "shop", env: "dev", url: "{{baseUrl}}/orders/{{id}}", "blank.id": "ord_9" }));
+  await tick();
+  const id = m.pack.history().list()[0]!.id;
+  const res = await m.post("/http/resend", { repo: "shop", env: "dev", ep: EP, id });
+  assert.equal(res.status, 303);
+  await tick();
+  assert.deepEqual(m.calls.map((c) => c.url), ["https://api.example.com/orders/ord_9", "https://api.example.com/orders/ord_9"]);
+  const page = await landed(m.get, res.headers.get("location")!);
+  assert.match(page, /Compare with/);
+  assert.equal((await m.post("/http/resend", { repo: "shop", id: "gone" })).status, 400);
+});
+
+test("the new routes: another site's POST is a 404 and nothing is sent or written", async () => {
+  const m = mounted();
+  shop(m, ORDERS);
+  const hash = hashIn(await (await m.get(`/http?${qs({ repo: "shop", ep: EP })}`)).text());
+  const bad = { origin: "https://evil.example", "sec-fetch-site": "cross-site" };
+  for (const [p, body] of [
+    ["/http/line", { line: "/orders/1", go: "1", repo: "shop", env: "dev" }],
+    ["/http/resend", { id: "x" }],
+    ["/http/keep", { id: "x", repo: "shop", file: "orders.http" }],
+    ["/http/case/run", { repo: "shop", env: "dev", ep: EP, file: "orders.http", n: "0", hash }],
+    ["/http/cases/run", { repo: "shop", env: "dev", ep: EP, hashes: `orders.http:${hash}` }],
+  ] as const)
+    assert.equal((await m.post(p, body, bad)).status, 404, p);
+  assert.equal(m.calls.length, 0);
+  assert.equal(readFileSync(join(m.code, "shop", ".http", "orders.http"), "utf8"), ORDERS);
+});
+
+test("quick view: hostile spec, file names, case names and responses come out inert", async () => {
+  const fake = fakeFetch(() => new Response(H, { status: 200, statusText: H, headers: { "content-type": "text/html" } }));
+  const m = mounted({ fetchFn: fake.fetchFn });
+  writeFileSync(
+    join(m.code, "shop", "openapi.yaml"),
+    JSON.stringify({ openapi: "3.0.0", info: { title: H }, paths: { [`/x/${H}`]: { get: { tags: [H], summary: H, description: JS_URL, parameters: [{ name: H, in: "query", description: H, schema: { type: H } }], responses: { [H]: { description: H } } } } } }),
+  );
+  mkdirSync(join(m.code, "shop", ".http"));
+  writeFileSync(join(m.code, "shop", ".http", "orders.http"), `### ${H}\n# @given ${H}\n# @expect ${H}\nGET {{baseUrl}}/x/{{${"a".repeat(10)}}}?q=${encodeURIComponent(H)}\n`);
+  const home = await (await m.get("/http?repo=shop&env=dev")).text();
+  inert(home);
+  const ep = /href="(\/http\?repo=shop[^"]*ep=GET[^"]*)"/.exec(home)![1]!.replace(/&amp;/g, "&");
+  const page = await (await m.get(ep)).text();
+  inert(page);
+  assert.match(page, /&lt;script&gt;/);
+  inert(await (await m.get(`/http?repo=shop&env=dev&ep=${encodeURIComponent(H)}&q=${encodeURIComponent(H)}`)).text());
+  await m.post("/http/send", send({ back: "quick", repo: "shop", env: "dev", url: "https://api.example.com/x" }));
+  await tick();
+  inert(await landed(m.get, "/http?repo=shop&env=dev"));
+  inert(await (await m.post("/http/line", { repo: "shop", line: H })).text().catch(() => ""));
+  inert(await (await m.get("/http/import")).text());
 });
