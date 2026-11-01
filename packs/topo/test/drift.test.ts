@@ -79,6 +79,7 @@ test("CloudInventory: a kind the token can't read is named with the permission i
   assert.equal(r.have.buckets, undefined, "not taken for an empty list");
   assert.deepEqual(r.failed.map((f) => f.what), ["buckets", "queues"]);
   assert.match(r.failed[0]!.why, /HTTP 403: Authentication error \(does the token have Workers R2 Storage Read\?\)/);
+  assert.deepEqual(r.failed.map((f) => f.scope), ["Workers R2 Storage Read", "Queues Read"]);
 });
 
 test("CloudInventory: not configured without both settings; nothing is fetched", async () => {

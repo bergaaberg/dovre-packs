@@ -19,8 +19,8 @@ export type CloudRead = {
   have: Partial<Record<Kind, string[]>>;
   /** Durable Object classes by worker name, when it could read them. */
   objects?: Record<string, string[]>;
-  /** What it couldn't read this time, and why. */
-  failed: { what: CloudWhat; why: string }[];
+  /** What it couldn't read this time, and why. `scope`: the token was refused, and lacks this permission. */
+  failed: { what: CloudWhat; why: string; scope?: string }[];
 };
 
 /** The token permission each read needs, for the message when it's refused. */
@@ -136,7 +136,7 @@ export class CloudInventory {
           await read();
         } catch (e) {
           const why = String((e as Error)?.message ?? e).split("\n")[0]!.slice(0, 160);
-          out.failed.push({ what, why: /HTTP 40[13]/.test(why) ? `${why} (does the token have ${SCOPE[what]}?)` : why });
+          out.failed.push(/HTTP 40[13]/.test(why) ? { what, why: `${why} (does the token have ${SCOPE[what]}?)`, scope: SCOPE[what] } : { what, why });
         }
       }),
     );

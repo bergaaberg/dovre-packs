@@ -16,6 +16,9 @@ import { type Finding, RULES, type RuleId } from "./rules.ts";
 import type { TopoEntry, TopoRepo } from "./scan.ts";
 import { WRITE } from "./fix.ts";
 
+/** Where an account's API tokens are edited. */
+const TOKENS_URL = "https://dash.cloudflare.com/profile/api-tokens";
+
 /** Fix PRs (step 5), when the forge can open them: who I am there (a new file's owner), and how the last one went. */
 export type PrOpts = { login?: string; said?: { ok: boolean; text: string; url?: string } };
 const PR_KIND = `topo.${WRITE}`;
@@ -455,7 +458,7 @@ function picked(model: TopoModel, at?: string): string {
   return first?.key ?? model.off[0]?.key ?? "";
 }
 
-function notices(o: { reads?: { checkouts: boolean; forge: boolean }; unread?: { error?: string; failed: string[] }; drift?: DriftView; rules?: RulesView; map?: { unknown?: string }; unusable: number }): Html[] {
+function notices(o: { hosted: boolean; reads?: { checkouts: boolean; forge: boolean }; unread?: { error?: string; failed: string[] }; drift?: DriftView; rules?: RulesView; map?: { unknown?: string }; unusable: number }): Html[] {
   const out: Html[] = [];
   if (o.reads && !o.reads.checkouts && !o.reads.forge) out.push(Notice({ tone: "warn", children: "Nothing to read: there's no code folder here, and the forge can't read repos' files." }));
   if (o.unread?.error) out.push(Notice({ tone: "warn", children: html`${o.unread.error}. What's shown is from the last read that worked.` }));
@@ -465,7 +468,12 @@ function notices(o: { reads?: { checkouts: boolean; forge: boolean }; unread?: {
   const d = o.drift;
   if (d && !d.configured && d.declares) out.push(Notice({ children: html`Set <code>CF_ACCOUNT_ID</code> and <code>CF_API_TOKEN</code> (read-only) in Settings to check what the files declare against Cloudflare.` }));
   if (d?.configured && d.read?.failed.length) {
-    out.push(Notice({ tone: "warn", children: html`Couldn't read from Cloudflare this time, so these aren't checked: ${d.read.failed.map((f, i) => html`${i ? "; " : ""}${CF_NAMES[f.what][1]} (${f.why})`)}.` }));
+    const scopes = [...new Set(d.read.failed.flatMap((f) => (f.scope ? [f.scope] : [])))];
+    // A refusal is the token's permissions: say which token, where it lives here, and what to add.
+    const fix = scopes.length
+      ? html` To fix it, edit the token in <code>CF_API_TOKEN</code> at ${Link(TOKENS_URL, "Cloudflare → API Tokens")} and add ${scopes.map((s, i) => html`${i ? (i === scopes.length - 1 ? " and " : ", ") : ""}<strong>${s}</strong>`)} (Account, Read). Editing keeps the token's value, so nothing here changes.${o.hosted ? html` For a new token instead: <code>wrangler secret put CF_API_TOKEN</code> on this Worker.` : html` For a new token instead: Settings → Topo.`}`
+      : "";
+    out.push(Notice({ tone: "warn", children: html`Couldn't read from Cloudflare this time, so these aren't checked: ${d.read.failed.map((f, i) => html`${i ? "; " : ""}${CF_NAMES[f.what][1]} (${f.why})`)}.${fix}` }));
   }
   if (d?.drift?.orphans.length && o.unusable) {
     out.push(Notice({ children: html`${o.unusable === 1 ? "One file has" : `${o.unusable} files have`} problems, so what ${o.unusable === 1 ? "it claims" : "they claim"} isn't counted: some unclaimed things may be theirs.` }));
@@ -523,7 +531,7 @@ export function topoPage(opts: {
       `,
     })}
     <div data-live id="topo">
-      ${notices({ reads, unread, drift, rules, map, unusable: coverage.filter((f) => f.kind === "problems").length })}
+      ${notices({ hosted, reads, unread, drift, rules, map, unusable: coverage.filter((f) => f.kind === "problems").length })}
       ${!model.places.length && !model.off.length
         ? Empty({ title: "No repos yet", children: html`<p>Topo draws a repo once it has a peak.yaml (the format: ${Link(SPEC_URL, "peak.yaml spec")}).</p>` })
         : html`<div class="topo-wrap">
