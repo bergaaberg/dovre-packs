@@ -108,11 +108,13 @@ export const AVATAR_CSS = String.raw`
 export const AVATAR_PAGE_CSS = String.raw`
 .av-img { display: block; width: 100%; height: auto; }
 .face-btn .av-img { width: 76px; margin: -14px -6px 0; }
-.av-face { display: contents; }
-.face-btn:has(.av-face[data-scene="fire"]) { border-color: var(--bad); box-shadow: 0 0 0 3px var(--bad-soft), var(--shadow); }
-.face-btn:has(.av-face[data-scene="storm"]) { border-color: var(--warn); }
-.face-btn:has(.av-face[data-scene="party"]) { border-color: var(--ok); }
-@media (max-width: 900px) { body:has(.tab-gap) #bdock-btn.face-btn:has(.av-face[data-scene="fire"]) { box-shadow: 0 0 0 5px var(--bg), 0 0 0 8px var(--bad-soft), 0 10px 24px -10px var(--bad); } }
+/* The scene's ring over core's Bino button, drawn by the face itself (a pack styles only its own markup). */
+.av-face { display: contents; border-radius: inherit; }
+.av-face[data-scene]::after { content: ""; position: absolute; inset: -1px; border: 1px solid transparent; border-radius: inherit; pointer-events: none; }
+.av-face[data-scene="fire"]::after { border-color: var(--bad); box-shadow: 0 0 0 3px var(--bad-soft); }
+.av-face[data-scene="storm"]::after { border-color: var(--warn); }
+.av-face[data-scene="party"]::after { border-color: var(--ok); }
+@media (max-width: 900px) { body:has(.tab-gap) .av-face[data-scene="fire"]::after { box-shadow: 0 0 0 5px var(--bg), 0 0 0 8px var(--bad-soft), 0 10px 24px -10px var(--bad); } }
 .av-say { position: absolute; right: 0; bottom: calc(100% + 10px); width: max-content; max-width: 260px; padding: 8px 12px; border-radius: 12px; border: 1px solid var(--line-2); background: var(--surface); color: var(--ink); font: 500 var(--fs-s)/1.35 var(--sans); box-shadow: var(--shadow); pointer-events: auto; animation: av-say-in .25s ease-out both; }
 .av-say::after { content: ""; position: absolute; right: 26px; bottom: -6px; width: 10px; height: 10px; background: var(--surface); border-right: 1px solid var(--line-2); border-bottom: 1px solid var(--line-2); transform: rotate(45deg); }
 .av-say a { color: var(--accent); }
