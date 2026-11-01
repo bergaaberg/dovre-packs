@@ -51,7 +51,8 @@ export function createGitLab(opts: { host: string; token: string; fetchFn?: Fetc
     async getAll<T>(path: string, max = MAX_ITEMS) {
       const out: T[] = [];
       let page = "1";
-      while (page && out.length < max) {
+      // Pages too are capped: a server that keeps sending x-next-page on empty pages can't loop us.
+      for (let read = 0; page && out.length < max && read < Math.ceil(max / PAGE_SIZE) + 1; read++) {
         const res = await request(page === "1" ? path : `${path}${path.includes("?") ? "&" : "?"}page=${enc(page)}`);
         out.push(...((await res.json()) as T[]));
         page = res.headers.get("x-next-page")?.trim() ?? "";
