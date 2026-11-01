@@ -8,11 +8,12 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createTopoPack, ForgeCatalog, TopoCatalog, TopoScanner } from "../index.ts";
+import { createTopoPack, ForgeCatalog, lastPush, TopoCatalog, TopoScanner } from "../index.ts";
 import { forgeUrls } from "../forge.ts";
 import { topoPage } from "../view.ts";
 import type { Coverage, TopoEntry } from "../index.ts";
 import type { PackForge } from "dovre/packs/types.ts";
+import type { EveryRepo } from "dovre/sources/files.ts";
 import { HOSTILE as H, assertInert, packApp, testContext } from "dovre/packs/testing.ts";
 
 /** A forge whose repos have these files (`owner/name` → path → text). */
@@ -195,4 +196,58 @@ test("topoPage: says when there's nothing to read, and what the forge couldn't r
   assert.doesNotMatch(out, /Nothing to read/);
   assert.match(out, /Couldn(&#39;|')t list the repos on GitHub: 401\. What(&#39;|')s shown is from the last read that worked\./);
   assert.match(out, /Couldn(&#39;|')t read 2 repos this time: acme\/a, acme\/b\./);
+});
+
+test("ForgeCatalog over everyRepo (dovre#294): one call, a day old is fine, newer than a push after one, the same read isn't a new one", async () => {
+  let t = 10_000_000;
+  const asked: number[] = [];
+  let readAt = t;
+  const f: PackForge = {
+    ...fakeForge({}),
+    repos: undefined,
+    file: undefined,
+    everyRepo: async (paths, o): Promise<EveryRepo> => {
+      asked.push(o?.maxAgeMs ?? -1);
+      assert.deepEqual(paths, ["peak.yaml", "peak.yml"]);
+      return {
+        at: readAt,
+        repos: [
+          { repo: "acme/quill", files: { "peak.yaml": "name: Quill\ntier: active\n" } },
+          { repo: "acme/harbor", files: { "peak.yml": "name: Harbor\ntier: active\n" } },
+          { repo: "acme/broken", files: { "peak.yaml": "tier: active\n" } },
+          { repo: "acme/plain", files: {} },
+        ],
+      };
+    },
+  };
+  const fc = new ForgeCatalog({ forge: () => f, ttlMs: 1000, now: () => t });
+  assert.equal(fc.can(), true);
+  const r = (await fc.load())!;
+  assert.deepEqual(r.entries.map((e) => [e.full, e.file]), [["acme/quill", "peak.yaml"], ["acme/harbor", "peak.yml"]]);
+  assert.deepEqual([r.problems.map((p) => p.full), r.bare.map((b) => b.full), r.at], [["acme/broken"], ["acme/plain"], 10_000_000]);
+  assert.deepEqual(asked, [24 * 3600_000], "a day old is fine");
+
+  t += 5000;
+  assert.equal(await fc.load(), r, "the same read again (kept for every isolate): what it made of it stands");
+  assert.equal(await fc.load({ after: t - 9000 }), r, "already newer than that push: not asked");
+  assert.equal(asked.length, 2);
+
+  readAt = t;
+  const pushedAt = t - 2000;
+  const n = (await fc.load({ after: pushedAt }))!;
+  assert.notEqual(n, r);
+  assert.equal(asked.at(-1), 2000, "after a push: a read newer than it");
+  await fc.load(true);
+  assert.equal(asked.at(-1), 0, "forced: now");
+});
+
+test("lastPush: my newest push to a main branch, from the gathered moves", async () => {
+  const move = (type: string, title: string, at: string) => ({ at, actor: "me", bot: false, repo: "acme/quill", type, verb: "pushed 1 to", title, url: "https://github.com/acme/quill" });
+  const snap = (moves: ReturnType<typeof move>[]) => ({ moves: { ok: true as const, value: moves } }) as unknown as Parameters<typeof lastPush>[0];
+  assert.equal(
+    lastPush(snap([move("PushEvent", "feat/x", "2026-10-29T12:00:00Z"), move("PushEvent", "main", "2026-10-29T10:00:00Z"), move("PushEvent", "master", "2026-10-29T11:00:00Z"), move("CreateEvent", "main", "2026-10-29T13:00:00Z")])),
+    Date.parse("2026-10-29T11:00:00Z"),
+  );
+  assert.equal(lastPush(snap([])), undefined);
+  assert.equal(lastPush(undefined), undefined);
 });

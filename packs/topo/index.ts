@@ -20,6 +20,7 @@ import { listRepos } from "dovre/sources/claude.ts";
 import { strictOrigin } from "dovre/strict.ts";
 import { WORK } from "dovre/agents/workdir.ts";
 import { type Pack, PACK_API, type PackContext } from "dovre/packs/types.ts";
+import type { Snapshot } from "dovre/gather.ts";
 import { TopoCatalog } from "./catalog.ts";
 import { CloudInventory } from "./cloud.ts";
 import { declaresCloudflare, drift } from "./drift.ts";
@@ -45,11 +46,26 @@ export { claimText, dropText, runFix, startText, wranglerRuns } from "./fix.ts";
 export type TopoDeps = {
   /** Keeps what it read for 30 s; default: one over `ctx.codeDir` (none without a code folder). */
   scanner?: TopoScanner;
-  /** Keeps what it read for 15 min; default: one over `ctx.forge()`. */
+  /** Keeps what it read for 15 min (the forge's answer up to a day, or until a push); default: one over `ctx.forge()`. */
   forge?: ForgeCatalog;
   /** Keeps what it read for 15 min; default: one over the CF_ACCOUNT_ID and CF_API_TOKEN settings. */
   cloud?: CloudInventory;
 };
+
+/** Branches a peak.yaml is read from, as far as Topo can tell from a push. */
+const MAIN = /^(main|master)$/;
+
+/** When I last pushed to a main branch (ms), from the gathered moves: a peak.yaml may have changed there. */
+export function lastPush(s: Snapshot | undefined): number | undefined {
+  if (!s?.moves.ok) return undefined;
+  let last: number | undefined;
+  for (const m of s.moves.value) {
+    if (m.type !== "PushEvent" || !MAIN.test(m.title ?? "")) continue;
+    const at = Date.parse(m.at);
+    if (Number.isFinite(at) && (last === undefined || at > last)) last = at;
+  }
+  return last;
+}
 
 export function createTopoPack(o: TopoDeps = {}): Pack {
   let catalog: TopoCatalog | undefined;
@@ -90,12 +106,13 @@ export function createTopoPack(o: TopoDeps = {}): Pack {
     const checkouts = () => (codeDir ? listRepos(codeDir).filter((r) => r !== WORK) : []);
     return (catalog = new TopoCatalog({ scanner, forge, checkouts }));
   };
-  /** Fresh forge and Cloudflare reads, then the page's region redrawn. */
+  /** Fresh forge and Cloudflare reads, then the page's region redrawn. The forge's is read again after a push to a main branch. */
   const reload = async (ctx: PackContext, force = false) => {
     const f = of(ctx).forge;
     const c = cloudOf(ctx);
     const before = [f?.peek(), c.peek()];
-    const after = await Promise.all([f?.can() ? f.load(force) : before[0], c.load(force)]);
+    const pushed = force ? undefined : lastPush(ctx.snapshot());
+    const after = await Promise.all([f?.can() ? f.load(force || (pushed ? { after: pushed } : false)) : before[0], c.load(force)]);
     if (after.some((r, i) => r !== before[i])) ctx.publish(["topo"]);
   };
   return {
