@@ -2,7 +2,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { pickForge } from "dovre/forge/pick.ts";
-import { checksOf, createGitLab, describeEvent, diffCounts, gitlabForge, hostOf, isBot, jobState, toDeploys, toNote } from "../forge.ts";
+import { HOSTILE } from "dovre/packs/testing.ts";
+import { GitLabError, checksOf, createGitLab, describeEvent, diffCounts, gitlabForge, hostOf, isBot, jobState, toDeploys, toNote } from "../forge.ts";
 import { createGitlabPack } from "../index.ts";
 
 const HOST = "git.example.com";
@@ -180,4 +181,89 @@ test("issues(): assigned, opened by me, mentioned from todos, triage per project
   assert.equal(sets.assigned[0]!.type, "Incident");
   assert.ok(!asked.some((a) => a.includes("someone-else")), "a project outside the owners is never asked");
   assert.ok(!asked.some((a) => a.includes("/projects/7/")), "nor what closes an issue outside them");
+});
+
+// ── Timeouts, paging, fan-out, rate limits, hostile input ────────────────────
+
+const json = (body: unknown, headers: Record<string, string> = {}) => Response.json(body, { headers });
+
+test("a request that never answers fails after the timeout, naming the path without its query", async () => {
+  const fetchFn = ((_url: string, init?: RequestInit) =>
+    new Promise<Response>((_, reject) => init!.signal!.addEventListener("abort", () => reject(init!.signal!.reason)))) as unknown as typeof fetch;
+  const gl = createGitLab({ host: HOST, token: "glpat-test", fetchFn, timeoutMs: 20 });
+  await assert.rejects(gl.get("/todos?state=pending&secret=1"), (e: Error) => /GitLab GET \/todos: timed out/.test(e.message) && !e.message.includes("secret"));
+});
+
+test("getAll follows x-next-page into one list, and stops at the cap", async () => {
+  const seen: string[] = [];
+  const fetchFn = (async (input: string) => {
+    const url = new URL(String(input));
+    const page = Number(url.searchParams.get("page") ?? 1);
+    seen.push(String(page));
+    const items = [page * 10, page * 10 + 1];
+    return json(items, page < 3 ? { "x-next-page": String(page + 1) } : { "x-next-page": "" });
+  }) as unknown as typeof fetch;
+  const gl = createGitLab({ host: HOST, token: "t", fetchFn });
+  assert.deepEqual(await gl.getAll<number>("/todos?per_page=2"), [10, 11, 20, 21, 30, 31]);
+  assert.deepEqual(seen, ["1", "2", "3"]);
+  seen.length = 0;
+  assert.deepEqual(await gl.getAll<number>("/todos?per_page=2", 3), [10, 11, 20], "the cap holds");
+  assert.deepEqual(seen, ["1", "2"], "and no page past it is read");
+});
+
+test("with 20 merge requests, no more than 4 detail reads are in flight", async () => {
+  const mrs = Array.from({ length: 20 }, (_, i) => ({ ...MR, iid: i + 1, web_url: `https://${HOST}/northwind/shop/-/merge_requests/${i + 1}` }));
+  let active = 0, peak = 0, detail = 0;
+  const fetchFn = (async (input: string) => {
+    const url = new URL(String(input));
+    const path = url.pathname.replace(/^\/api\/v4/, "");
+    if (path === "/merge_requests") return json(url.searchParams.get("scope") === "created_by_me" ? mrs : []);
+    detail++;
+    active++;
+    peak = Math.max(peak, active);
+    await new Promise((r) => setTimeout(r, 2));
+    active--;
+    return json(/merge_requests\/\d+$/.test(path) ? MR : path.endsWith("/approvals") ? {} : []);
+  }) as unknown as typeof fetch;
+  const { mine } = await gitlabForge(createGitLab({ host: HOST, token: "t", fetchFn })).prs("kari", "northwind");
+  assert.equal(mine.length, 20);
+  assert.ok(detail >= 80, `detail reads happened (${detail})`);
+  assert.ok(peak <= 4 && peak > 1, `peak in flight: ${peak}`);
+});
+
+test("a 429 is a failure, not an empty list", async () => {
+  const fetchFn = (async () => new Response("slow down", { status: 429 })) as unknown as typeof fetch;
+  const gl = createGitLab({ host: HOST, token: "t", fetchFn });
+  await assert.rejects(gitlabForge(gl).notes(), (e: unknown) => e instanceof GitLabError && e.status === 429);
+  // …and one on a per-MR detail read reaches the caller too, instead of reading as "no reviewers".
+  const limited = (async (input: string) => {
+    const path = new URL(String(input)).pathname.replace(/^\/api\/v4/, "");
+    if (path === "/merge_requests") return json([MR]);
+    return new Response("slow down", { status: 429 });
+  }) as unknown as typeof fetch;
+  await assert.rejects(gitlabForge(createGitLab({ host: HOST, token: "t", fetchFn: limited })).prs("kari", "northwind"), /429/);
+});
+
+test("hostile titles, branches and job names come out as data, and URLs are built with encodeURIComponent", async () => {
+  const H = HOSTILE;
+  const hostile = { ...MR, title: H, source_branch: H, description: H, labels: [H], head_pipeline: { id: 5, status: "failed" } };
+  const { gl, asked } = fakeGitLab({
+    "/merge_requests?state=opened&scope=created_by_me": [hostile],
+    "/merge_requests?state=opened&scope=all&reviewer_username=kari": [],
+    "/projects/42/merge_requests/3": hostile,
+    "/projects/42/merge_requests/3/reviewers": [],
+    "/projects/42/merge_requests/3/approvals": {},
+    "/projects/42/merge_requests/3/discussions": [],
+    "/projects/42/pipelines/5/jobs": [{ name: H, status: "failed", web_url: "https://x/1" }],
+    "/projects/42/merge_requests/3/diffs": [],
+  });
+  const { mine } = await gitlabForge(gl).prs("kari", "northwind");
+  assert.equal(mine[0]!.title, H);
+  assert.equal(mine[0]!.branch, H);
+  assert.equal(mine[0]!.runs[0]!.name, H);
+  assert.deepEqual(mine[0]!.labels, [H]);
+  assert.ok(asked.every((a) => !a.includes("<") && !a.includes('"')), "no raw markup in any request");
+  const move = describeEvent({ action_name: "pushed to", target_type: null, created_at: "2026-10-25T08:00:00Z", author: { username: "kari" }, push_data: { ref: H, ref_type: "branch", commit_count: 1 } }, { path_with_namespace: "northwind/shop", web_url: `https://${HOST}/northwind/shop` });
+  assert.equal(move.title, H);
+  assert.ok(move.url!.endsWith(`/-/commits/${encodeURIComponent(H)}`) && !move.url!.includes("<"));
 });
