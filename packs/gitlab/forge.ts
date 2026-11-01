@@ -7,25 +7,82 @@ import type { Deploy, Forge, Issue, IssueSets, Move, Note, Pr, PrRef } from "dov
 import { ownersOf } from "dovre/owners.ts";
 
 export type Fetch = typeof fetch;
-export type GitLab = { host: string; get<T>(path: string): Promise<T> };
-
+const enc = encodeURIComponent;
 /** "gitlab.com", "https://git.example.com/" → "git.example.com". */
 export const hostOf = (raw: string | undefined) => (raw ?? "").trim().replace(/^https?:\/\//i, "").replace(/\/+$/, "").toLowerCase() || "gitlab.com";
 
-export function createGitLab(opts: { host: string; token: string; fetchFn?: Fetch }): GitLab {
+export type GitLab = { host: string; get<T>(path: string): Promise<T>; getAll<T>(path: string, max?: number): Promise<T[]> };
+
+/** A GitLab answer that wasn't 2xx, or no answer in time (status 0). */
+export class GitLabError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+  }
+}
+
+const PAGE_SIZE = 100;
+/** Items followed by `getAll`, at most: 5 pages of 100. */
+const MAX_ITEMS = 500;
+/** Detail and events reads in flight at once. */
+const PARALLEL = 4;
+
+export function createGitLab(opts: { host: string; token: string; fetchFn?: Fetch; timeoutMs?: number }): GitLab {
   const f = opts.fetchFn ?? fetch;
   const base = `https://${opts.host}/api/v4`;
+  const request = async (path: string) => {
+    const name = path.split("?")[0];
+    let res: Response;
+    try {
+      res = await f(base + path, { headers: { "private-token": opts.token, accept: "application/json", "user-agent": "dovre" }, signal: AbortSignal.timeout(opts.timeoutMs ?? 8000) });
+    } catch (e) {
+      if (e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError")) throw new GitLabError(`GitLab GET ${name}: timed out`, 0);
+      throw e;
+    }
+    if (!res.ok) throw new GitLabError(`GitLab GET ${name}: ${res.status} ${(await res.text()).slice(0, 200)}`, res.status);
+    return res;
+  };
   return {
     host: opts.host,
     async get<T>(path: string) {
-      const res = await f(base + path, { headers: { "private-token": opts.token, accept: "application/json", "user-agent": "dovre" } });
-      if (!res.ok) throw new Error(`GitLab GET ${path.split("?")[0]}: ${res.status} ${(await res.text()).slice(0, 200)}`);
-      return (await res.json()) as T;
+      return (await (await request(path)).json()) as T;
+    },
+    async getAll<T>(path: string, max = MAX_ITEMS) {
+      const out: T[] = [];
+      let page = "1";
+      while (page && out.length < max) {
+        const res = await request(page === "1" ? path : `${path}${path.includes("?") ? "&" : "?"}page=${enc(page)}`);
+        out.push(...((await res.json()) as T[]));
+        page = res.headers.get("x-next-page")?.trim() ?? "";
+      }
+      return out.slice(0, max);
     },
   };
 }
 
-const enc = encodeURIComponent;
+/** Runs the calls it's given, at most `n` at a time. */
+export function limiter(n: number) {
+  let active = 0;
+  const queue: (() => void)[] = [];
+  return async <T>(fn: () => Promise<T>): Promise<T> => {
+    while (active >= n) await new Promise<void>((go) => queue.push(go));
+    active++;
+    try {
+      return await fn();
+    } finally {
+      active--;
+      queue.shift()?.();
+    }
+  };
+}
+
+/** A read that may fail quietly (a missing detail is just a blank), except when GitLab says slow down: that is an error. */
+const orElse = <T>(v: T) => (e: unknown): T => {
+  if (e instanceof GitLabError && e.status === 429) throw e;
+  return v;
+};
+
 const MR_PATH = /^https?:\/\/[^/]+\/(.+?)\/-\/merge_requests\/(\d+)/;
 
 /** "https://host/group/sub/shop/-/merge_requests/3" → "group/sub/shop". */
@@ -119,17 +176,18 @@ export function toPr(mr: RawMr, more: { reviewers: RawReviewer[]; approvals: Raw
   };
 }
 
-async function loadMr(gl: GitLab, mr: RawMr): Promise<Pr> {
+async function loadMr(gl: GitLab, mr: RawMr, slot: ReturnType<typeof limiter>): Promise<Pr> {
   const at = `/projects/${mr.project_id}/merge_requests/${mr.iid}`;
-  const none = <T>(v: T) => () => v;
-  const full = await gl.get<RawMr>(at).catch(() => mr);
+  const none = orElse;
+  const get = <T>(path: string) => slot(() => gl.get<T>(path));
+  const full = await get<RawMr>(at).catch(none(mr));
   const pipeline = full.head_pipeline ?? null;
   const [reviewers, approvals, discussions, jobs, diffs] = await Promise.all([
-    gl.get<RawReviewer[]>(`${at}/reviewers`).catch(none([])),
-    gl.get<RawApprovals>(`${at}/approvals`).catch(none({})),
-    gl.get<RawDiscussion[]>(`${at}/discussions?per_page=100`).catch(none([])),
-    pipeline ? gl.get<RawJob[]>(`/projects/${mr.project_id}/pipelines/${pipeline.id}/jobs?per_page=100`).catch(none([])) : Promise.resolve([]),
-    gl.get<RawDiff[]>(`${at}/diffs?per_page=100`).catch(none([])),
+    get<RawReviewer[]>(`${at}/reviewers`).catch(none([])),
+    get<RawApprovals>(`${at}/approvals`).catch(none({})),
+    get<RawDiscussion[]>(`${at}/discussions?per_page=100`).catch(none([])),
+    pipeline ? get<RawJob[]>(`/projects/${mr.project_id}/pipelines/${pipeline.id}/jobs?per_page=100`).catch(none([])) : Promise.resolve([]),
+    get<RawDiff[]>(`${at}/diffs?per_page=100`).catch(none([])),
   ]);
   return toPr(full, { reviewers, approvals, discussions, jobs, diffs, pipeline });
 }
@@ -137,11 +195,12 @@ async function loadMr(gl: GitLab, mr: RawMr): Promise<Pr> {
 export async function loadPrs(gl: GitLab, login: string, owners: string): Promise<{ mine: Pr[]; review: Pr[] }> {
   const groups = ownersOf(owners);
   const [mine, review] = await Promise.all([
-    gl.get<RawMr[]>(`/merge_requests?state=opened&scope=created_by_me&per_page=100`),
-    gl.get<RawMr[]>(`/merge_requests?state=opened&scope=all&reviewer_username=${enc(login)}&per_page=100`),
+    gl.getAll<RawMr>(`/merge_requests?state=opened&scope=created_by_me&per_page=${PAGE_SIZE}`),
+    gl.getAll<RawMr>(`/merge_requests?state=opened&scope=all&reviewer_username=${enc(login)}&per_page=${PAGE_SIZE}`),
   ]);
   const ours = (list: RawMr[]) => list.filter((m) => inOwners(repoOfUrl(m.web_url), groups));
-  return { mine: await Promise.all(ours(mine).map((m) => loadMr(gl, m))), review: await Promise.all(ours(review).map((m) => loadMr(gl, m))) };
+  const slot = limiter(PARALLEL);
+  return { mine: await Promise.all(ours(mine).map((m) => loadMr(gl, m, slot))), review: await Promise.all(ours(review).map((m) => loadMr(gl, m, slot))) };
 }
 
 /** "group/shop#3" → its state and title. */
@@ -180,7 +239,7 @@ export function toNote(t: RawTodo): Note {
 }
 
 export async function loadNotes(gl: GitLab): Promise<Note[]> {
-  const todos = await gl.get<RawTodo[]>(`/todos?state=pending&per_page=100`);
+  const todos = await gl.getAll<RawTodo>(`/todos?state=pending&per_page=${PAGE_SIZE}`);
   return todos.map(toNote).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
@@ -221,12 +280,13 @@ export async function loadMoves(gl: GitLab, owners: string, hours = 24, now = Da
   const since = now - hours * 3600e3;
   const after = new Date(since - 86400e3).toISOString().slice(0, 10);
   const out: Move[] = [];
+  const slot = limiter(PARALLEL);
   for (const owner of ownersOf(owners)) {
     const q = `?order_by=last_activity_at&sort=desc&per_page=20&archived=false&last_activity_after=${enc(new Date(since).toISOString())}`;
     const projects = await gl
       .get<RawProject[]>(`/groups/${enc(owner)}/projects${q}&include_subgroups=true`)
       .catch(() => gl.get<RawProject[]>(`/users/${enc(owner)}/projects${q}`).catch(() => [] as RawProject[]));
-    const events = await Promise.all(projects.map((p) => gl.get<RawEvent[]>(`/projects/${p.id}/events?after=${after}&per_page=100`).then((es) => ({ p, es }), () => ({ p, es: [] as RawEvent[] }))));
+    const events = await Promise.all(projects.map((p) => slot(() => gl.get<RawEvent[]>(`/projects/${p.id}/events?after=${after}&per_page=100`)).then((es) => ({ p, es }), (e) => ({ p, es: orElse([] as RawEvent[])(e) }))));
     for (const { p, es } of events) out.push(...es.filter((e) => Date.parse(e.created_at) > since).map((e) => describeEvent(e, p)));
   }
   return out.sort((a, b) => b.at.localeCompare(a.at));
@@ -313,9 +373,9 @@ export async function loadIssues(gl: GitLab, owners: string, opts: { triage?: st
   const ours = (list: RawIssue[]) => list.filter((i) => i.state === "opened" && inOwners(repoOfUrl(i.web_url), groups));
   const triage = [...new Set(opts.triage ?? [])].filter((r) => REPO_PATH.test(r) && !r.split("/").some((p) => p === "." || p === "..") && inOwners(r, groups));
   const [assigned, authored, todos, ...waiting] = await Promise.all([
-    gl.get<RawIssue[]>(`/issues?state=opened&scope=assigned_to_me&per_page=100`),
-    gl.get<RawIssue[]>(`/issues?state=opened&scope=created_by_me&per_page=100`),
-    gl.get<RawTodo2[]>(`/todos?state=pending&type=Issue&per_page=100`),
+    gl.getAll<RawIssue>(`/issues?state=opened&scope=assigned_to_me&per_page=${PAGE_SIZE}`),
+    gl.getAll<RawIssue>(`/issues?state=opened&scope=created_by_me&per_page=${PAGE_SIZE}`),
+    gl.getAll<RawTodo2>(`/todos?state=pending&type=Issue&per_page=${PAGE_SIZE}`),
     ...triage.map((r) => gl.get<RawIssue[]>(`/projects/${enc(r)}/issues?state=opened&assignee_id=None&labels=None&per_page=30`)),
   ]);
   const mentioned = todos.flatMap((t) => (t.target_type === "Issue" && t.target && /^(mentioned|directly_addressed)$/.test(t.action_name) ? [t.target] : []));
