@@ -211,6 +211,16 @@ test("getAll follows x-next-page into one list, and stops at the cap", async () 
   assert.deepEqual(seen, ["1", "2"], "and no page past it is read");
 });
 
+test("getAll stops when every page is empty but x-next-page never ends", async () => {
+  let reads = 0;
+  const fetchFn = (async () => {
+    reads++;
+    return json([], { "x-next-page": "2" });
+  }) as unknown as typeof fetch;
+  assert.deepEqual(await createGitLab({ host: HOST, token: "t", fetchFn }).getAll("/todos"), []);
+  assert.ok(reads <= 6, `pages read: ${reads}`);
+});
+
 test("with 20 merge requests, no more than 4 detail reads are in flight", async () => {
   const mrs = Array.from({ length: 20 }, (_, i) => ({ ...MR, iid: i + 1, web_url: `https://${HOST}/northwind/shop/-/merge_requests/${i + 1}` }));
   let active = 0, peak = 0, detail = 0;
