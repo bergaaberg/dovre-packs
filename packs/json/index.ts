@@ -7,13 +7,41 @@
  * land in history and logs), handled in the request, and never logged, stored or published.
  * The forms post under core's strictOrigin guard, so only Dovre's own pages can post to them.
  */
+import { readFileSync } from "node:fs";
 import type { Context } from "hono";
 import type { AppEnv } from "dovre/env.ts";
 import { type Pack, PACK_API } from "dovre/packs/types.ts";
 import { strictOrigin } from "dovre/strict.ts";
 import { MAX_INPUT, b64Decode, b64Encode, diff, epoch, format, jwtDecode, minify, parse, query, sortKeys, urlDecode, urlEncode } from "./tools.ts";
-import { fromYaml, shapeOf, toJsonSchema, toTypeScript, toYaml } from "./convert.ts";
-import { type ConvertOp, type ConvertState, type DecodeOp, type DecodeResult, CONVERT_OPS, DECODE_OPS, convertPage, decodePage, diffPage, formatPage, queryPage, styles } from "./view.ts";
+import { fromToml, fromYaml, shapeOf, toJsonSchema, toToml, toTypeScript, toYaml } from "./convert.ts";
+import { type ConvertOp, type ConvertState, type DecodeOp, type DecodeResult, type DockOp, CONVERT_OPS, DECODE_OPS, DOCK_OPS, convertPage, decodePage, diffPage, dockView, formatPage, jqPage, queryPage, styles } from "./view.ts";
+import { SCRIPT, WORKER_JS } from "./script.ts";
+import { JQ_JS_SHA, JQ_WASM_SHA } from "./gen.ts";
+
+/** FNV-1a: a served file's URL changes when it does. */
+const hashOf = (s: string) => {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 0x01000193);
+  return (h >>> 0).toString(36);
+};
+export const WORKER_PATH = `/json/jq-worker.${hashOf(WORKER_JS)}.js`;
+const vendored = (name: string) => () => new Uint8Array(readFileSync(new URL(`./vendor/${name}`, import.meta.url)));
+
+/** What the dock's buttons do: the format and decode tools, on one box. */
+export function dockRun(op: DockOp, input: string, now: number): { out?: string; error?: string } {
+  if (op === "format" || op === "minify") {
+    const p = parse(input);
+    if (!p.ok) return { error: `Not valid JSON: ${p.error} (line ${p.line}, column ${p.column})` };
+    return { out: op === "minify" ? minify(p.value) : format(p.value) };
+  }
+  const r = decode(op, input.trim(), now);
+  if (r.op === "error") return { error: r.error };
+  if (r.op === "text") return { out: r.json !== undefined ? format(r.json) : r.text };
+  if (r.op === "epoch") return { out: `${r.iso}\n${r.seconds} s · ${r.ms} ms (read as ${r.unit})` };
+  const times = Object.fromEntries(r.times.map((t) => [t.claim, t.iso]));
+  const state = r.expired ? "expired" : r.notYet ? "not valid yet" : undefined;
+  return { out: `${state ? `(${state}; signature not checked)\n` : "(signature not checked)\n"}${format({ header: r.header, payload: r.payload, ...(r.times.length ? { times } : {}) } as never)}` };
+}
 
 /** A body bigger than this is refused before it's read (two documents at MAX_INPUT, form-encoded). */
 const MAX_BODY = 8 * MAX_INPUT;
@@ -52,9 +80,17 @@ export function convert(op: ConvertOp, input: string, root = "Root"): ConvertSta
     const y = fromYaml(input);
     return y.ok ? { out: format(y.value) } : { yaml: y };
   }
+  if (op === "fromtoml") {
+    const t = fromToml(input);
+    return t.ok ? { out: format(t.value) } : { toml: t };
+  }
   const p = parse(input);
   if (!p.ok) return { json: p };
   if (op === "yaml") return { out: toYaml(p.value) };
+  if (op === "toml") {
+    const t = toToml(p.value);
+    return t.ok ? { out: t.out } : { error: t.error };
+  }
   if (op === "ts") return { out: toTypeScript(shapeOf(p.value), root) };
   return { out: format(toJsonSchema(shapeOf(p.value))) };
 }
@@ -72,12 +108,17 @@ export function createJsonPack(opts: { now?: () => number } = {}): Pack {
       private: true,
     },
     styles,
+    script: SCRIPT,
+    wasm: { jq: { sha256: JQ_WASM_SHA, load: vendored("jq.wasm") } },
+    files: { "jq.js": { sha256: JQ_JS_SHA, load: vendored("jq.js") } },
+    dock: () => ({ label: "JSON", key: "J", title: "Format JSON, decode a JWT, base64 or a Unix time" }),
     nav: () => [{ href: "/json", title: "JSON", icon: "code", group: "Code" }],
     pages: () => [
       { title: "JSON: format & tree", href: "/json", icon: "{}", about: "Format, minify, validate JSON and browse it as a tree", also: ["json", "pretty print", "validate", "minify", "beautify", "tree"] },
-      { title: "JSON: query", href: "/json/query", icon: "{}", about: "Run a JSONPath over a document", also: ["jsonpath", "jq", "query"] },
+      { title: "JSON: query", href: "/json/query", icon: "{}", about: "Run a JSONPath over a document", also: ["jsonpath", "query"] },
+      { title: "JSON: jq", href: "/json/jq", icon: "{}", about: "Filter and reshape JSON with jq, in your browser", also: ["jq", "filter", "select", "map"] },
       { title: "JSON: diff", href: "/json/diff", icon: "{}", about: "Compare two JSON documents, key order ignored", also: ["compare", "diff"] },
-      { title: "JSON: convert", href: "/json/convert", icon: "{}", about: "JSON to YAML and back; TypeScript types or a JSON Schema from a sample", also: ["yaml", "typescript", "types", "interface", "json schema", "convert"] },
+      { title: "JSON: convert", href: "/json/convert", icon: "{}", about: "JSON to YAML or TOML and back; TypeScript types or a JSON Schema from a sample", also: ["yaml", "toml", "typescript", "types", "interface", "json schema", "convert"] },
       { title: "JSON: decode", href: "/json/decode", icon: "{}", about: "Decode a JWT, base64 or URL-encoding; Unix time to date", also: ["jwt", "base64", "url decode", "epoch", "timestamp", "unix time"] },
     ],
     about: (_ctx, path) => (path.startsWith("/json") ? "JSON tools (what's pasted here isn't shared)" : undefined),
@@ -115,6 +156,29 @@ export function createJsonPack(opts: { now?: () => number } = {}): Pack {
         } catch (e) {
           return page(c, "JSON query", queryPage({ input, path, result: { parsed, error: (e as Error).message } }));
         }
+      });
+
+      const jqAt = () => ({ worker: WORKER_PATH, core: ctx.file("jq.js"), wasm: ctx.wasm("jq") });
+      app.get("/json/jq", (c) => page(c, "jq", jqPage({ input: "", filter: ".", at: jqAt() })));
+      // Only without the page's script: jq never runs on the server.
+      app.post("/json/jq", strictOrigin, async (c) => {
+        const f = await form(c);
+        if (!f) return tooBig(c);
+        return page(c, "jq", jqPage({ input: f.input ?? "", filter: (f.filter ?? ".").slice(0, 4000), at: jqAt(), posted: true }));
+      });
+      app.get(WORKER_PATH, (c) => {
+        c.header("Content-Type", "text/javascript; charset=utf-8");
+        c.header("Cache-Control", "private, max-age=31536000, immutable");
+        return c.body(WORKER_JS);
+      });
+
+      app.get("/json/dock", (c) => ctx.dockPage(c, { title: "JSON", body: dockView({ input: "" }) }));
+      app.post("/json/dock", strictOrigin, async (c) => {
+        const f = await form(c);
+        if (!f) return tooBig(c);
+        const input = f.input ?? "";
+        const op = (DOCK_OPS.find(([v]) => v === f.op)?.[0] ?? "format") as DockOp;
+        return ctx.dockPage(c, { title: "JSON", body: dockView({ input, op, ...dockRun(op, input, now()) }) });
       });
 
       app.get("/json/diff", (c) => page(c, "JSON diff", diffPage({ a: "", b: "" })));

@@ -26,6 +26,9 @@ importers:
       markdown-it-footnote:
         specifier: 4.0.0
         version: 4.0.0
+      smol-toml:
+        specifier: 1.9.1
+        version: 1.9.1
       yaml:
         specifier: ^2.9.1
         version: 2.9.1
@@ -220,6 +223,10 @@ packages:
     resolution: {integrity: sha512-uxFIHU0YlHYhDQtV4R9J6a52SLx28BCjT+4ieh7IGbgwVJWO+km431c4yRlREUAsAmt/uMjQUyQHNEPf0M39CA==}
     engines: {node: '>=6'}
 
+  smol-toml@1.9.1:
+    resolution: {integrity: sha512-j7WyPdf0CJoutMzMoPLF/bVXHtKZIT9Rb4eGeEbWw8X2t5oirjPgpL+OpaENZrILYaXqYwnVH+qgUwVbl+pUJQ==}
+    engines: {node: '>= 18'}
+
   typescript@7.0.2:
     resolution: {integrity: sha512-8FYau96o3NKOhbjKi/qNvG/W5jhzxkbdm5sj9AbZ/5T5sWqn3hJgLfGx27sRKZWTvyzCP8dLRBTf5tBTSRVUNA==}
     engines: {node: '>=16.20.0'}
@@ -349,6 +356,8 @@ snapshots:
   mdurl@2.1.0: {}
 
   punycode.js@2.3.1: {}
+
+  smol-toml@1.9.1: {}
 
   typescript@7.0.2:
     optionalDependencies:
