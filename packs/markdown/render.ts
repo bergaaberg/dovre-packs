@@ -1,8 +1,8 @@
 /**
  * Markdown (`markdown`) rendering: GitHub-flavoured Markdown on the server (markdown-it), plus
- * task lists, alerts (`> [!NOTE]`), footnotes and front matter as a table. Math and `mermaid` blocks
- * are left as their source for the browser: the pack's script draws them (KaTeX as MathML, and
- * mermaid), each loaded only where a document needs it, so neither is in the Worker bundle.
+ * task lists, alerts (`> [!NOTE]`), footnotes and front matter as a table. Math, `mermaid` and
+ * `dot` blocks are left as their source for the browser: the pack's script draws them (KaTeX as
+ * MathML, mermaid, Graphviz), each loaded only where a document needs it, so none is in the Worker bundle.
  *
  * The source is hostile. Raw HTML in it is shown as text (`html: false`), so the only markup in the
  * output is what markdown-it writes, with every piece of text escaped. Links go only to
@@ -34,6 +34,8 @@ export type Rendered = {
   /** Relative links that lead nowhere, as written. */
   broken: string[];
   mermaid: number;
+  /** Graphviz blocks (`dot`, `graphviz`). */
+  dot: number;
   math: number;
 };
 
@@ -143,7 +145,7 @@ function frontMatter(src: string): { body: string; front?: Rendered["front"] } {
 
 const isExternal = (href: string) => /^(https?:|mailto:)/i.test(href);
 
-function build(opts: RenderOptions, out: { broken: string[]; headings: Heading[]; mermaid: number; math: number }) {
+function build(opts: RenderOptions, out: { broken: string[]; headings: Heading[]; mermaid: number; dot: number; math: number }) {
   const md = new MarkdownIt({ html: false, linkify: true, typographer: false });
   // Its types are for markdown-it 14's; the plugin works on 15 as it is.
   md.use(footnote as unknown as (md: Md) => void);
@@ -160,6 +162,7 @@ function build(opts: RenderOptions, out: { broken: string[]; headings: Heading[]
     const lang = t.info.trim().split(/\s+/)[0]!.toLowerCase();
     if (lang === "math") return (out.math++, math(md, t.content, true));
     if (lang === "mermaid") return (out.mermaid++, `<pre class="md-mermaid">${md.utils.escapeHtml(t.content)}</pre>\n`);
+    if (lang === "dot" || lang === "graphviz") return (out.dot++, `<pre class="md-dot">${md.utils.escapeHtml(t.content)}</pre>\n`);
     return fence(tokens, i, o, env, self);
   };
 
@@ -278,7 +281,7 @@ function decodeURIComponentSafe(s: string): string {
 export function render(source: string, opts: RenderOptions = {}): Rendered {
   const src = source.length > MAX_SOURCE ? source.slice(0, MAX_SOURCE) : source;
   const { body, front } = frontMatter(src.replace(/\r\n?/g, "\n"));
-  const out = { broken: [] as string[], headings: [] as Heading[], mermaid: 0, math: 0 };
+  const out = { broken: [] as string[], headings: [] as Heading[], mermaid: 0, dot: 0, math: 0 };
   const html = build(opts, out).render(body);
   return { html, ...(front ? { front } : {}), ...out };
 }

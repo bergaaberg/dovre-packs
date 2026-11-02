@@ -10,7 +10,7 @@ import { HOSTILE, assertFragment, assertInert, assertScoped, packApp, testContex
 import { markdownPack } from "../index.ts";
 import { render, slug } from "../render.ts";
 import { cleanPath, listDocs } from "../docs.ts";
-import { KATEX_SHA, MERMAID_SHA } from "../gen.ts";
+import { GRAPHVIZ_SHA, KATEX_SHA, MERMAID_SHA } from "../gen.ts";
 import { SCRIPT } from "../script.ts";
 import { body } from "../view.ts";
 
@@ -24,17 +24,18 @@ const inert = (name: string, out: string) => {
   assert.ok(!/<(iframe|object|embed|form|style|base|meta|link)\b/i.test(out), `${name}: page markup got through`);
 };
 
-test("markdown: manifest, styles scoped, mermaid's and KaTeX's files match their hashes", () => {
+test("markdown: manifest, styles scoped, mermaid's, KaTeX's and Graphviz's files match their hashes", () => {
   assert.equal(markdownPack.manifest.id, "markdown");
   assert.equal(markdownPack.manifest.execution, "any");
   assert.equal(markdownPack.manifest.private, true);
   assertScoped(markdownPack);
-  for (const [name, sha] of [["mermaid.js", MERMAID_SHA], ["katex.js", KATEX_SHA]] as const) {
+  for (const [name, sha] of [["mermaid.js", MERMAID_SHA], ["katex.js", KATEX_SHA], ["graphviz.js", GRAPHVIZ_SHA]] as const) {
     const bytes = readFileSync(new URL(`../vendor/${name}`, import.meta.url));
     assert.equal(createHash("sha256").update(bytes).digest("hex").slice(0, 16), sha, "run build.sh: gen.ts is stale");
     assert.equal(markdownPack.files?.[name]?.sha256, sha);
     assert.doesNotMatch(bytes.toString("utf8").slice(-300), /sourceMappingURL/, `${name}: no map is shipped`);
   }
+  assert.deepEqual(Object.entries(markdownPack.files ?? {}).filter(([, f]) => (f as { wasm?: boolean }).wasm).map(([n]) => n), ["graphviz.js"], "only Graphviz compiles WebAssembly");
 });
 
 test("markdown: GitHub-flavoured features", () => {
@@ -77,6 +78,10 @@ test("markdown: math and mermaid left as their source for the browser, money lef
   assert.doesNotMatch(hostile.html, /<script|<img/i, "a formula's TeX is text");
   assert.equal(r.mermaid, 1);
   assert.match(r.html, /<pre class="md-mermaid">graph LR; A--&gt;B\n<\/pre>/);
+  const g = render('```dot\ndigraph { a -> b [URL="javascript:alert(1)"] }\n```\n\n```graphviz\ngraph { "</pre><script>" }\n```');
+  assert.equal(g.dot, 2);
+  assert.match(g.html, /<pre class="md-dot">digraph \{ a -&gt; b \[URL=&quot;javascript:alert\(1\)&quot;\] \}\n<\/pre>/);
+  assert.doesNotMatch(g.html, /<script/);
 });
 
 test("markdown: front matter as a table, or as written when it isn't a map", () => {
@@ -180,6 +185,7 @@ test("markdown: write, preview, export and print over the app; posts only from D
 
 test("markdown: the script draws diagrams strictly and only where there's a document", () => {
   assert.match(SCRIPT, /securityLevel: "strict"/);
+  assert.match(SCRIPT, /cleanSvg\(gv\.dot\(text, "svg"\)\)/, "Graphviz's SVG is cleaned before it's shown");
   assert.match(SCRIPT, /if \(!document\.querySelector\("\[data-md-doc\], form\[data-md-live\]"\)\) return;/);
   assert.doesNotMatch(SCRIPT, /dovre:change/);
   new Function(SCRIPT); // it parses
@@ -313,7 +319,7 @@ test("markdown: a PR's .md file read rendered at its head commit, through the fo
 });
 
 test("markdown: the dock, a scratch pad with a live preview that goes on to the editor", async () => {
-  assert.deepEqual(markdownPack.dock!({} as never), { label: "Markdown", key: "M", title: "A scratch pad with a live preview: math and mermaid too" });
+  assert.deepEqual(markdownPack.dock!({} as never), { label: "Markdown", key: "M", title: "A scratch pad with a live preview: math and diagrams too" });
   const { get, post } = packApp([markdownPack]);
   const dock = await (await get("/markdown/dock")).text();
   assert.match(dock, /<form method="post" action="\/markdown\/dock" class="md-editor" data-md-live/);

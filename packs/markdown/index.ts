@@ -1,8 +1,8 @@
 /**
  * Markdown (`markdown`): read and write Markdown the way GitHub renders it, plus the diagrams it
- * doesn't. GFM (tables, task lists, footnotes, alerts), front matter as a table, math (KaTeX, as MathML)
- * and `mermaid` blocks drawn in the browser (both kept out of the Worker bundle as Pack.files
- * scripts; mermaid with `securityLevel: "strict"`). A split editor with a live preview, export to a self-contained HTML file, and a print page (PDF through the browser).
+ * doesn't. GFM (tables, task lists, footnotes, alerts), front matter as a table, math (KaTeX, as MathML),
+ * `mermaid` and Graphviz `dot` blocks drawn in the browser (all kept out of the Worker bundle as
+ * Pack.files scripts; mermaid with `securityLevel: "strict"`, Graphviz's SVG cut to shapes and text). A split editor with a live preview, export to a self-contained HTML file, and a print page (PDF through the browser).
  *
  * Locally it also reads the docs in my checkouts (git repos directly under CODE_DIR): a repo's
  * README, docs/ and the rest of its Markdown, with links between files working and broken ones
@@ -23,7 +23,7 @@ import { codeDirOf, listDocs, listRepos, readDoc, readImage, repoRoot, resolver 
 import { dockView, docPage, docsPage, hostedDocsPage, notFound, previewFragment, reposPage, standalone, titleOf, writePage } from "./view.ts";
 import { PRINT_JS, SCRIPT } from "./script.ts";
 import { styles } from "./styles.ts";
-import { KATEX_SHA, MERMAID_SHA } from "./gen.ts";
+import { GRAPHVIZ_SHA, KATEX_SHA, MERMAID_SHA } from "./gen.ts";
 import { prDocHref, prDocOf, prResolver } from "./pr.ts";
 import { isDoc } from "./docs.ts";
 
@@ -66,26 +66,27 @@ export function createMarkdownPack(): Pack {
       api: PACK_API,
       id: "markdown",
       name: "Markdown",
-      description: "GitHub-flavoured Markdown with math and mermaid diagrams: write with a live preview, export or print, and read the docs in your checkouts with their links checked.",
+      description: "GitHub-flavoured Markdown with math, mermaid and Graphviz diagrams: write with a live preview, export or print, and read the docs in your checkouts with their links checked.",
       domain: "general",
       execution: "any",
       private: true,
     },
     styles,
     script: SCRIPT,
-    files: { "mermaid.js": vendored(MERMAID_SHA, "mermaid.js"), "katex.js": vendored(KATEX_SHA, "katex.js") },
+    // graphviz.js compiles the WebAssembly it carries inside: `wasm` lets pages do that.
+    files: { "mermaid.js": vendored(MERMAID_SHA, "mermaid.js"), "katex.js": vendored(KATEX_SHA, "katex.js"), "graphviz.js": { ...vendored(GRAPHVIZ_SHA, "graphviz.js"), wasm: true } },
     nav: () => [{ href: "/markdown", title: "Markdown", icon: "pen", group: "Code" }],
     pages: (ctx) => [
-      { title: "Markdown: write & preview", href: "/markdown", icon: "pen", about: "Write Markdown with a live preview, math and mermaid; export or print", also: ["markdown", "md", "mermaid", "diagram", "math", "katex", "preview", "readme"] },
+      { title: "Markdown: write & preview", href: "/markdown", icon: "pen", about: "Write Markdown with a live preview, math, mermaid and Graphviz; export or print", also: ["markdown", "md", "mermaid", "graphviz", "dot", "diagram", "math", "katex", "preview", "readme"] },
       ...(ctx.hosted ? [] : [{ title: "Markdown: docs in checkouts", href: "/markdown/docs", icon: "pen", about: "Read a checkout's README and docs rendered, with broken links flagged", also: ["docs", "readme", "documentation"] }]),
     ],
-    dock: () => ({ label: "Markdown", key: "M", title: "A scratch pad with a live preview: math and mermaid too" }),
+    dock: () => ({ label: "Markdown", key: "M", title: "A scratch pad with a live preview: math and diagrams too" }),
     slots: (ctx) => ({
       "pr.file": (f) => (isDoc(f.path) && f.status !== "removed" && ctx.forge()?.file ? html`<a class="btn sm ghost" href="${prDocHref({ repo: f.repo, n: f.number, sha: f.sha, path: f.path })}">Rendered</a>` : ""),
     }),
     about: (_ctx, path) => (path.startsWith("/markdown/docs/") ? "A Markdown doc in a local checkout" : path.startsWith("/markdown/pr/") ? "A PR's Markdown file, rendered" : path.startsWith("/markdown") ? "Markdown editor (what's pasted here isn't shared)" : undefined),
     routes(app, ctx) {
-      const files = () => ({ mermaid: ctx.file("mermaid.js"), katex: ctx.file("katex.js") });
+      const files = () => ({ mermaid: ctx.file("mermaid.js"), katex: ctx.file("katex.js"), graphviz: ctx.file("graphviz.js") });
       const codeDir = () => ctx.codeDir ?? codeDirOf(ctx.env);
       const page = (c: Context<AppEnv>, title: string, body: Parameters<typeof ctx.page>[1]["body"]) => ctx.page(c, { title, body, current: "/markdown" });
 

@@ -17,9 +17,9 @@ function header(current: Tab, sub: string, hosted: boolean, title = "Markdown") 
 }
 
 /** Where the browser libraries are (Pack.files), so the pack's script can draw diagrams and math. */
-export type DocFiles = { mermaid?: string; katex?: string };
+export type DocFiles = { mermaid?: string; katex?: string; graphviz?: string };
 
-const docAttrs = (f: DocFiles | undefined) => html`${f?.mermaid ? html` data-mermaid="${f.mermaid}"` : ""}${f?.katex ? html` data-katex="${f.katex}"` : ""}`;
+const docAttrs = (f: DocFiles | undefined) => html`${f?.mermaid ? html` data-mermaid="${f.mermaid}"` : ""}${f?.katex ? html` data-katex="${f.katex}"` : ""}${f?.graphviz ? html` data-graphviz="${f.graphviz}"` : ""}`;
 
 /** The rendered document, with the libraries' files named so the pack's script can draw it. */
 export function body(r: Rendered, files: DocFiles | undefined): Html {
@@ -46,7 +46,7 @@ export function writePage(s: WriteState): Html {
 <p class="t3 sm">Rendered on this Dovre's server as you type: nothing is sent elsewhere, logged or kept. Raw HTML shows as text; images show only from a checkout's own files.</p>
 </form>`;
   const preview = html`<div class="md-preview" data-md-preview>${r ? body(r, s.files) : html`<div class="md-body" data-md-doc${docAttrs(s.files)}><p class="t3">The preview shows here.</p></div>`}</div>`;
-  return html`${header("write", "GitHub-flavoured Markdown with math and mermaid diagrams: write, preview, export.", s.hosted)}<div class="md-split">${Panel({ children: form })}${Panel({ title: "Preview", children: preview })}</div>`;
+  return html`${header("write", "GitHub-flavoured Markdown with math, mermaid and Graphviz diagrams: write, preview, export.", s.hosted)}<div class="md-split">${Panel({ children: form })}${Panel({ title: "Preview", children: preview })}</div>`;
 }
 
 /** The dock beside Bino's: a scratch pad with its preview under it, to take to the full editor. */
