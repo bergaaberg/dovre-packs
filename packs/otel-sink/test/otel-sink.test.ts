@@ -10,8 +10,8 @@ import type { IngestInput, PackContext } from "dovre/packs/types.ts";
 import { createWorker } from "dovre/worker.ts";
 import { createOtelSinkPack, repoMap } from "../index.ts";
 import { extraKeys, hexId, scrub } from "../otlp.ts";
-import { MAX_SPANS, readLogs, readTrace } from "../store.ts";
-import { logsPage, servicePage, sinkCard, sinkPage, sinkProd, spanArg, tracePage, treeOrder } from "../view.ts";
+import { MAX_SPANS, readLogs, readMetricTrends, readTrace } from "../store.ts";
+import { logsPage, repoHref, serviceProblem, servicePage, sinkCard, sinkPage, sinkProd, spanArg, traceProblem, tracePage, treeOrder } from "../view.ts";
 
 const H = `<script>alert(1)</script>`;
 const J = "javascript:alert(1)";
@@ -250,6 +250,9 @@ test("otel-sink: hostile service names, span names, attributes and log bodies co
     servicePage(kept, H),
     servicePage(kept, J),
     tracePage(TRACE, spans, logs),
+    tracePage(TRACE, spans, logs, () => [], () => ({ repo: "a/b", version: H })),
+    servicePage(kept, H, { forge: { id: "github", host: "github.com" }, trends: [{ name: H, unit: H, values: [1, null, 2] }] }),
+    servicePage(kept, J, { forge: { id: "github", host: J } }),
     logsPage(logs, { service: H, level: H, trace: H }, [H, J]),
     sinkCard(kept),
     sinkProd(kept, "a/b"),
@@ -340,4 +343,69 @@ test("otel-sink: an HTTP span on the trace page carries what other packs put the
   assert.equal((page.match(/<button>Open GET<\/button>/g) ?? []).length, 1);
   assert.equal(spanArg({ ...spans[0]!, attrs: "not json" })!.attrs["url.full"], undefined, "unreadable attrs: none");
   assert.doesNotMatch(String(tracePage(TRACE, spans, [])), /<button>/, "no pack answers: no button");
+});
+
+test("otel-sink: an erroring service links to its repo and version, and Investigate hands on names and counts, never messages", async () => {
+  const { db, ctx, pack, send } = setup({ OTEL_SINK_SERVICES: "api=acme/api" });
+  const failing = [1, 2, 3, 4].map((i) => span({ id: i, trace: TRACE.replace(/.$/, String(i)), err: true, ex: ["PayError", "card 4111 declined"], attrs: [["http.request.method", "POST"], ["http.route", "/pay"]] }));
+  await send("v1/traces", traces("api", failing));
+  await pack.refresh!(ctx);
+  const kept = pack.kept()!;
+  assert.ok(kept.ok);
+  const s = kept.services[0]!;
+  assert.equal(s.status, "bad");
+
+  const gh = { id: "github", host: "github.com" };
+  const page = String(servicePage(kept, "api", { forge: gh }));
+  assert.match(page, /href="https:\/\/github\.com\/acme\/api">acme\/api<\/a>/);
+  assert.match(page, /href="https:\/\/github\.com\/acme\/api\/tree\/1\.4\.2"/);
+  assert.match(page, /href="\/investigate\?prompt=[^"]*&amp;repo=acme%2Fapi&amp;from=%2Fotel-sink%2Fservice%2Fapi"/);
+  assert.doesNotMatch(String(servicePage(kept, "api")), /https:\/\/github/, "no forge known: the repo is text");
+
+  const said = serviceProblem(s, kept.errors);
+  assert.match(said, /api version 1\.4\.2 \(prod\) is failing: 4 of 4 requests/);
+  assert.match(said, /PayError in span "GET \/pay" \(4×\)/);
+  assert.doesNotMatch(said, /4111/, "an error's message stays out");
+
+  assert.equal(repoHref({ id: "github", host: "ghe.acme.com" }, "acme/api", "abc1234"), "https://ghe.acme.com/acme/api/commit/abc1234");
+  assert.equal(repoHref({ id: "gitlab", host: "gitlab.com" }, "acme/api", "v2.0.0"), "https://gitlab.com/acme/api/-/tree/v2.0.0");
+  assert.equal(repoHref({ id: "github", host: "evil.example/x" }, "acme/api"), "", "a host that isn't one makes no link");
+
+  const spans = await readTrace(db, TRACE.replace(/.$/, "1"));
+  const t = traceProblem(TRACE, spans, "1.4.2");
+  assert.match(t, /1 of 1 spans have errors/);
+  assert.match(t, /PayError in span "GET \/pay" of api version 1\.4\.2 \(POST \/pay\)/);
+  assert.doesNotMatch(t, /4111/);
+  assert.equal(traceProblem(TRACE, [{ ...spans[0]!, err: 0 }]), "", "nothing failed: nothing to hand on");
+
+  const app = new Hono();
+  const pageOf: PackContext["page"] = async (_c, o) => new Response(String(await o.body));
+  pack.routes!(app as never, { ...ctx, page: pageOf, forge: () => ({ id: "github", name: "GitHub", host: "github.com", login: "me", owners: "acme" }) });
+  const tr = await (await app.request(`http://localhost/otel-sink/trace/${TRACE.replace(/.$/, "1")}`)).text();
+  assert.match(tr, /Investigate<\/a>/);
+  assert.match(tr, /repo=acme%2Fapi/);
+  assert.match(await (await app.request("http://localhost/otel-sink/service/api")).text(), /github\.com\/acme\/api\/tree\/1\.4\.2/);
+});
+
+test("otel-sink: a service's page shows each metric's week as hourly means", async () => {
+  const { db, ctx, pack, send } = setup();
+  const point = (v: number, at: number) => ({ resourceMetrics: [{ resource: resource("api"), scopeMetrics: [{ metrics: [{ name: "queue.depth", unit: "1", gauge: { dataPoints: [{ timeUnixNano: ns(at), asDouble: v }] } }] }] }] });
+  await send("v1/metrics", point(4, NOW - 3 * 3600_000));
+  await send("v1/metrics", point(8, NOW - 3 * 3600_000));
+  await send("v1/metrics", point(2, NOW - 60_000));
+  const [t] = await readMetricTrends(db, "api", NOW - 1); // NOW is on the hour: read from inside the last one
+  assert.equal(t!.name, "queue.depth");
+  assert.equal(t!.values.length, 168);
+  assert.equal(t!.values.at(-1), 2);
+  assert.equal(t!.values.at(-3), 6, "an hour's mean");
+  assert.equal(t!.values.filter((v) => v !== null).length, 2);
+  assert.deepEqual(await readMetricTrends(db, "other", NOW), []);
+
+  await pack.refresh!(ctx);
+  const app = new Hono();
+  pack.routes!(app as never, { ...ctx, page: async (_c, o) => new Response(String(await o.body)) });
+  const out = await (await app.request("http://localhost/otel-sink/service/api")).text();
+  assert.match(out, /hourly means, 7 days/);
+  assert.match(out, /7-day range 2–6/);
+  assert.match(out, /<svg/);
 });

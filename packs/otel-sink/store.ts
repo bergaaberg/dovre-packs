@@ -250,3 +250,26 @@ export async function readLogs(db: D1, f: LogFilter, limit = 200): Promise<LogEn
   const { results } = await db.prepare(sql).bind(...args, limit).all<LogEntry>();
   return results;
 }
+
+/** A metric's hourly means over the metrics' retention (7 days), oldest first; null where nothing came in. */
+export type MetricTrend = { name: string; unit: string; values: (number | null)[] };
+
+/** One service's metric trends, read when its page is opened (the summary keeps only the latest hour). */
+export async function readMetricTrends(db: D1, service: string, now: number): Promise<MetricTrend[]> {
+  const nowH = Math.floor(now / 3600e3);
+  const hours = Math.round(METRIC_RETENTION_MS / 3600e3);
+  const from = nowH - hours + 1;
+  const r = await db.prepare("SELECT name, unit, hour, n, total FROM otel_sink_metrics WHERE service = ? AND hour >= ? ORDER BY name, hour LIMIT 20000").bind(service, from).all();
+  const out = new Map<string, MetricTrend>();
+  for (const row of r.results as { name: string; unit: string; hour: number; n: number; total: number }[]) {
+    let t = out.get(row.name);
+    if (!t) {
+      if (out.size >= 40) continue;
+      t = { name: row.name, unit: row.unit, values: Array<number | null>(hours).fill(null) };
+      out.set(row.name, t);
+    }
+    const i = row.hour - from;
+    if (i >= 0 && i < hours && row.n) t.values[i] = row.total / row.n;
+  }
+  return [...out.values()];
+}

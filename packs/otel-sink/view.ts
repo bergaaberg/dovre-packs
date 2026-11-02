@@ -6,9 +6,9 @@
 import { html } from "hono/html";
 import { safeUrl } from "dovre/pages/parts.ts";
 import type { SpanSlotArg } from "dovre/packs/types.ts";
-import { Card, Empty, Item, KeyValues, List, Notice, PageHeader, Panel, Pill, Pulse, Stat, Stats, type Html } from "dovre/ui/kit.ts";
+import { Card, Empty, Investigate, Item, KeyValues, List, Notice, PageHeader, Panel, Pill, Pulse, Spark, Stat, Stats, type Html } from "dovre/ui/kit.ts";
 import { LEVELS, levelName } from "./otlp.ts";
-import { BAD_ERR, WARN_ERR, type ErrorSpan, type LogEntry, type ServiceSum, type SinkKept, type TraceSpan } from "./store.ts";
+import { BAD_ERR, WARN_ERR, type ErrorSpan, type LogEntry, type MetricTrend, type ServiceSum, type SinkKept, type TraceSpan } from "./store.ts";
 
 export const ID = "otel-sink";
 type Tone = "ok" | "warn" | "bad" | "neutral";
@@ -60,6 +60,62 @@ function errorItem(e: ErrorSpan, withService: boolean): Html {
   });
 }
 
+/** The forge the instance follows (PackContext.forge), for links to a service's repo and version. */
+export type ForgeAt = { id: string; host: string };
+
+/** A web link into a repo on the forge: the repo, or a version in it (a commit when it looks like one, else a tag or branch). */
+export function repoHref(forge: ForgeAt, repo: string, version?: string | null): string {
+  if (!/^[\w.-]+\/[\w.-]+$/.test(repo) || !/^[a-z0-9.-]+(:\d+)?$/i.test(forge.host)) return "";
+  const base = `https://${forge.host}/${repo}`;
+  if (!version) return safeUrl(base);
+  const sep = forge.id === "gitlab" ? "/-/" : "/";
+  const commit = /^[0-9a-f]{7,40}$/i.test(version);
+  return safeUrl(`${base}${sep}${commit ? "commit" : "tree"}/${encodeURIComponent(version)}`);
+}
+
+/** Where a service's code is: its repo (OTEL_SINK_SERVICES) and the version it reports, linked when the forge is known. */
+function deployedFrom(s: ServiceSum, forge: ForgeAt | undefined): Html | "" {
+  if (!s.repo) return "";
+  const repo = forge ? repoHref(forge, s.repo) : "";
+  const at = forge && s.version ? repoHref(forge, s.repo, s.version) : "";
+  return html`<p class="t2">Runs ${repo ? html`<a href="${repo}">${s.repo}</a>` : html`<code>${s.repo}</code>`}${s.version ? html` at ${at ? html`<a href="${at}"><code>${s.version}</code></a>` : html`<code>${s.version}</code>`}` : ""}.</p>`;
+}
+
+/**
+ * What Investigate hands Bino or an agent about an erroring service: names, states and counts,
+ * never an error's message (it can carry what the app was handling).
+ */
+export function serviceProblem(s: ServiceSum, errors: ErrorSpan[]): string {
+  const kinds = new Map<string, number>();
+  for (const e of errors.filter((x) => x.service === s.name)) {
+    const k = `${e.err_type ?? (e.http_status ? `HTTP ${e.http_status}` : "an error")} in span "${e.name}"`;
+    kinds.set(k, (kinds.get(k) ?? 0) + 1);
+  }
+  const top = [...kinds].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([k, n]) => `${k} (${n}×)`);
+  return `Service ${s.name}${s.version ? ` version ${s.version}` : ""}${s.environment ? ` (${s.environment})` : ""} is ${WORD[s.status]}: ${s.errors} of ${s.n} requests failed in the last 15 minutes, p95 ${ms(s.p95)}.${top.length ? ` Recent errors: ${top.join("; ")}.` : ""} Find the likely cause in the code and suggest a fix.`;
+}
+
+/** The same for one failing trace: where it failed, by span names, types and statuses. */
+export function traceProblem(traceId: string, spans: TraceSpan[], version?: string | null): string {
+  const errs = spans.filter((s) => s.err);
+  const first = [...errs].sort((a, b) => a.start_us - b.start_us)[0];
+  if (!first) return "";
+  const where = `${first.err_type ?? (first.http_status ? `HTTP ${first.http_status}` : "an error")} in span "${first.name}" of ${first.service}${version ? ` version ${version}` : ""}${first.http_method ? ` (${first.http_method} ${first.http_route ?? ""})`.replace(" )", ")") : ""}`;
+  return `Trace ${traceId} failed: ${errs.length} of ${spans.length} spans have errors across ${new Set(spans.map((s) => s.service)).size} services. The first: ${where}. Find the likely cause in the code and suggest a fix.`;
+}
+
+/** A metric's week, as a sparkline of hourly means. */
+function trendItem(t: MetricTrend): Html {
+  const seen = t.values.filter((v): v is number => v !== null);
+  const last = seen.at(-1);
+  const round = (n: number) => num(Math.round(n * 1000) / 1000);
+  return Item({
+    title: html`<code>${t.name}</code>`,
+    line: html`${last === undefined ? "nothing yet" : html`last hour ${round(last)}${t.unit ? ` ${t.unit}` : ""}`}${seen.length ? html` · 7-day range ${round(Math.min(...seen))}–${round(Math.max(...seen))}` : ""}`,
+    more: seen.length > 1 ? Spark({ values: t.values, label: `${t.name}, hourly mean over 7 days`, format: (n) => `${round(n)}${t.unit ? ` ${t.unit}` : ""}` }) : "",
+  });
+}
+
 function notReady(kept: SinkKept | undefined): Html | "" {
   if (!kept) return Notice({ children: "Reading what came in…" });
   if (!kept.ok) return Notice({ tone: "bad", children: html`OTel sink: ${kept.error}` });
@@ -86,12 +142,14 @@ ${kept.errors.length ? Panel({ title: "Latest errors", meta: String(kept.errors.
 </div>`;
 }
 
-export function servicePage(kept: SinkKept | undefined, name: string): Html {
+/** `forge`: links to the service's repo; `trends`: its metrics over 7 days (else the latest hour from the summary). */
+export function servicePage(kept: SinkKept | undefined, name: string, o: { forge?: ForgeAt; trends?: MetricTrend[] } = {}): Html {
   const s = kept?.ok ? kept.services.find((x) => x.name === name) : undefined;
   const crumbs = [{ href: safeUrl(`/${ID}`), label: "OTel sink" }, { label: name }];
-  return html`${PageHeader({ title: name, crumbs, sub: s ? html`${s.version ? `v${s.version} · ` : ""}${s.environment ? `${s.environment} · ` : ""}via ${s.source}` : "", actions: html`<a href="${logsHref({ service: name })}">Logs</a>` })}
+  return html`${PageHeader({ title: name, crumbs, sub: s ? html`${s.version ? `v${s.version} · ` : ""}${s.environment ? `${s.environment} · ` : ""}via ${s.source}` : "", actions: html`<a href="${logsHref({ service: name })}">Logs</a>${s && (s.status === "warn" || s.status === "bad") ? html` ${Investigate({ prompt: serviceProblem(s, kept!.ok ? kept!.errors : []), repo: s.repo, from: serviceHref(name) })}` : ""}` })}
 <div data-live id="${ID}">
 ${notReady(kept)}
+${s ? deployedFrom(s, o.forge) : ""}
 ${kept?.ok && !s ? Empty({ title: "No such service", children: html`<p class="notes">Nothing has come in from it in the last 7 days.</p>` }) : ""}
 ${s
   ? html`${Stats([
@@ -105,7 +163,9 @@ ${(() => {
   const errs = kept!.ok ? kept!.errors.filter((e) => e.service === s.name) : [];
   return errs.length ? Panel({ title: "Latest errors", meta: String(errs.length), flush: true, children: List(errs.map((e) => errorItem(e, false))) }) : "";
 })()}
-${s.metrics.length
+${o.trends?.length
+  ? Panel({ title: "Metrics", meta: "hourly means, 7 days", flush: true, children: List(o.trends.map(trendItem)) })
+  : s.metrics.length
   ? Panel({ title: "Metrics", meta: "this hour or the last", flush: true, children: List(s.metrics.map((m) => Item({ title: html`<code>${m.name}</code>`, line: html`last ${num(Math.round(m.last * 1000) / 1000)}${m.unit ? ` ${m.unit}` : ""} · mean ${num(Math.round(m.avg * 1000) / 1000)}` }))) })
   : ""}`
   : ""}
@@ -156,7 +216,8 @@ export function spanArg(s: TraceSpan): SpanSlotArg | undefined {
 }
 
 /** `actions`: what other packs put beside an HTTP span (the "span.actions" slot; http: open it in the editor). */
-export function tracePage(traceId: string, spans: TraceSpan[], logs: LogEntry[], actions: (s: SpanSlotArg) => (Html | "")[] = () => []): Html {
+/** `repoOf`: a service's repo (OTEL_SINK_SERVICES) and version, for Investigate on a failing trace. */
+export function tracePage(traceId: string, spans: TraceSpan[], logs: LogEntry[], actions: (s: SpanSlotArg) => (Html | "")[] = () => [], repoOf: (service: string) => { repo?: string; version?: string | null } = () => ({})): Html {
   const crumbs = [{ href: safeUrl(`/${ID}`), label: "OTel sink" }, { label: `Trace ${traceId.slice(0, 12)}` }];
   if (!spans.length)
     return html`${PageHeader({ title: "Trace", crumbs })}${Empty({ title: "No such trace", children: html`<p class="notes">Not here, or older than 24 hours.</p>` })}`;
@@ -182,7 +243,12 @@ ${s.http_method || s.http_route ? html`<div class="osink-detail t3">${s.http_met
 ${s.attrs ? html`<div class="osink-detail t3">${attrsText(s.attrs)}</div>` : ""}
 </li>`;
   });
-  return html`${PageHeader({ title: html`Trace <code>${traceId.slice(0, 16)}</code>`, crumbs, sub: `${spans.length} spans · ${services.length} services · ${ms(total / 1000)}${errs ? ` · ${errs} with errors` : ""}`, actions: html`<a href="${logsHref({ trace: traceId })}">Logs for this trace</a>` })}
+  return html`${PageHeader({ title: html`Trace <code>${traceId.slice(0, 16)}</code>`, crumbs, sub: `${spans.length} spans · ${services.length} services · ${ms(total / 1000)}${errs ? ` · ${errs} with errors` : ""}`, actions: html`<a href="${logsHref({ trace: traceId })}">Logs for this trace</a>${(() => {
+    const first = spans.filter((s) => s.err).sort((a, b) => a.start_us - b.start_us)[0];
+    if (!first) return "";
+    const at = repoOf(first.service);
+    return html` ${Investigate({ prompt: traceProblem(traceId, spans, at.version), repo: at.repo, from: traceHref(traceId) })}`;
+  })()}` })}
 ${Panel({ title: "Waterfall", meta: services.join(", "), flush: true, children: html`<ul class="osink-wf">${rows}</ul>` })}
 ${logs.length ? Panel({ title: "Logs", meta: String(logs.length), flush: true, children: logList(logs, true) }) : ""}`;
 }
