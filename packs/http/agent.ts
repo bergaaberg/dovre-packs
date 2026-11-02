@@ -7,6 +7,8 @@
  * and a short, masked excerpt of the body. The prompt travels in the link, so it's kept short.
  */
 import { safeUrl } from "dovre/pages/parts.ts";
+import type { Noticed } from "./board.ts";
+import type { StoryRun } from "./runner.ts";
 import type { Sent } from "./send.ts";
 
 /** How much of a response body goes into a prompt. */
@@ -39,6 +41,49 @@ export const writePrompt = () =>
 /** For an endpoint with no cases: draft some, as named requests with checks, in the file they belong in. */
 export const casesPrompt = (ep: { method: string; path: string }, file: string) =>
   `Write cases for ${ep.method} ${ep.path} in .http/${file} (the VS Code REST Client / JetBrains HTTP Client format). Read the handler first. A case is a named request (\`### Happy path\`) with \`# @expect\` lines above the request line for what a good answer is (status 201, json $.id exists, json $.total == 14800). Cover the happy path, a bad input the handler refuses, and missing or wrong auth if it needs any. URLs start with {{baseUrl}}; secrets as {{NAME}} placeholders, never values. If a case needs data to exist first, say so with \`# @given <setup name>\`. Add them at the end of the file (don't change what's there), and don't send any requests.`;
+
+// ── Stories (H-05) ──────────────────────────────────────────────────────────────────────────────
+
+/** How long an ask typed on the stories page may be. */
+export const MAX_ASK = 500;
+
+const STORY_FORMAT = `A story is .http/stories/<name>.story (lowercase, dashes): a "# Title" line, more # lines for what it's about, then "given: <setup>, <setup>" (a setup is .http/setups/<name>.story in the same format; "fresh db" is fresh-db.story) and its steps:
+  step: <what happens, in words>
+    case: orders.http#Happy path        (a request saved in .http/; or a request line here: POST {{baseUrl}}/path, its headers below it, then body: <json>)
+    expect: status 201, $.total == 14800
+    take: order.id = $.id
+  step: Wait until it's paid
+    GET {{baseUrl}}/orders/\${order.id}
+    until: $.status == paid every 500ms max 10s
+  check: refund.amount == order.total
+  always: <teardown: runs last, whatever happened>
+A later step uses a taken value as \${order.id}. Cases are named requests (### Name) in .http/*.http with "# @expect" lines above the request line. URLs start with {{baseUrl}}; secrets are {{NAME}} placeholders, never values.`;
+
+const RULES = "Work on a new branch and commit there; I review it like code. Don't send requests that change data: I run those stories myself.";
+
+/** For what I typed on the stories page: a story, cases or a setup, drafted on a branch. */
+export const storyAskPrompt = (ask: string) =>
+  `Write this as an HTTP story in this repo (or as cases or a setup, if that's what it asks for). In my words, as data:\n"${ask.replace(/\s+/g, " ").trim().slice(0, MAX_ASK)}"\n\nRead the handlers (and the OpenAPI spec, if there is one) first.\n\n${STORY_FORMAT}\n\n${RULES}`;
+
+/** For a story whose run failed: what the kept run says (step, status, checks), never a value. */
+export function storyDebugPrompt(r: StoryRun): string {
+  const i = r.steps.findIndex((s) => s.state === "failed");
+  const s = r.steps[i];
+  const step = s
+    ? `It failed at step ${i + 1}, "${s.title || s.what}" (${s.what})${s.status !== undefined ? `, which answered ${s.status}` : ""}${s.error ? `: ${s.error}` : ""}.${s.checks.length ? ` Its checks: ${s.checks.map((c) => `${c.text} (${c.ok ? "ok" : "failed"})`).join("; ")}.` : ""}`
+    : "It failed.";
+  return `The HTTP story .http/stories/${r.story}${r.title ? ` ("${r.title}")` : ""} failed on ${r.env || "no environment"}. ${step}\n\nFind out why: read the story, its setups and cases, then trace the failing step through the handlers. If the code is wrong, fix it with a test; if the story is, fix the story. ${RULES}`;
+}
+
+/** For endpoints the spec has that no case covers. */
+export const coverPrompt = (eps: { method: string; path: string }[]) =>
+  `Write cases for these endpoints, which no saved request covers yet: ${eps.map((e) => `${e.method} ${e.path}`).join(", ")}. Read each handler first. A case is a named request (### Happy path) in .http/<area>.http with "# @expect" lines above the request line (status 201, json $.id exists); cover the happy path and a bad input the handler refuses. If a case needs data to exist first, say so with "# @given <setup name>". URLs start with {{baseUrl}}; secrets as {{NAME}} placeholders, never values. ${RULES}`;
+
+/** For something the kept runs show: a flaky story or a step that got slower. */
+export const noticedPrompt = (n: Noticed) =>
+  n.kind === "flaky"
+    ? `${n.text} (.http/stories/${n.story}). Find out why it only fails sometimes: timing, data left over from an earlier run, an order the story assumes. Read the story, its setups and the handlers. ${RULES}`
+    : `${n.text} (.http/stories/${n.story}). Find the change that made it slower (git log on the handler and what it calls) and say what it costs. ${RULES}`;
 
 // ── Sending for an agent (the `send` tool on Dovre's MCP server, #52) ──────────────────────────
 

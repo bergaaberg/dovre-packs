@@ -280,6 +280,21 @@ export function parseEnvs(text: string | undefined): Envs {
   return out;
 }
 
+/** The environments an agent may run writes in: those with `"$agent": "writes"` in the env file (dovre-packs#65). */
+export function agentEnvsOf(text: string | undefined): Set<string> {
+  const out = new Set<string>();
+  let j: unknown;
+  try {
+    j = JSON.parse(text ?? "");
+  } catch {
+    return out;
+  }
+  if (!j || typeof j !== "object" || Array.isArray(j)) return out;
+  for (const [env, vars] of Object.entries(j as Record<string, unknown>).slice(0, 50))
+    if (env !== "$shared" && /^[\w$.-]{1,64}$/.test(env) && vars && typeof vars === "object" && (vars as Record<string, unknown>).$agent === "writes") out.add(env);
+  return out;
+}
+
 /** The environments' names, `$shared` aside. */
 export const envNames = (...sets: Envs[]) => [...new Set(sets.flatMap((s) => Object.keys(s)).filter((n) => n !== "$shared"))].sort();
 

@@ -114,6 +114,7 @@ ${
         )
 }
 ${o.files?.length ? html`<h3 class="sub-h">Files</h3><ul class="http-eps">${o.files.map((f) => html`<li class="http-file"><span class="mono">${f.name}</span>${f.error ? html` <span class="t3">${f.error}</span>` : f.reqs.length ? html` <a class="btn sm ghost" href="${runHref({ repo, file: f.name, env: o.where.env })}" title="Send its requests one after the other and check each response">Run</a>` : ""}</li>`)}</ul>` : ""}
+<p><a href="${safeUrl(`/http/stories?${new URLSearchParams({ repo, ...(o.where.env ? { env: o.where.env } : {}) })}`)}">Stories</a>: chains of requests, run step by step</p>
 <div class="buttons"><a class="btn sm ghost" href="${agentHref(repo, writePrompt())}" title="Start an agent session that writes this repo's endpoints as .http requests">Write requests with an agent</a></div>
 <p><a href="/http/import">Import a spec, collection or curl</a></p>
 </nav>`;
@@ -260,24 +261,24 @@ ${o.doc ? reference(o.doc, o.specName) : ""}
 }
 
 export const quickStyles = `
-.http-quick { display: grid; grid-template-columns: minmax(220px, 300px) minmax(0, 1fr); gap: var(--s4); align-items: start; }
-.http-side { display: flex; flex-direction: column; gap: var(--s2); min-width: 0; }
-.http-main { display: flex; flex-direction: column; gap: var(--s3); min-width: 0; }
+.http-quick { display: grid; grid-template-columns: minmax(220px, 300px) minmax(0, 1fr); gap: 1rem; align-items: start; }
+.http-side { display: flex; flex-direction: column; gap: .5rem; min-width: 0; }
+.http-main { display: flex; flex-direction: column; gap: .75rem; min-width: 0; }
 .http-eps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
-.http-ep { display: flex; gap: var(--s2); align-items: center; padding: 6px 8px; border-radius: var(--r-s); color: var(--text-2); text-decoration: none; font: var(--fs-xs)/1.4 var(--mono); min-height: 32px; }
+.http-ep { display: flex; gap: .5rem; align-items: center; padding: 6px 8px; border-radius: var(--r-s); color: var(--text-2); text-decoration: none; font: var(--fs-xs)/1.4 var(--mono); min-height: 32px; }
 .http-ep:hover { background: var(--hover); color: var(--text); }
 .http-ep.on { background: var(--accent-soft); color: var(--accent-ink); }
 .http-m { flex: none; min-width: 3.4em; color: var(--text-3); font-family: var(--mono); font-size: var(--fs-xs); }
 .http-ep .http-p { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.http-file { display: flex; gap: var(--s2); align-items: center; justify-content: space-between; font-size: var(--fs-xs); padding: 2px 8px; }
-.http-blanks { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--s2) var(--s3); }
+.http-file { display: flex; gap: .5rem; align-items: center; justify-content: space-between; font-size: var(--fs-xs); padding: 2px 8px; }
+.http-blanks { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: .5rem .75rem; }
 .http-case.on { background: var(--accent-soft); border-radius: var(--r-s); }
-.http-cards { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--s3); }
-.http-card { border-top: 1px solid var(--line); padding-top: var(--s3); display: flex; flex-direction: column; gap: var(--s2); min-width: 0; }
+.http-cards { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .75rem; }
+.http-card { border-top: 1px solid var(--line); padding-top: .75rem; display: flex; flex-direction: column; gap: .5rem; min-width: 0; }
 .http-card:first-child { border-top: 0; padding-top: 0; }
-.http-card-head { display: flex; flex-wrap: wrap; gap: var(--s2); align-items: baseline; min-width: 0; }
+.http-card-head { display: flex; flex-wrap: wrap; gap: .5rem; align-items: baseline; min-width: 0; }
 .http-card-head .http-p { overflow-wrap: anywhere; }
-.http-keep { display: flex; flex-wrap: wrap; gap: var(--s2); align-items: end; }
+.http-keep { display: flex; flex-wrap: wrap; gap: .5rem; align-items: end; }
 .http-line .mono, .http-filter input { width: 100%; }
 @media (max-width: 760px) { .http-quick { grid-template-columns: 1fr; } }
 `;
