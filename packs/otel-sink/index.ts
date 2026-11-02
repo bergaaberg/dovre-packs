@@ -11,7 +11,7 @@ import { type Pack, type PackContext, type PackNeed } from "dovre/packs/types.ts
 import { Notice } from "dovre/ui/kit.ts";
 import { LEVELS, SPAN_KEEP, decode, extraKeys, hexId, parseLogs, parseMetrics, parseTraces, type Signal } from "./otlp.ts";
 import { encodeReply } from "./proto.ts";
-import { LOG_RETENTION_MS, MAX_LOGS, MAX_METRIC_ROWS, MAX_SPANS, METRIC_RETENTION_MS, SPAN_RETENTION_MS, type SinkKept, ensureSchema, insertLogs, insertPoints, insertSpans, prune, readLogs, readSummary, readTrace } from "./store.ts";
+import { LOG_RETENTION_MS, MAX_LOGS, MAX_METRIC_ROWS, MAX_SPANS, METRIC_RETENTION_MS, SPAN_RETENTION_MS, type SinkKept, ensureSchema, insertLogs, insertPoints, insertSpans, prune, readLogs, readMetricTrends, readSummary, readTrace } from "./store.ts";
 import { ID, STYLES, logsPage, servicePage, serviceHref, sinkCard, sinkPage, sinkProd, tracePage } from "./view.ts";
 
 /** `api,web=owner/web` → service name → repo, for the /deploys pill. */
@@ -50,7 +50,7 @@ export function createOtelSinkPack(opts: { now?: () => number } = {}): Pack & { 
     kept: () => kept,
     manifest: {
       api: "1.6",
-      version: "1.0.0",
+      version: "1.1.0",
       id: ID,
       name: "OTel sink",
       description: "Receives OTLP/HTTP (traces, metrics, logs) straight from your apps: RED per service, errors with their trace, a waterfall, a log tail.",
@@ -115,9 +115,17 @@ export function createOtelSinkPack(opts: { now?: () => number } = {}): Pack & { 
     },
     routes(app, ctx) {
       app.get(`/${ID}`, (c) => ctx.page(c, { title: "OTel sink", current: `/${ID}`, body: sinkPage(kept) }));
-      app.get(`/${ID}/service/:name`, (c) => {
+      app.get(`/${ID}/service/:name`, async (c) => {
         const name = c.req.param("name").slice(0, 100);
-        return ctx.page(c, { title: name, current: `/${ID}`, body: servicePage(kept, name) });
+        const f = ctx.forge();
+        let trends;
+        try {
+          await ensureSchema(ctx.db);
+          trends = await readMetricTrends(ctx.db, name, now());
+        } catch {
+          // the page still shows the summary's latest hour
+        }
+        return ctx.page(c, { title: name, current: `/${ID}`, body: servicePage(kept, name, { forge: f ? { id: f.id, host: f.host } : undefined, trends }) });
       });
       app.get(`/${ID}/trace/:id`, async (c) => {
         const id = hexId(c.req.param("id"), 16);
@@ -125,7 +133,10 @@ export function createOtelSinkPack(opts: { now?: () => number } = {}): Pack & { 
         try {
           await ensureSchema(ctx.db);
           const [spans, logs] = await Promise.all([readTrace(ctx.db, id), readLogs(ctx.db, { trace: id }, 100)]);
-          return ctx.page(c, { title: `Trace ${id.slice(0, 12)}`, current: `/${ID}`, body: tracePage(id, spans, logs, (a) => ctx.fill("span.actions", a)) });
+          return ctx.page(c, { title: `Trace ${id.slice(0, 12)}`, current: `/${ID}`, body: tracePage(id, spans, logs, (a) => ctx.fill("span.actions", a), (service) => {
+            const s = kept?.ok ? kept.services.find((x) => x.name === service) : undefined;
+            return { repo: s?.repo ?? repoMap(ctx.env.OTEL_SINK_SERVICES).get(service), version: s?.version };
+          }) });
         } catch (e) {
           return ctx.page(c, { title: "Trace", current: `/${ID}`, body: Notice({ tone: "bad", children: html`Reading the trace failed: ${e instanceof Error ? e.message : "unknown"}` }) });
         }
