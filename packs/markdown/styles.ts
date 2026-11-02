@@ -44,10 +44,10 @@ export const styles = `
 .md-body .md-broken { text-decoration: line-through wavy var(--bad); }
 .md-body .md-nolink { border-bottom: 1px dotted var(--ink-3); }
 .md-body .md-img { font-size: var(--fs-s); }
-.md-body .md-mermaid-bad { border-color: var(--bad); }
-.md-body .md-diagram { margin: .8em 0; overflow-x: auto; text-align: center; }
-.md-body .md-diagram svg { max-width: 100%; height: auto; }
-.md-body .md-dot-drawn svg { background: #fff; border-radius: var(--r-s); padding: 4px; }
+.md-mermaid-bad { border-color: var(--bad); }
+.md-diagram { margin: .8em 0; overflow-x: auto; text-align: center; }
+.md-diagram svg { max-width: 100%; height: auto; }
+.md-dot-drawn svg { background: #fff; border-radius: var(--r-s); padding: 4px; }
 .md-body .md-front { margin-bottom: 1.2em; font-size: var(--fs-s); color: var(--ink-2); }
 .md-body .footnotes { font-size: var(--fs-s); color: var(--ink-2); }
 .md-preview .md-body { min-height: 200px; }

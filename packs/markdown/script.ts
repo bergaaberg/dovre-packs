@@ -8,6 +8,10 @@
  *   mermaid can't draw stays as its source, saying why.
  * - Draws `dot` blocks with Graphviz (Pack.files, an ES module with its WebAssembly inside), and
  *   keeps only shapes and text of the SVG it makes (cleanSvg): no links, pictures or scripts.
+ * - Draws the same blocks in core's Markdown on any page (Bino's answers, PR and issue bodies):
+ *   a closed fence core marks `mermaid`, `dot` or `graphviz` (`.md pre.code[data-lang]`), with the
+ *   libraries' paths from `dovreFiles`. A diagram is kept by its source, so a live region swapped
+ *   in again (an answer being written) shows it at once instead of drawing it anew.
  * - The editor: a preview rendered on the server as I type, a file opened from this computer
  *   (read here, never uploaded as a file), and Export with the math and diagrams drawn in.
  * - The print page: prints once its math and diagrams are drawn.
@@ -38,8 +42,18 @@ const tex = async (doc) => {
   }
 };
 let n = 0;
+// Drawn diagrams by their source, to put back at once when the same block comes again.
+const drawn = new Map();
+const keyOf = (kind, pre) => kind + (kind === "mermaid" && dark() ? ":dark" : "") + "\\n" + (pre.textContent || "");
+const keep = (key, div) => { if (drawn.size >= 50) drawn.delete(drawn.keys().next().value); drawn.set(key, div.cloneNode(true)); };
+const reuse = (kind, pre) => {
+  const div = drawn.get(keyOf(kind, pre));
+  if (!div) return false;
+  pre.replaceWith(div.cloneNode(true));
+  return true;
+};
 const dark = () => /dark/.test(getComputedStyle(document.documentElement).colorScheme || "");
-const draw = (doc) => Promise.all([tex(doc), diagrams(doc), dots(doc)]);
+const draw = (doc) => Promise.all([tex(doc), diagrams(doc, doc.dataset.mermaid), dots(doc, doc.dataset.graphviz)]);
 // Graphviz's SVG holds only shapes and text: no links (URL/href), pictures (image), scripts,
 // foreign objects, styles or event handlers, and fills only from its own gradients.
 const SVG_KEEP = new Set(["svg", "g", "path", "polygon", "polyline", "ellipse", "circle", "rect", "line", "text", "tspan", "title", "defs", "lineargradient", "radialgradient", "stop"]);
@@ -64,14 +78,13 @@ const cleanSvg = (text) => {
   return document.importNode(root, true);
 };
 let viz;
-const dots = async (doc) => {
-  const blocks = [...doc.querySelectorAll("pre.md-dot:not([data-drawn])")];
-  const src = doc.dataset.graphviz;
+const dots = async (doc, src) => {
+  const blocks = [...doc.querySelectorAll("pre.md-dot:not([data-drawn])")].filter((pre) => !reuse("dot", pre));
   if (!blocks.length || !src) return;
+  for (const pre of blocks) pre.dataset.drawn = "1";
   try { viz ??= import(src).then((m) => m.Graphviz.load()); await viz; } catch { viz = undefined; return; }
   const gv = await viz;
   for (const pre of blocks) {
-    pre.dataset.drawn = "1";
     const text = pre.textContent || "";
     try {
       if (text.length > 20000) throw new Error("too big to draw here (20,000 characters at most)");
@@ -80,6 +93,7 @@ const dots = async (doc) => {
       const div = document.createElement("div");
       div.className = "md-diagram md-dot-drawn";
       div.append(svg);
+      keep(keyOf("dot", pre), div);
       pre.replaceWith(div);
     } catch (e) {
       pre.classList.add("md-mermaid-bad");
@@ -87,21 +101,21 @@ const dots = async (doc) => {
     }
   }
 };
-const diagrams = async (doc) => {
-  const blocks = [...doc.querySelectorAll("pre.md-mermaid:not([data-drawn])")];
-  const src = doc.dataset.mermaid;
+const diagrams = async (doc, src) => {
+  const blocks = [...doc.querySelectorAll("pre.md-mermaid:not([data-drawn])")].filter((pre) => !reuse("mermaid", pre));
   if (!blocks.length || !src) return;
+  for (const pre of blocks) pre.dataset.drawn = "1";
   try { await load(src); } catch { return; }
   const m = globalThis.mermaid;
   if (!m) return;
   m.initialize({ startOnLoad: false, securityLevel: "strict", theme: dark() ? "dark" : "default", maxTextSize: 50000 });
   for (const pre of blocks) {
-    pre.dataset.drawn = "1";
     try {
       const { svg } = await m.render("md-mermaid-" + ++n, pre.textContent || "");
       const div = document.createElement("div");
       div.className = "md-diagram";
       div.innerHTML = svg;
+      keep(keyOf("mermaid", pre), div);
       pre.replaceWith(div);
     } catch (e) {
       document.getElementById("md-mermaid-" + n)?.remove();
@@ -114,11 +128,39 @@ const diagrams = async (doc) => {
 const drawAll = () => Promise.all([...document.querySelectorAll("[data-md-doc]")].map(draw));
 `;
 
-/** On every page while the pack is on; does something only where a rendered document or the editor is. */
+/** Core's Markdown (src/ui/markdown.ts in dovre): its closed fences carry their language. */
+const CORE = `
+const FILES = typeof dovreFiles === "object" && dovreFiles ? dovreFiles : {};
+const KINDS = { mermaid: "md-mermaid", dot: "md-dot", graphviz: "md-dot" };
+const mark = (root) => {
+  for (const pre of root.querySelectorAll(".md pre.code[data-lang]:not(.md-mermaid):not(.md-dot)")) {
+    const kind = KINDS[pre.dataset.lang];
+    if (kind && !pre.closest("[data-md-doc]")) pre.classList.add(kind);
+  }
+};
+const drawCore = () => {
+  mark(document);
+  if (!document.querySelector(".md pre.md-mermaid:not([data-drawn]), .md pre.md-dot:not([data-drawn])")) return;
+  for (const md of document.querySelectorAll(".md")) if (!md.closest("[data-md-doc]")) { diagrams(md, FILES["mermaid.js"]); dots(md, FILES["graphviz.js"]); }
+};
+// A live region about to be swapped in: put back what was drawn before it shows.
+document.addEventListener("dovre:swap", (e) => {
+  const to = e.detail && e.detail.to;
+  if (!to || !to.querySelectorAll) return;
+  mark(to);
+  for (const pre of to.querySelectorAll(".md pre.md-mermaid, .md pre.md-dot")) reuse(pre.classList.contains("md-mermaid") ? "mermaid" : "dot", pre);
+});
+let frame = 0;
+new MutationObserver(() => { cancelAnimationFrame(frame); frame = requestAnimationFrame(drawCore); }).observe(document.body, { childList: true, subtree: true });
+drawCore();
+`;
+
+/** On every page while the pack is on; does something only where a rendered document, the editor or a diagram in core's Markdown is. */
 export const SCRIPT = `
 (() => {
-  if (!document.querySelector("[data-md-doc], form[data-md-live]")) return;
 ${DRAW}
+${CORE}
+  if (!document.querySelector("[data-md-doc], form[data-md-live]")) return;
   const CSS = ${JSON.stringify(DOC_CSS)};
   const form = document.querySelector("form[data-md-live]");
   const out = document.querySelector("[data-md-preview]");
