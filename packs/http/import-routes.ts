@@ -9,7 +9,7 @@ import { logAction } from "dovre/actions/deploys.ts";
 import type { AppEnv } from "dovre/env.ts";
 import type { PackContext } from "dovre/packs/types.ts";
 import { fromCollection, varLines } from "./collections.ts";
-import { codeDirOf, listRepos, readFile, repoRoot, writeFile } from "./files.ts";
+import { readFile, reposOf, rootOf, writeFile } from "./files.ts";
 import { blankReq, fromCurl, masker, parseHttp, placeholdSecrets, reqOfForm, secretIn, serializeReq } from "./model.ts";
 import { fileNameOf, fromOpenApi, MAX_SPEC } from "./openapi.ts";
 import { type Draw, type Sending, str } from "./sending.ts";
@@ -45,7 +45,7 @@ export function mountImport(app: Hono<AppEnv>, ctx: PackContext, d: { sending: S
     const spec = str(f.spec, MAX_SPEC);
     const got = importText(spec);
     if (!got.ok) return draw(ctx, c, blankReq(), noWhere(), { flash: { tone: "warn", text: got.error }, spec }, 400);
-    return ctx.page(c, { title: got.title, current: "/http", body: openapiPage({ got, spec, repos: listRepos(codeDirOf(ctx.env)), repo: str(f.repo, 100), file: fileNameOf(got.title) }) });
+    return ctx.page(c, { title: got.title, current: "/http", body: openapiPage({ got, spec, repos: reposOf(ctx), repo: str(f.repo, 100), file: fileNameOf(got.title) }) });
   });
 
   // Every operation added to a repo's .http file: a new file, or at the end of one (nothing there changes).
@@ -57,10 +57,10 @@ export function mountImport(app: Hono<AppEnv>, ctx: PackContext, d: { sending: S
     const got = importText(spec);
     if (!got.ok) return draw(ctx, c, blankReq(), noWhere(), { flash: { tone: "warn", text: got.error }, spec }, 400);
     const fail = async (problem: string) => {
-      const res = await ctx.page(c, { title: got.title, current: "/http", body: openapiPage({ got, spec, repos: listRepos(codeDirOf(ctx.env)), repo, file, problem }) });
+      const res = await ctx.page(c, { title: got.title, current: "/http", body: openapiPage({ got, spec, repos: reposOf(ctx), repo, file, problem }) });
       return new Response(res.body, { status: 400, headers: res.headers });
     };
-    const root = repoRoot(codeDirOf(ctx.env), repo);
+    const root = rootOf(ctx, repo);
     if (!root) return fail("Pick a repo (a checkout directly in your code folder) to save in.");
     if (!fileOk(file)) return fail("The file is a plain name ending in .http (api.http).");
     let current: { text: string; hash: string } | undefined;

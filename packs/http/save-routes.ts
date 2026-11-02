@@ -8,7 +8,7 @@ import type { Hono } from "hono";
 import { logAction } from "dovre/actions/deploys.ts";
 import type { AppEnv } from "dovre/env.ts";
 import type { PackContext } from "dovre/packs/types.ts";
-import { codeDirOf, readFile, repoRoot, writeFile } from "./files.ts";
+import { readFile, rootOf, writeFile } from "./files.ts";
 import { parseHttp, reqOfForm, secretIn, serializeReq, withReq } from "./model.ts";
 import { blanksOfForm, fillBlanks } from "./quick.ts";
 import { type Draw, type Sending, str, whereOf } from "./sending.ts";
@@ -27,7 +27,7 @@ export function mountSave(app: Hono<AppEnv>, ctx: PackContext, d: { sending: Sen
     const r = filled.ok ? filled.req : typed;
     const refuse = (text: string) => draw(ctx, c, r, w, { flash: { tone: "warn", text }, ep: str(f.ep, 600) }, 400);
     if (!filled.ok) return refuse(filled.error.replace("nothing was sent", "nothing was saved"));
-    const root = repoRoot(codeDirOf(ctx.env), w.repo);
+    const root = rootOf(ctx, w.repo);
     if (!root) return refuse("Pick a repo (a checkout directly in your code folder) to save in.");
     if (!fileOk(w.file)) return refuse("The file is a plain name ending in .http (api.http).");
     if (!r.url) return refuse("A request needs a URL to be saved.");

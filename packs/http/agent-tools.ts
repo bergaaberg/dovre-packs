@@ -21,7 +21,7 @@ import type { PackContext, PackTool, ToolCall, ToolResult } from "dovre/packs/ty
 import { agentMayReach } from "./agent.ts";
 import { READS, whoOf, whoRuns } from "./board.ts";
 import { buildCatalog } from "./catalog.ts";
-import { codeDirOf, ENV_FILE, findSpec, listFiles, listStories, notCommitted, readStoryFile, repoAgentEnvs, repoRoot, STORY_RE, uncommitted } from "./files.ts";
+import { ENV_FILE, findSpec, listFiles, listStories, notCommitted, readStoryFile, repoAgentEnvs, rootOf, STORY_RE, uncommitted } from "./files.ts";
 import { masker, type Secret } from "./model.ts";
 import type { StepRun, StoryRun } from "./runner.ts";
 import { type createStories, defaultEnv, loadStory, plannedSteps } from "./stories-routes.ts";
@@ -76,10 +76,10 @@ export function createAgentTools(d: AgentToolDeps) {
   const turns = new Map<string, number>();
 
   /** The turn's checkout, or why there isn't one. */
-  const rootOf = (ctx: PackContext, call: ToolCall) => repoRoot(codeDirOf(ctx.env), call.repo);
+  const turnRoot = (ctx: PackContext, call: ToolCall) => rootOf(ctx, call.repo);
 
   async function catalog(ctx: PackContext, a: Record<string, unknown>, call: ToolCall): Promise<ToolResult> {
-    const root = rootOf(ctx, call);
+    const root = turnRoot(ctx, call);
     if (!root) return fail(`This turn's folder (${call.repo}) isn't a checkout directly in the code folder, so there's no catalog here.`);
     const envs = d.varsFor(ctx, { ...noWhere(), repo: call.repo }).envs;
     const env = typeof a.env === "string" && a.env ? str(a.env, 64) : defaultEnv(envs);
@@ -133,7 +133,7 @@ export function createAgentTools(d: AgentToolDeps) {
   }
 
   async function run(ctx: PackContext, a: Record<string, unknown>, call: ToolCall, listed: string[]): Promise<ToolResult> {
-    const root = rootOf(ctx, call);
+    const root = turnRoot(ctx, call);
     if (!root) return fail(`This turn's folder (${call.repo}) isn't a checkout directly in the code folder. Nothing was sent.`);
     const story = storyName(a.story);
     if (!STORY_RE.test(story)) return fail("A story is named by its file in .http/stories/ (checkout or checkout.story). Nothing was sent.");

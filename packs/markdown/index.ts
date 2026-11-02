@@ -12,7 +12,7 @@
  * never logged, stored or sent anywhere; `private` to Bino. Libraries are bundled with the pack and
  * served from Dovre: nothing is fetched from the network.
  */
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import type { Context } from "hono";
 import { html } from "hono/html";
 import type { AppEnv } from "dovre/env.ts";
@@ -63,8 +63,8 @@ function restOf(path: string, prefix: string): string | null {
 export function createMarkdownPack(): Pack {
   return {
     manifest: {
-      api: "1.6",
-      version: "1.0.0",
+      api: "1.7",
+      version: "1.1.0",
       id: "markdown",
       name: "Markdown",
       description: "GitHub-flavoured Markdown with math, mermaid and Graphviz diagrams: write with a live preview, export or print, and read the docs in your checkouts with their links checked.",
@@ -89,6 +89,18 @@ export function createMarkdownPack(): Pack {
     routes(app, ctx) {
       const files = () => ({ mermaid: ctx.file("mermaid.js"), katex: ctx.file("katex.js"), graphviz: ctx.file("graphviz.js") });
       const codeDir = () => ctx.codeDir ?? codeDirOf(ctx.env);
+      // Core's checkouts (API 1.7, narrowed to one in a pack session), else the code folder listed here.
+      const repos = () => (ctx.checkouts ? ctx.checkouts() : listRepos(codeDir()));
+      // Its real path, as repoRoot's: the docs' "nothing outside the checkout" checks compare real paths.
+      const rootOf = (repo: string) => {
+        if (!ctx.checkout) return repoRoot(codeDir(), repo);
+        const dir = ctx.checkout(repo);
+        try {
+          return dir ? realpathSync(dir) : null;
+        } catch {
+          return null;
+        }
+      };
       const page = (c: Context<AppEnv>, title: string, body: Parameters<typeof ctx.page>[1]["body"]) => ctx.page(c, { title, body, current: "/markdown" });
 
       const missing = async (c: Context<AppEnv>, why: string) => {
@@ -137,11 +149,11 @@ export function createMarkdownPack(): Pack {
       });
 
       // Docs in checkouts: local only.
-      app.get("/markdown/docs", (c) => (ctx.hosted ? page(c, "Docs", hostedDocsPage()) : page(c, "Docs", reposPage(listRepos(codeDir()), codeDir()))));
+      app.get("/markdown/docs", (c) => (ctx.hosted ? page(c, "Docs", hostedDocsPage()) : page(c, "Docs", reposPage(repos(), codeDir()))));
       app.get("/markdown/docs/:repo", async (c) => {
         if (ctx.hosted) return page(c, "Docs", hostedDocsPage());
         const repo = c.req.param("repo");
-        const root = repoRoot(codeDir(), repo);
+        const root = rootOf(repo);
         if (!root) return missing(c, "No such checkout.");
         const { files, more } = listDocs(root);
         return page(c, repo, docsPage(repo, files, more));
@@ -149,7 +161,7 @@ export function createMarkdownPack(): Pack {
       app.get("/markdown/docs/:repo/*", async (c) => {
         if (ctx.hosted) return page(c, "Docs", hostedDocsPage());
         const repo = c.req.param("repo");
-        const root = repoRoot(codeDir(), repo);
+        const root = rootOf(repo);
         const path = restOf(c.req.path, `/markdown/docs/${encodeURIComponent(repo)}/`);
         const got = root && path ? readDoc(root, path) : { ok: false as const, why: "No such checkout." };
         if (!got.ok) return missing(c, got.why);
@@ -172,7 +184,7 @@ export function createMarkdownPack(): Pack {
       app.get("/markdown/raw/:repo/*", (c) => {
         if (ctx.hosted) return c.notFound();
         const repo = c.req.param("repo");
-        const root = repoRoot(codeDir(), repo);
+        const root = rootOf(repo);
         const path = restOf(c.req.path, `/markdown/raw/${encodeURIComponent(repo)}/`);
         const img = root && path ? readImage(root, path) : null;
         if (!img) return c.notFound();

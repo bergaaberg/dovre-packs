@@ -13,6 +13,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import type { PackContext } from "dovre/packs/types.ts";
 import { agentEnvsOf, parseEnvs, parseHttp, type Envs, type Parsed } from "./model.ts";
 
 export const DIR = ".http";
@@ -41,6 +42,12 @@ export function repoRoot(codeDir: string, name: unknown): string | null {
   const st = lst(dir);
   return st?.isDirectory() && existsSync(join(dir, ".git")) ? dir : null;
 }
+
+/** The checkouts: core's (API 1.7, narrowed to one in a pack session), else the code folder listed here. */
+export const reposOf = (ctx: Pick<PackContext, "env" | "checkouts">): string[] => (ctx.checkouts ? ctx.checkouts() : listRepos(codeDirOf(ctx.env)));
+
+/** A checkout's folder by name: core's check (API 1.7), else repoRoot's. */
+export const rootOf = (ctx: Pick<PackContext, "env" | "checkout">, name: unknown): string | null => (ctx.checkout ? ctx.checkout(name) : repoRoot(codeDirOf(ctx.env), name));
 
 export function listRepos(codeDir: string): string[] {
   try {

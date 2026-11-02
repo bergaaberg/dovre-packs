@@ -101,9 +101,11 @@ export function createTopoPack(o: TopoDeps = {}): Pack {
   const of = (ctx: PackContext): TopoCatalog => {
     if (catalog) return catalog;
     const codeDir = ctx.hosted ? undefined : ctx.codeDir;
-    const scanner = o.scanner ?? (codeDir ? new TopoScanner(codeDir) : undefined);
+    // Core's checkouts (API 1.7, narrowed to one in a pack session), else the code folder listed here.
+    const names = () => (ctx.checkouts ? ctx.checkouts() : codeDir ? listRepos(codeDir) : []);
+    const scanner = o.scanner ?? (codeDir ? new TopoScanner(codeDir, ctx.checkouts ? { names: ctx.checkouts } : {}) : undefined);
     const forge = o.forge ?? new ForgeCatalog({ forge: () => ctx.forge() });
-    const checkouts = () => (codeDir ? listRepos(codeDir).filter((r) => r !== WORK) : []);
+    const checkouts = () => (codeDir ? names().filter((r) => r !== WORK) : []);
     return (catalog = new TopoCatalog({ scanner, forge, checkouts }));
   };
   /** Fresh forge and Cloudflare reads, then the page's region redrawn. The forge's is read again after a push to a main branch. */
@@ -117,8 +119,8 @@ export function createTopoPack(o: TopoDeps = {}): Pack {
   };
   return {
     manifest: {
-      api: "1.6",
-      version: "1.0.0",
+      api: "1.7",
+      version: "1.1.0",
       id: "topo",
       name: "Topo",
       description: "What each repo is, from its peak.yaml: tier, components, rules and docs, and which repos have none",

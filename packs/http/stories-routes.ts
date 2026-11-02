@@ -13,7 +13,7 @@ import type { PackContext } from "dovre/packs/types.ts";
 import { agentHref, MAX_ASK, storyAskPrompt } from "./agent.ts";
 import { noticedIn, pipsOf, uncovered, usesOf, whoOf } from "./board.ts";
 import { buildCatalog, endpointFor, endpointKey } from "./catalog.ts";
-import { codeDirOf, ENV_FILE, findSpec, hashOf, listFiles, listRepos, listStories, notCommitted, readFile, readStoryFile, repoAgentEnvs, repoRoot, STORY_RE, uncommitted } from "./files.ts";
+import { ENV_FILE, findSpec, hashOf, listFiles, listStories, notCommitted, readFile, readStoryFile, repoAgentEnvs, reposOf, rootOf, STORY_RE, uncommitted } from "./files.ts";
 import { masker, parseHttp, type Req } from "./model.ts";
 import type { QuickDeps } from "./quick-routes.ts";
 import { createLiveRuns, keepRun, keptRun, keptRuns, type Lane, newRun, type RunIo, runStory, runSummary, type StoryRun } from "./runner.ts";
@@ -289,7 +289,7 @@ export function createStories(d: StoriesDeps) {
   }
 
   async function renderStory(ctx: PackContext, c: Context<AppEnv>, o: { repo: string; story: string; env: string; flash?: string; status?: number }) {
-    const root = repoRoot(codeDirOf(ctx.env), o.repo);
+    const root = rootOf(ctx, o.repo);
     const w: Where = { ...noWhere(), env: o.env, repo: o.repo };
     let got: ReturnType<typeof loadStory> | { ok: false; error: string };
     try {
@@ -326,13 +326,12 @@ export function createStories(d: StoriesDeps) {
     app.get("/http/stories", async (c) => {
       const repo = str(c.req.query("repo"), 100);
       const show = SHOWS.find((v) => v === c.req.query("show")) ?? "all";
-      const codeDir = codeDirOf(ctx.env);
-      const root = repo ? repoRoot(codeDir, repo) : null;
+      const root = repo ? rootOf(ctx, repo) : null;
       const page = (body: Parameters<typeof storiesPage>[0]) => {
         c.header("Cache-Control", "no-store");
         return ctx.page(c, { title: "Stories", current: "/http", head: html`<meta name="u-topics" content="http">`, body: storiesPage(body) });
       };
-      const empty = { repos: listRepos(codeDir), repo, env: "", envs: [], show, counts: { setups: 0, cases: 0 }, stories: [], pipEnvs: [], gaps: [], noticed: [], setups: [], recent: [], now: d.now() };
+      const empty = { repos: reposOf(ctx), repo, env: "", envs: [], show, counts: { setups: 0, cases: 0 }, stories: [], pipEnvs: [], gaps: [], noticed: [], setups: [], recent: [], now: d.now() };
       if (!root) return page({ ...empty, ...(repo ? { repo: "", flash: "That repo isn't a checkout in your code folder." } : {}) });
       return page({ ...empty, show, ...(await board(ctx, repo, root, c.req.query("env"))) });
     });
@@ -341,7 +340,7 @@ export function createStories(d: StoriesDeps) {
     app.get("/http/stories/ask", (c) => {
       const repo = str(c.req.query("repo"), 100);
       const ask = str(c.req.query("ask"), MAX_ASK).trim();
-      const known = repo && repoRoot(codeDirOf(ctx.env), repo) ? repo : "";
+      const known = repo && rootOf(ctx, repo) ? repo : "";
       if (!ask) return c.redirect(storiesHref({ repo: known }), 303);
       return c.redirect(agentHref(known, storyAskPrompt(ask)), 303);
     });
@@ -353,7 +352,7 @@ export function createStories(d: StoriesDeps) {
       const f = await c.req.parseBody();
       const o = { repo: str(f.repo, 100), story: str(f.story, 80), env: str(f.env, 64) };
       const refuse = (flash: string, status = 400) => renderStory(ctx, c, { ...o, flash, status });
-      const root = repoRoot(codeDirOf(ctx.env), o.repo);
+      const root = rootOf(ctx, o.repo);
       if (!root) return refuse("That repo isn't a checkout in your code folder: nothing was sent.");
       if (!STORY_RE.test(o.story)) return refuse("A story is a lowercase name ending in .story: nothing was sent.");
       let got: ReturnType<typeof loadStory>;
