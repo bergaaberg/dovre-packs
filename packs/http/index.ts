@@ -16,7 +16,9 @@
  *    Settings → Writes). Both re-check the file first.
  *  - Agents (agent.ts): drafted prompts on core's /agents/new, and the `send` tool on Dovre's MCP
  *    server (Pack.tools): a running agent turn's GET or HEAD, only to this machine or HTTP_AGENT_HOSTS,
- *    secrets bound as for any send, the answer masked and cut short, in history, logged.
+ *    secrets bound as for any send, the answer masked and cut short, in history, logged. Its
+ *    `catalog` and `run` tools (agent-tools.ts) run a committed story, writes only where the env
+ *    file allows agents to, logged as `http.agentRun`.
  *  - Chaining (chain.ts): `{{login.response.body.token}}` takes a value from the response to the request
  *    named login: in a run, the one earlier in it; in the editor, its newest send in history. Masked
  *    values aren't reused, and the value meets the same host check and secret binding as typed text.
@@ -49,6 +51,7 @@ import { createResults, type Results } from "./cases.ts";
 import { blanksOfForm, fillBlanks } from "./quick.ts";
 import { createQuick } from "./quick-routes.ts";
 import { createStories } from "./stories-routes.ts";
+import { createAgentTools } from "./agent-tools.ts";
 import { quickHref, quickStyles } from "./quick-view.ts";
 import { storiesStyles } from "./stories-view.ts";
 import type { Child, Tone } from "dovre/ui/kit.ts";
@@ -180,6 +183,7 @@ export function createHttpPack(opts: CreateHttpPackOpts = {}): Pack & { history(
     start,
     wait: opts.wait,
   });
+  const agentTools = createAgentTools({ stories, secretsOf, varsFor });
 
   /** A repo's .http file and its requests, for a run. */
   function loadRun(ctx: PackContext, repo: string, file: string) {
@@ -318,6 +322,7 @@ export function createHttpPack(opts: CreateHttpPackOpts = {}): Pack & { history(
           },
           run: (a, c, call) => agentSend(c, a, call, listed),
         },
+        ...agentTools.tools(listed),
       ];
     },
 
@@ -328,7 +333,7 @@ export function createHttpPack(opts: CreateHttpPackOpts = {}): Pack & { history(
     about: (_ctx, path) => (path.startsWith("/http") ? "The HTTP client (requests and responses aren't shared)." : undefined),
 
     slots: () => ({
-      "actions.what": ({ kind }) => (kind === "http.send" ? "Sent an HTTP request" : kind === "http.run" ? "Ran HTTP requests as a test (a file, cases or a story)" : kind === "http.save" ? "Saved an HTTP request to a repo" : undefined),
+      "actions.what": ({ kind }) => (kind === "http.send" ? "Sent an HTTP request" : kind === "http.run" ? "Ran HTTP requests as a test (a file, cases or a story)" : kind === "http.agentRun" ? "An agent ran an HTTP story" : kind === "http.save" ? "Saved an HTTP request to a repo" : undefined),
       "span.actions": spanActions,
     }),
 

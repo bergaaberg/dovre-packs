@@ -7,6 +7,7 @@
  *  - saving .http files: new = one click, replace = Confirm, re-checked, traversal and symlinks refused
  */
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -1225,6 +1226,14 @@ test("stories: hostile titles, steps, file names and repos come out inert", asyn
 
 const STORY_SPEC = JSON.stringify({ openapi: "3.0.0", info: { title: "Shop" }, paths: { "/orders": { post: {} }, "/customers": { post: {} }, "/refunds": { post: {} } } });
 const LOOK = "# Look around\nstep: List\n  GET {{baseUrl}}/orders\n";
+
+/** Commits everything in a test checkout (made a real git repo the first time). */
+function commitAll(dir: string) {
+  const git = (...args: string[]) => execFileSync("git", ["-C", dir, "-c", "user.email=t@example.com", "-c", "user.name=t", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", ...args], { stdio: "pipe" });
+  git("init", "-q");
+  git("add", "-A");
+  git("commit", "-qm", "x", "--allow-empty");
+}
 const runHash = (page: string, story: string) => new RegExp(`name="story" value="${story.replace(".", "\\.")}"><input type="hidden" name="env" value="dev"><input type="hidden" name="hash" value="([0-9a-f]+)"`).exec(page)![1]!;
 
 test("stories overview: who can run each, Run from the table, pips and the failing filter, gaps and setups; nothing sent on a GET", async () => {
@@ -1234,6 +1243,9 @@ test("stories overview: who can run each, Run from the table, pips and the faili
   storyRepo(m);
   writeFileSync(join(m.code, "shop", ".http", "stories", "look.story"), LOOK);
   writeFileSync(join(m.code, "shop", "openapi.yaml"), STORY_SPEC);
+  // Before it's committed, an agent can't run even the story that only reads.
+  assert.match(await (await m.get("/http/stories?repo=shop")).text(), /agent can run once committed/);
+  commitAll(join(m.code, "shop"));
 
   const page = await (await m.get("/http/stories?repo=shop")).text();
   assert.equal(fake.calls.length, 0);
@@ -1280,10 +1292,107 @@ test("stories overview: who can run each, Run from the table, pips and the faili
   writeFileSync(join(m.code, "shop", ".http", "http-client.env.json"), '{"dev": {"$agent": "writes"}}');
   const marked = await (await m.get("/http/stories?repo=shop")).text();
   assert.doesNotMatch(marked, /needs your click/);
+  assert.equal(marked.match(/agent can run once committed/g)?.length, 2, "the env file isn't committed yet");
+  commitAll(join(m.code, "shop"));
+  assert.equal((await (await m.get("/http/stories?repo=shop")).text()).match(/agent can run<\/span>/g)?.length, 2);
   // No environment: Run still posts env="" for the stories that can.
   const none = await (await m.get("/http/stories?repo=shop&env=")).text();
   assert.match(none, /<option value="">No environment<\/option>/);
   assert.match(none, /name="env" value=""/);
+});
+
+test("agent tools: catalog says who may run each story; run needs committed files, writes only where the env allows, listed hosts only; capped and logged", async () => {
+  const fake = fakeFetch(shopApi);
+  const m = mounted({ fetchFn: fake.fetchFn });
+  storyRepo(m);
+  const shop = join(m.code, "shop");
+  // Not a git checkout yet: git can't vouch for anything.
+  assert.match((await m.pack.tools!(m.ctx)[2]!.run({ story: "cancel" }, m.ctx, { run: "turn-0", repo: "shop", cwd: shop }) as { text: string }).text, /^git couldn't tell what's committed \(not a git repository/);
+  commitAll(shop);
+  writeFileSync(join(shop, ".http", "stories", "look.story"), LOOK);
+  writeFileSync(join(shop, "openapi.yaml"), STORY_SPEC);
+  const tools = m.pack.tools!(m.ctx);
+  assert.deepEqual(tools.map((t) => t.name), ["send", "catalog", "run"]);
+  const tool = (name: string) => tools.find((t) => t.name === name)!;
+  const call = { run: "turn-1", repo: "shop", cwd: shop };
+  const catalog = (a: Record<string, unknown> = {}) => tool("catalog").run(a, m.ctx, call) as Promise<{ text: string; error?: boolean }>;
+  const run = (a: Record<string, unknown>, c = call) => tool("run").run(a, m.ctx, c) as Promise<{ text: string; error?: boolean }>;
+
+  // Not committed: the catalog says so, and a run is refused.
+  let cat = await catalog();
+  assert.match(cat.text, /Environments: dev; agents may write in: none/);
+  assert.match(cat.text, /look\.story "Look around" · 1 steps \(GET\) · you can run it once these are committed: stories\/look\.story/);
+  let out = await run({ story: "look" });
+  assert.equal(out.error, true);
+  assert.match(out.text, /only what's committed, and these aren't: \.http\/stories\/look\.story/);
+  commitAll(shop);
+
+  cat = await catalog();
+  assert.match(cat.text, /GET \/orders .*cases: orders\.http#Order|POST \/orders .*cases: orders\.http#Order/);
+  assert.match(cat.text, /look\.story "Look around" · 1 steps \(GET\) · you can run it/);
+  assert.match(cat.text, /cancel\.story "A customer orders and cancels" · given one customer · .* · it writes \(POST, DELETE\) and dev isn't open to agents' writes: only I run it/);
+  assert.match(cat.text, /one-customer\.story/);
+  assert.match((await catalog({ env: "nope" })).text, /There's no environment nope/);
+
+  for (const [a, re, c] of [
+    [{ story: "cancel", env: "dev" }, /sends POST, DELETE, and dev isn't open to agents' writes/, call],
+    [{ story: "gone" }, /There's no \.http\/stories\/gone\.story/, call],
+    [{ story: "../x" }, /A story is named by its file/, call],
+    [{ story: "look", env: "prod" }, /There's no environment prod/, call],
+    [{ story: "look" }, /isn't a checkout/, { ...call, repo: "../etc" }],
+  ] as const) {
+    out = await run(a, c);
+    assert.equal(out.error, true, JSON.stringify(a));
+    assert.match(out.text, re);
+  }
+  assert.equal(fake.calls.length, 0, "nothing refused was sent");
+
+  // dev's host isn't this machine or listed: each send is held back once its URL is filled in.
+  out = await run({ story: "look.story", env: "dev" });
+  assert.equal(out.error, true);
+  assert.match(out.text, /FAILED at step 1/);
+  assert.match(out.text, /Not sent: an agent may only send to this machine \(localhost\) or the hosts in HTTP_AGENT_HOSTS, and api\.example\.com isn't one/);
+  assert.equal(fake.calls.length, 0);
+
+  // Listed: it runs, by an agent, logged as http.agentRun.
+  const m2ctx = testContext({ ...m.ctx, env: { ...m.ctx.env, HTTP_AGENT_HOSTS: "api.example.com" } });
+  const listedRun = (a: Record<string, unknown>, c = call) => m.pack.tools!(m2ctx).find((t) => t.name === "run")!.run(a, m2ctx, c) as Promise<{ text: string; error?: boolean }>;
+  out = await listedRun({ story: "look", env: "dev" });
+  assert.equal(out.error, false, out.text);
+  assert.match(out.text, /^look\.story \("Look around"\) in dev: passed, all 1 steps/);
+  assert.match(out.text, /1\. passed · List — GET https:\/\/api\.example\.com\/orders → 201 · \d+ ms\n   ok: status below 400/);
+  assert.match(out.text, /\/http\/story\/run\/[0-9a-f-]{36}/);
+  assert.deepEqual(fake.calls.map((c) => `${c.init.method} ${c.url}`), ["GET https://api.example.com/orders"]);
+  assert.equal(m.pack.history().list()[0]!.by, "agent");
+  for (let i = 0; i < 50 && !(await m.actions()).some((a) => a.kind === "http.agentRun" && a.ok); i++) await tick();
+  assert.deepEqual({ ...(await m.actions()).find((a) => a.kind === "http.agentRun" && a.ok)! }, { kind: "http.agentRun", target: "shop/.http/stories/look.story", detail: "all 1 passed · dev", ok: 1, error: null });
+
+  // An env marked for agents' writes, once committed, runs the writing story too.
+  writeFileSync(join(shop, ".http", "http-client.env.json"), '{"dev": {"$agent": "writes"}}');
+  out = await listedRun({ story: "cancel", env: "dev" });
+  assert.match(out.text, /these aren't: \.http\/http-client\.env\.json/);
+  commitAll(shop);
+  assert.match((await catalog()).text, /agents may write in: dev/);
+  out = await listedRun({ story: "cancel", env: "dev" });
+  assert.equal(out.error, false, out.text);
+  assert.match(out.text, /passed, all 4 steps/);
+  assert.match(out.text, /setup "one customer" · Customer — POST https:\/\/api\.example\.com\/customers → 201/);
+  assert.match(out.text, /took order\.id/);
+  assert.match(out.text, /always · Clean up — DELETE https:\/\/api\.example\.com\/customers\/c7 → 200/);
+  assert.equal(fake.calls.length, 5);
+
+  // An ignored file is on disk but in no commit.
+  writeFileSync(join(shop, ".gitignore"), ".http/stories/hidden.story\n");
+  writeFileSync(join(shop, ".http", "stories", "hidden.story"), LOOK);
+  commitAll(shop);
+  out = await listedRun({ story: "hidden", env: "dev" });
+  assert.match(out.text, /these aren't: \.http\/stories\/hidden\.story/);
+
+  // At most 10 runs a turn (3 so far in turn-1: a run whose sends were held back counts).
+  for (let i = 0; i < 7; i++) assert.equal((await listedRun({ story: "look", env: "dev" })).error, false);
+  out = await listedRun({ story: "look", env: "dev" });
+  assert.match(out.text, /run 10 stories already/);
+  assert.equal((await listedRun({ story: "look", env: "dev" }, { ...call, run: "turn-2" })).error, false, "a new turn starts again");
 });
 
 test("stories overview: an ask is an agent session with the prompt drafted; empty goes back; a repo that isn't a checkout is left out", async () => {

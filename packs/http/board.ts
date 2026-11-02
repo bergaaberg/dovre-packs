@@ -15,6 +15,10 @@ export const READS = ["GET", "HEAD"];
 /** Who can run a story whose sends use these methods: an agent, or me (a click). A method we can't tell counts as a write. */
 export const whoRuns = (methods: string[], agentWrites: boolean): "agent" | "you" => (agentWrites || methods.every((m) => READS.includes(m)) ? "agent" : "you");
 
+/** Who may run a story, as an agent's run checks it: an agent, an agent once the files it reads are committed, or only me. */
+export type Who = "agent" | "commit" | "you";
+export const whoOf = (methods: string[], agentWrites: boolean, committed: boolean): Who => (whoRuns(methods, agentWrites) === "you" ? "you" : committed ? "agent" : "commit");
+
 /** `${name}` values a step's text uses, once each, in order. */
 export function usesOf(text: string): string[] {
   const out: string[] = [];

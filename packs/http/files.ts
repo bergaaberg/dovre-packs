@@ -8,6 +8,7 @@
  * repo's own. A write re-checks the file's hash against the one it was opened with, writes a temp
  * file and renames it over (or creates the file exclusively), and never writes a secret's value.
  */
+import { execFile } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
@@ -179,7 +180,7 @@ function envText(root: string | null): string | undefined {
 /** The repo's environments, {} when there's no env file or it's unsafe. */
 export const repoEnvs = (root: string | null): Envs => parseEnvs(envText(root));
 
-/** The repo's environments marked `"$agent": "writes"`, as the working tree has them (H-06 reads HEAD before a run). */
+/** The repo's environments marked `"$agent": "writes"`, as the working tree has them (an agent's run first checks the env file is committed: `uncommitted`). */
 export const repoAgentEnvs = (root: string | null): Set<string> => agentEnvsOf(envText(root));
 
 export type Written = { ok: true; created: boolean; hash: string } | { ok: false; error: string };
@@ -259,3 +260,25 @@ export function findSpec(root: string): { name: string; text: string } | undefin
   }
   return undefined;
 }
+
+/**
+ * What under `.http/` differs from the checkout's HEAD (these paths, or all of it with "."):
+ * changed, staged, untracked or ignored (an ignored file is on disk but in no commit), as git
+ * names them from the repo's root (`.http/stories/x.story`; a folder ends in /). An agent's run
+ * reads only committed files, so what it runs is what I can review in git (`notCommitted`).
+ */
+export function uncommitted(root: string, paths: string[]): Promise<{ ok: true; changed: string[] } | { ok: false; error: string }> {
+  const rel = [...new Set(paths)].filter((p) => /^[\w .\/-]{1,200}$/.test(p) && !p.split("/").includes("..")).map((p) => `${DIR}/${p}`);
+  if (!rel.length) return Promise.resolve({ ok: true, changed: [] });
+  return new Promise((resolve) => {
+    execFile("git", ["-C", root, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=matching", "--", ...rel], { timeout: 10_000, maxBuffer: 1_000_000 }, (err, out, stderr) => {
+      if (err) return resolve({ ok: false, error: `git couldn't tell what's committed (${String(stderr).trim().split("\n", 1)[0]!.replace(/^fatal: /, "").slice(0, 160) || "it didn't answer"})` });
+      // -z: "XY path\0" each, and a rename's old path as an entry of its own (left out: it isn't on disk).
+      const changed = String(out).split("\0").filter((e) => /^[ MADRCU?!]{2} ./.test(e)).map((e) => e.slice(3));
+      resolve({ ok: true, changed });
+    });
+  });
+}
+
+/** Which of these paths (under .http/) `uncommitted` found changed: itself, or a folder it's in. */
+export const notCommitted = (changed: string[], paths: string[]) => paths.filter((p) => changed.some((c) => c === `${DIR}/${p}` || (c.endsWith("/") && `${DIR}/${p}`.startsWith(c))));

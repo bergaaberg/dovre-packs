@@ -11,9 +11,9 @@ import { logAction } from "dovre/actions/deploys.ts";
 import type { AppEnv } from "dovre/env.ts";
 import type { PackContext } from "dovre/packs/types.ts";
 import { agentHref, MAX_ASK, storyAskPrompt } from "./agent.ts";
-import { noticedIn, pipsOf, uncovered, usesOf, whoRuns } from "./board.ts";
+import { noticedIn, pipsOf, uncovered, usesOf, whoOf } from "./board.ts";
 import { buildCatalog, endpointFor, endpointKey } from "./catalog.ts";
-import { codeDirOf, findSpec, hashOf, listFiles, listRepos, listStories, readFile, readStoryFile, repoAgentEnvs, repoRoot, STORY_RE } from "./files.ts";
+import { codeDirOf, ENV_FILE, findSpec, hashOf, listFiles, listRepos, listStories, notCommitted, readFile, readStoryFile, repoAgentEnvs, repoRoot, STORY_RE, uncommitted } from "./files.ts";
 import { masker, parseHttp, type Req } from "./model.ts";
 import type { QuickDeps } from "./quick-routes.ts";
 import { createLiveRuns, keepRun, keptRun, keptRuns, type Lane, newRun, type RunIo, runStory, runSummary, type StoryRun } from "./runner.ts";
@@ -32,8 +32,13 @@ export function loadStory(root: string, story: string, env: string) {
   const f = readStoryFile(root, "stories", story);
   if (!f) return { ok: false as const, error: `There's no .http/stories/${story}.` };
   const read = [`stories/${f.name}:${f.hash}`];
+  // The paths it read, under .http/ (an agent's run checks they're committed).
+  const paths = [`stories/${f.name}`];
   const parsed = parseStory(f.text);
-  const planned = parsed.errors.length ? undefined : planStory(parsed.story, env, setupLoader(root, (file, hash) => read.push(`setups/${file}:${hash}`)));
+  const planned = parsed.errors.length ? undefined : planStory(parsed.story, env, setupLoader(root, (file, hash) => {
+    read.push(`setups/${file}:${hash}`);
+    paths.push(`setups/${file}`);
+  }));
   const plan = planned?.ok ? planned.plan : undefined;
   const cases = new Map<string, Found>();
   const files = new Map<string, { text: string; hash: string } | { error: string }>();
@@ -42,6 +47,7 @@ export function loadStory(root: string, story: string, env: string) {
     if (s.ask.t !== "case" || cases.has(caseKeyOf(s.ask.ref))) continue;
     const { file, name } = s.ask.ref;
     if (!files.has(file)) {
+      paths.push(file);
       try {
         const got = readFile(root, file);
         files.set(file, got);
@@ -72,14 +78,15 @@ export function loadStory(root: string, story: string, env: string) {
     problem: planned && !planned.ok ? planned.error : undefined,
     cases,
     hash: hashOf(read.sort().join("\n")),
+    paths,
   };
 }
-type Loaded = Extract<ReturnType<typeof loadStory>, { ok: true }>;
+export type Loaded = Extract<ReturnType<typeof loadStory>, { ok: true }>;
 
 const secs = (ms: number) => (ms % 1000 === 0 ? `${ms / 1000} s` : `${ms} ms`);
 
 /** The plan's steps as the story page's rail draws them, and the methods its sends use ("?" for a case that can't be read). */
-function plannedSteps(plan: Plan, cases: Loaded["cases"]): { steps: RailStep[]; methods: string[] } {
+export function plannedSteps(plan: Plan, cases: Loaded["cases"]): { steps: RailStep[]; methods: string[] } {
   const taken: string[] = [];
   const methods: string[] = [];
   const send = (s: Send, lane: Lane, from: string): RailStep => {
@@ -126,7 +133,7 @@ function ownRequests(story: Story): { method: string; url: string }[] {
 }
 
 /** An environment to show first when none is asked for: one named local or dev, else the first. */
-const defaultEnv = (envs: string[]) => envs.find((e) => /^(local|dev)/i.test(e)) ?? envs[0] ?? "";
+export const defaultEnv = (envs: string[]) => envs.find((e) => /^(local|dev)/i.test(e)) ?? envs[0] ?? "";
 const SHOWS: Show[] = ["all", "failing", "agent"];
 
 /** What a setup does, in a line: its first steps. */
@@ -151,8 +158,12 @@ export function createStories(d: StoriesDeps) {
   const live = createLiveRuns();
   const wait = d.wait ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
 
-  /** One run of a loaded story, in the background; it's kept and logged when done. */
-  function start(ctx: PackContext, repo: string, env: string, got: Loaded & { plan: Plan }): StoryRun {
+  /**
+   * One run of a loaded story, in the background; it's kept and logged when done (`done`).
+   * `agent`: an agent's run. Each send is held to `guard` once its URL is filled in (a refusal is
+   * "Not sent"), shows in history as by an agent, and the run is logged as `http.agentRun`.
+   */
+  function start(ctx: PackContext, repo: string, env: string, got: Loaded & { plan: Plan }, agent?: { guard(method: string, url: string): string | undefined }): { run: StoryRun; done: Promise<void> } {
     const run = newRun({ id: crypto.randomUUID(), at: d.now(), repo, story: got.name, title: got.story.title, env }, got.plan);
     live.add(run);
     const publish = () => ctx.publish(["http", `http-story:${run.id}`]);
@@ -164,7 +175,9 @@ export function createStories(d: StoriesDeps) {
         const p = d.prepare(ctx, req, w, refs);
         if (!p.ok) return { ok: false, error: `Not sent: ${p.error}` };
         const url = originPath(mask(p.url));
-        const { s, settled } = d.start(ctx, req, w, p);
+        const refused = agent?.guard(req.method, p.url);
+        if (refused) return { ok: false, error: `Not sent: ${refused}`, url };
+        const { s, settled } = d.start(ctx, req, w, p, agent ? "agent" : undefined);
         await settled;
         if (s.state !== "done" || !s.resp) return { ok: false, error: `Nothing came back: ${s.error ?? "it failed"}.`, sentId: s.id, url };
         return { ok: true, sentId: s.id, resp: s.resp, url };
@@ -173,7 +186,7 @@ export function createStories(d: StoriesDeps) {
       now: d.now,
       publish,
     };
-    void runStory(run, got.plan, io)
+    const done = runStory(run, got.plan, io)
       .catch((e) => {
         run.state = "failed";
         ctx.log(`http: a story run stopped: ${String((e as Error)?.message ?? e).slice(0, 200)}`);
@@ -181,11 +194,11 @@ export function createStories(d: StoriesDeps) {
       .then(async () => {
         await keepRun(ctx.db, run);
         const bad = run.state !== "passed";
-        await logAction(ctx.db, { kind: "http.run", target: `${repo}/.http/stories/${got.name}`.slice(0, 300), detail: `${runSummary(run)}${env ? ` · ${env}` : ""}`.slice(0, 200), ok: !bad, error: bad ? runSummary(run).slice(0, 200) : undefined });
+        await logAction(ctx.db, { kind: agent ? "http.agentRun" : "http.run", target: `${repo}/.http/stories/${got.name}`.slice(0, 300), detail: `${runSummary(run)}${env ? ` · ${env}` : ""}`.slice(0, 200), ok: !bad, error: bad ? runSummary(run).slice(0, 200) : undefined });
       })
       .catch((e) => ctx.log(`http: couldn't keep a story run: ${String((e as Error)?.message ?? e).slice(0, 200)}`))
       .finally(publish);
-    return run;
+    return { run, done };
   }
 
   /** A run by id: the live one, else the kept one. */
@@ -212,6 +225,9 @@ export function createStories(d: StoriesDeps) {
     const envs = d.varsFor(ctx, { ...noWhere(), repo }).envs;
     const env = asked === undefined ? defaultEnv(envs) : asked.slice(0, 64);
     const agentEnvs = repoAgentEnvs(root);
+    const git = await uncommitted(root, ["."]);
+    // Committed as an agent's run checks it (git that can't tell counts as not committed).
+    const committed = (paths: string[]) => git.ok && !notCommitted(git.changed, [...paths, ENV_FILE]).length;
     const runs = await repoRuns(ctx, repo);
     const files = listFiles(root);
     const catalog = buildCatalog(findSpec(root)?.text, files.filter((f) => !f.error));
@@ -236,7 +252,7 @@ export function createStories(d: StoriesDeps) {
         const row = { ...base, title: got.story.title, given: got.story.given };
         if (got.errors.length) return { ...row, error: `line ${got.errors[0]!.line}: ${got.errors[0]!.message}` };
         if (!got.plan) return { ...row, problem: got.problem ?? "It can't run here." };
-        return { ...row, who: whoRuns(plannedSteps(got.plan, got.cases).methods, agentEnvs.has(env)), hash: got.hash };
+        return { ...row, who: whoOf(plannedSteps(got.plan, got.cases).methods, agentEnvs.has(env), committed(got.paths)), hash: got.hash };
       } catch (e) {
         return { ...base, title: "", given: [], error: (e as Error).message };
       }
@@ -266,6 +282,12 @@ export function createStories(d: StoriesDeps) {
     };
   }
 
+  /** Who may run a story now, as an agent's run checks it. */
+  async function whoNow(root: string, methods: string[], env: string, paths: string[]) {
+    const git = await uncommitted(root, [...paths, ENV_FILE]);
+    return whoOf(methods, repoAgentEnvs(root).has(env), git.ok && !notCommitted(git.changed, [...paths, ENV_FILE]).length);
+  }
+
   async function renderStory(ctx: PackContext, c: Context<AppEnv>, o: { repo: string; story: string; env: string; flash?: string; status?: number }) {
     const root = repoRoot(codeDirOf(ctx.env), o.repo);
     const w: Where = { ...noWhere(), env: o.env, repo: o.repo };
@@ -291,7 +313,7 @@ export function createStories(d: StoriesDeps) {
       flash: o.flash,
       steps: planned?.steps ?? [],
       hash: got.ok ? got.hash : "",
-      ...(planned && root ? { who: whoRuns(planned.methods, repoAgentEnvs(root).has(o.env)) } : {}),
+      ...(planned && root && got.ok ? { who: await whoNow(root, planned.methods, o.env, got.paths) } : {}),
       runs: o.repo && STORY_RE.test(o.story) ? await runsOf(ctx, o.repo, o.story) : [],
       now: d.now(),
     });
@@ -343,7 +365,7 @@ export function createStories(d: StoriesDeps) {
       if (!got.ok) return refuse(`${got.error} Nothing was sent.`);
       if (got.errors.length || !got.plan) return refuse(`${got.problem ?? "It has lines that can't be read."} Nothing was sent.`);
       if (got.hash !== str(f.hash, 64)) return refuse("The story or a file it reads changed since it was shown: nothing was sent. This is what's there now.", 409);
-      const run = start(ctx, o.repo, o.env, { ...got, plan: got.plan });
+      const { run } = start(ctx, o.repo, o.env, { ...got, plan: got.plan });
       return c.redirect(storyRunHref(run.id), 303);
     });
 
@@ -356,5 +378,5 @@ export function createStories(d: StoriesDeps) {
     });
   }
 
-  return { mount, live, runsOf };
+  return { mount, live, runsOf, start, board };
 }

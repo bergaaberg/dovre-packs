@@ -13,7 +13,7 @@ import { html } from "hono/html";
 import { safeUrl } from "dovre/pages/parts.ts";
 import { type Child, Dot, Empty, Notice, PageHeader, Panel, Tabs, type Tone } from "dovre/ui/kit.ts";
 import { agentHref, coverPrompt, MAX_ASK, noticedPrompt, storyAskPrompt, storyDebugPrompt } from "./agent.ts";
-import { failedAt, type Noticed, type Pip, usesOf } from "./board.ts";
+import { failedAt, type Noticed, type Pip, usesOf, type Who } from "./board.ts";
 import type { Endpoint } from "./catalog.ts";
 import type { Lane, StepState, StoryRun } from "./runner.ts";
 import { runSummary } from "./runner.ts";
@@ -51,10 +51,12 @@ export function ago(at: number, now: number): string {
   return d === 1 ? "yesterday" : `${d} days ago`;
 }
 
-const whoChip = (who: "agent" | "you") =>
+const whoChip = (who: Who) =>
   who === "agent"
     ? html`<span class="http-who agent" title="Its sends only read, or the environment lets an agent write">agent can run</span>`
-    : html`<span class="http-who you" title="It writes: it runs when you click Run">needs your click</span>`;
+    : who === "commit"
+      ? html`<span class="http-who" title="An agent runs only committed files: the story, its setups, its cases' files and the env file">agent can run once committed</span>`
+      : html`<span class="http-who you" title="It writes: it runs when you click Run">needs your click</span>`;
 
 const PIP: Record<Pip, string> = { passed: "http-pip-ok", failed: "http-pip-bad", running: "http-pip-run", none: "" };
 
@@ -201,7 +203,7 @@ export type StoryOpts = {
   flash?: string;
   steps: RailStep[];
   hash: string;
-  who?: "agent" | "you";
+  who?: Who;
   runs: StoryRun[];
   now: number;
 };
@@ -269,7 +271,7 @@ export type StoryRow = {
   error?: string;
   /** It can't run in this environment. */
   problem?: string;
-  who?: "agent" | "you";
+  who?: Who;
   /** Set when it can run here: what Run posts. */
   hash?: string;
   /** Its newest run, any environment. */
@@ -315,7 +317,7 @@ function askPanel(o: BoardOpts): Html {
     title: "Ask for a story, cases or a setup",
     children: html`<form method="get" action="/http/stories/ask" class="http-ask">${hidden({ repo: o.repo })}<label class="field"><span class="label">What should it do?</span><input name="ask" maxlength="${MAX_ASK}" required autocomplete="off" placeholder="A customer who orders twice in a day gets 10% off the second order"></label><div class="buttons"><button type="submit">Draft with an agent</button></div></form>
 ${ideas.length ? html`<p class="http-ideas"><span class="t3">Ideas from this repo:</span>${ideas.map((i) => html`<a href="${agentHref(o.repo, storyAskPrompt(i))}">${i}</a>`)}</p>` : ""}
-<p class="hint">It opens an agent session with the prompt filled in: you read it and press Start. The agent reads the handlers and the spec and writes <code>.story</code> files on a branch, which you review like code. A story that writes runs only when you click Run, unless its environment says <code>"$agent": "writes"</code>.</p>`,
+<p class="hint">It opens an agent session with the prompt filled in: you read it and press Start. The agent reads the handlers and the spec and writes <code>.story</code> files on a branch, which you review like code. It can run a story once it's committed (Dovre's <code>http_run</code> tool, to this machine and the hosts in HTTP_AGENT_HOSTS); a story that writes runs only when you click Run, unless its environment says <code>"$agent": "writes"</code>.</p>`,
   });
 }
 
