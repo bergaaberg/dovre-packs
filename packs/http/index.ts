@@ -82,8 +82,8 @@ export function createHttpPack(opts: CreateHttpPackOpts = {}): Pack & { history(
     // The JSON tools' tree and diff classes, for a response body shown as a tree or compared.
     styles: jsonStyles + quickStyles + storiesStyles,
     manifest: {
-      api: "1.6",
-      version: "1.0.0",
+      api: "1.7",
+      version: "1.1.0",
       id: "http",
       name: "HTTP client",
       description: "Send HTTP requests from this machine; saved per repo as .http files, with environments and secrets bound to hosts.",

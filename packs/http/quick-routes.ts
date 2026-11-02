@@ -18,7 +18,7 @@ import { buildCatalog, type Endpoint, endpointFor, endpointKey } from "./catalog
 import type { Refs } from "./chain.ts";
 import { runChecks } from "./checks.ts";
 import { previous } from "./compare.ts";
-import { codeDirOf, FILE_RE, findSpec, listFiles, listRepos, readFile, repoRoot, writeFile } from "./files.ts";
+import { FILE_RE, findSpec, listFiles, readFile, reposOf, rootOf, writeFile } from "./files.ts";
 import { blankReq, MAX_NAME, masker, parseHttp, placeholdSecrets, type prepare, type Req, type Secret, secretIn, serializeReq, withReq } from "./model.ts";
 import { specDoc } from "./openapi.ts";
 import { askPrompt, blanksOf, fillBlanks, parseLine } from "./quick.ts";
@@ -78,7 +78,7 @@ export function createQuick(d: QuickDeps) {
 
   /** A repo's catalog, its files and spec, and an endpoint's cases (each with its file's hash). */
   function load(ctx: PackContext, repo: string) {
-    const root = repo ? repoRoot(codeDirOf(ctx.env), repo) : null;
+    const root = repo ? rootOf(ctx, repo) : null;
     if (!root) return undefined;
     const files = listFiles(root);
     const spec = findSpec(root);
@@ -90,7 +90,7 @@ export function createQuick(d: QuickDeps) {
 
   async function render(ctx: PackContext, c: Context<AppEnv>, o: RenderOpts) {
     const w: Where = { ...o.where };
-    const repos = listRepos(codeDirOf(ctx.env));
+    const repos = reposOf(ctx);
     const got = load(ctx, w.repo);
     let flash = o.flash;
     if (w.repo && !got) flash ??= { tone: "warn", text: "That repo isn't a checkout in your code folder." };
@@ -248,7 +248,7 @@ export function createQuick(d: QuickDeps) {
       const refuse = (text: string) => render(ctx, c, { where: w, ep: b.ep, flash: { tone: "warn", text }, status: 400 });
       const s = d.history.get(str(f.id, 64));
       if (!s) return refuse("That send isn't in this session's history any more: nothing was saved.");
-      const root = repoRoot(codeDirOf(ctx.env), w.repo);
+      const root = rootOf(ctx, w.repo);
       if (!root) return refuse("Pick a repo (a checkout directly in your code folder) to keep it in.");
       const file = str(f.file, 85).trim();
       if (!fileOk(file)) return refuse("The file is a plain name ending in .http (orders.http).");

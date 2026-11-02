@@ -53,8 +53,12 @@ export class TopoScanner {
   private ttlMs: number;
   private now: () => number;
 
-  constructor(codeDir: string, opts: { ttlMs?: number; now?: () => number } = {}) {
+  /** Which folders to read; default: everything in the code folder. A pack session gives its one checkout. */
+  private names?: () => string[];
+
+  constructor(codeDir: string, opts: { ttlMs?: number; now?: () => number; names?: () => string[] } = {}) {
     this.codeDir = codeDir;
+    this.names = opts.names;
     this.ttlMs = opts.ttlMs ?? 30_000;
     this.now = opts.now ?? Date.now;
   }
@@ -74,7 +78,7 @@ export class TopoScanner {
 
     let names: string[];
     try {
-      names = existsSync(this.codeDir) ? readdirSync(this.codeDir) : [];
+      names = this.names ? this.names() : existsSync(this.codeDir) ? readdirSync(this.codeDir) : [];
     } catch {
       return;
     }

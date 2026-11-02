@@ -20,7 +20,7 @@ import { HOSTILE as H, assertInert, packApp, testContext } from "dovre/packs/tes
 function codeDir(manifests: Record<string, string>): string {
   const dir = mkdtempSync(join(tmpdir(), "dovre-topo-"));
   for (const [name, yaml] of Object.entries(manifests)) {
-    mkdirSync(join(dir, name));
+    mkdirSync(join(dir, name, ".git"), { recursive: true });
     writeFileSync(join(dir, name, "peak.yaml"), yaml);
   }
   return dir;

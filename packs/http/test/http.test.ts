@@ -16,7 +16,8 @@ import { Hono } from "hono";
 import { html } from "hono/html";
 import { openDb } from "dovre/db.ts";
 import { testContext } from "dovre/packs/testing.ts";
-import { PACK_API, type PackContext } from "dovre/packs/types.ts";
+import { apiGap } from "dovre/packs/api.ts";
+import type { PackContext } from "dovre/packs/types.ts";
 import { STYLE } from "dovre/ui/style.ts";
 import { readdirSync } from "node:fs";
 import { createHttpPack, httpPack } from "../index.ts";
@@ -96,7 +97,7 @@ function inert(page: string) {
 }
 
 test("manifest: PACK_API, local only, private, its settings; off when hosted", () => {
-  assert.equal(httpPack.manifest.api, PACK_API);
+  assert.equal(apiGap(httpPack.manifest.api), null, "runs on this core");
   assert.equal(httpPack.manifest.id, "http");
   assert.equal(httpPack.manifest.execution, "local-only");
   assert.equal(httpPack.manifest.private, true);

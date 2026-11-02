@@ -11,7 +11,7 @@ import type { AppEnv } from "dovre/env.ts";
 import type { PackContext } from "dovre/packs/types.ts";
 import type { Child, Tone } from "dovre/ui/kit.ts";
 import type { Refs } from "./chain.ts";
-import { codeDirOf, readFile, repoEnvs, repoRoot } from "./files.ts";
+import { readFile, repoEnvs, rootOf } from "./files.ts";
 import { CREDENTIAL_HEADERS, envNames, masker, parseEnvs, parseHttp, parseSecrets, placeholdSecrets, prepare, type Req, varsOf } from "./model.ts";
 import { failure, type History, type Sent, sendOnce } from "./send.ts";
 import { fileOk, type Where } from "./view.ts";
@@ -33,7 +33,7 @@ export function createSending(o: { history: History; now: () => number; fetchFn?
   /** The variables for a request: the repo's and this instance's environments, then the file's own. */
   function varsFor(ctx: PackContext, w: Where): { vars: Record<string, string>; envs: string[] } {
     const mine = parseEnvs(ctx.env.HTTP_ENVS);
-    const root = w.repo ? repoRoot(codeDirOf(ctx.env), w.repo) : null;
+    const root = w.repo ? rootOf(ctx, w.repo) : null;
     const theirs = repoEnvs(root);
     let fileVars: Record<string, string> = {};
     if (root && w.opened && fileOk(w.opened)) {
