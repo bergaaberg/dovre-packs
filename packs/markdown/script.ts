@@ -9,8 +9,9 @@
  * - Draws `dot` blocks with Graphviz (Pack.files, an ES module with its WebAssembly inside), and
  *   keeps only shapes and text of the SVG it makes (cleanSvg): no links, pictures or scripts.
  * - Draws the same blocks in core's Markdown on any page (Bino's answers, PR and issue bodies):
- *   a closed fence core marks `mermaid`, `dot` or `graphviz` (`.md pre.code[data-lang]`), with the
- *   libraries' paths from `dovreFiles`. A diagram is kept by its source, so a live region swapped
+ *   a closed fence core marks `mermaid`, `dot`, `graphviz` or `math` (`.md pre.code[data-lang]`),
+ *   and inline math (`.md code[data-tex]`), with the libraries' paths from `dovreFiles`. What's
+ *   drawn is kept by its source, so a live region swapped
  *   in again (an answer being written) shows it at once instead of drawing it anew.
  * - The editor: a preview rendered on the server as I type, a file opened from this computer
  *   (read here, never uploaded as a file), and Export with the math and diagrams drawn in.
@@ -25,18 +26,20 @@ const load = (src) => {
   return loads.get(src);
 };
 const KATEX = { output: "mathml", throwOnError: false, trust: false, strict: "ignore", maxSize: 50, maxExpand: 500 };
-const tex = async (doc) => {
-  const els = [...doc.querySelectorAll(".md-tex")];
-  const src = doc.dataset.katex;
+const tex = async (doc, src) => {
+  const els = [...doc.querySelectorAll(".md-tex:not([data-drawn])")].filter((el) => !reuse("tex", el));
   if (!els.length || !src) return;
+  for (const el of els) el.dataset.drawn = "1";
   try { await load(src); } catch { return; }
   const k = globalThis.katex;
   if (!k) return;
   for (const el of els) {
     const display = el.hasAttribute("data-display");
     const out = document.createElement(display ? "div" : "span");
+    if (display && !el.closest("[data-md-doc]")) out.className = "md-tex-block";
     try {
       k.render(el.textContent || "", out, { ...KATEX, displayMode: display });
+      keep(keyOf("tex", el), out);
       el.replaceWith(out);
     } catch {}
   }
@@ -44,8 +47,8 @@ const tex = async (doc) => {
 let n = 0;
 // Drawn diagrams by their source, to put back at once when the same block comes again.
 const drawn = new Map();
-const keyOf = (kind, pre) => kind + (kind === "mermaid" && dark() ? ":dark" : "") + "\\n" + (pre.textContent || "");
-const keep = (key, div) => { if (drawn.size >= 50) drawn.delete(drawn.keys().next().value); drawn.set(key, div.cloneNode(true)); };
+const keyOf = (kind, pre) => kind + (kind === "mermaid" && dark() ? ":dark" : "") + (kind === "tex" && pre.hasAttribute("data-display") ? ":display" : "") + "\\n" + (pre.textContent || "");
+const keep = (key, div) => { if (drawn.size >= 200) drawn.delete(drawn.keys().next().value); drawn.set(key, div.cloneNode(true)); };
 const reuse = (kind, pre) => {
   const div = drawn.get(keyOf(kind, pre));
   if (!div) return false;
@@ -53,7 +56,7 @@ const reuse = (kind, pre) => {
   return true;
 };
 const dark = () => /dark/.test(getComputedStyle(document.documentElement).colorScheme || "");
-const draw = (doc) => Promise.all([tex(doc), diagrams(doc, doc.dataset.mermaid), dots(doc, doc.dataset.graphviz)]);
+const draw = (doc) => Promise.all([tex(doc, doc.dataset.katex), diagrams(doc, doc.dataset.mermaid), dots(doc, doc.dataset.graphviz)]);
 // Graphviz's SVG holds only shapes and text: no links (URL/href), pictures (image), scripts,
 // foreign objects, styles or event handlers, and fills only from its own gradients.
 const SVG_KEEP = new Set(["svg", "g", "path", "polygon", "polyline", "ellipse", "circle", "rect", "line", "text", "tspan", "title", "defs", "lineargradient", "radialgradient", "stop"]);
@@ -131,24 +134,28 @@ const drawAll = () => Promise.all([...document.querySelectorAll("[data-md-doc]")
 /** Core's Markdown (src/ui/markdown.ts in dovre): its closed fences carry their language. */
 const CORE = `
 const FILES = typeof dovreFiles === "object" && dovreFiles ? dovreFiles : {};
-const KINDS = { mermaid: "md-mermaid", dot: "md-dot", graphviz: "md-dot" };
+const KINDS = { mermaid: "md-mermaid", dot: "md-dot", graphviz: "md-dot", math: "md-tex" };
 const mark = (root) => {
-  for (const pre of root.querySelectorAll(".md pre.code[data-lang]:not(.md-mermaid):not(.md-dot)")) {
+  for (const pre of root.querySelectorAll(".md pre.code[data-lang]:not(.md-mermaid):not(.md-dot):not(.md-tex)")) {
     const kind = KINDS[pre.dataset.lang];
-    if (kind && !pre.closest("[data-md-doc]")) pre.classList.add(kind);
+    if (!kind || pre.closest("[data-md-doc]")) continue;
+    pre.classList.add(kind);
+    if (kind === "md-tex") pre.setAttribute("data-display", "");
   }
+  for (const code of root.querySelectorAll(".md code[data-tex]:not(.md-tex)")) if (!code.closest("[data-md-doc]")) code.classList.add("md-tex");
 };
+const PENDING = ".md pre.md-mermaid:not([data-drawn]), .md pre.md-dot:not([data-drawn]), .md .md-tex:not([data-drawn])";
 const drawCore = () => {
   mark(document);
-  if (!document.querySelector(".md pre.md-mermaid:not([data-drawn]), .md pre.md-dot:not([data-drawn])")) return;
-  for (const md of document.querySelectorAll(".md")) if (!md.closest("[data-md-doc]")) { diagrams(md, FILES["mermaid.js"]); dots(md, FILES["graphviz.js"]); }
+  if (!document.querySelector(PENDING)) return;
+  for (const md of document.querySelectorAll(".md")) if (!md.closest("[data-md-doc]")) { tex(md, FILES["katex.js"]); diagrams(md, FILES["mermaid.js"]); dots(md, FILES["graphviz.js"]); }
 };
 // A live region about to be swapped in: put back what was drawn before it shows.
 document.addEventListener("dovre:swap", (e) => {
   const to = e.detail && e.detail.to;
   if (!to || !to.querySelectorAll) return;
   mark(to);
-  for (const pre of to.querySelectorAll(".md pre.md-mermaid, .md pre.md-dot")) reuse(pre.classList.contains("md-mermaid") ? "mermaid" : "dot", pre);
+  for (const el of to.querySelectorAll(".md pre.md-mermaid, .md pre.md-dot, .md .md-tex")) reuse(el.classList.contains("md-mermaid") ? "mermaid" : el.classList.contains("md-dot") ? "dot" : "tex", el);
 });
 let frame = 0;
 new MutationObserver(() => { cancelAnimationFrame(frame); frame = requestAnimationFrame(drawCore); }).observe(document.body, { childList: true, subtree: true });
