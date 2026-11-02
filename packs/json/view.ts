@@ -17,11 +17,12 @@ import {
   relative,
 } from "./tools.ts";
 
-export type Tool = "format" | "query" | "diff" | "convert" | "decode";
+export type Tool = "format" | "query" | "jq" | "diff" | "convert" | "decode";
 
 const TOOLS: { id: Tool; label: string }[] = [
   { id: "format", label: "Format & tree" },
   { id: "query", label: "Query" },
+  { id: "jq", label: "jq" },
   { id: "diff", label: "Diff" },
   { id: "convert", label: "Convert" },
   { id: "decode", label: "Decode" },
@@ -192,10 +193,12 @@ export function diffPage(s: DiffState): Html {
 
 // ── Convert ──────────────────────────────────────────────────────────────────
 
-export type ConvertOp = "yaml" | "json" | "ts" | "schema";
+export type ConvertOp = "yaml" | "json" | "toml" | "fromtoml" | "ts" | "schema";
 export const CONVERT_OPS: [ConvertOp, string][] = [
   ["yaml", "JSON → YAML"],
   ["json", "YAML → JSON"],
+  ["toml", "JSON → TOML"],
+  ["fromtoml", "TOML → JSON"],
   ["ts", "JSON → TypeScript"],
   ["schema", "JSON → JSON Schema"],
 ];
@@ -204,13 +207,13 @@ export type ConvertState = {
   input: string;
   op?: ConvertOp;
   root?: string;
-  result?: { out: string } | { json: Extract<Parsed, { ok: false }> } | { yaml: { error: string; line: number; column: number } };
+  result?: { out: string } | { json: Extract<Parsed, { ok: false }> } | { yaml: { error: string; line: number; column: number } } | { toml: { error: string; line: number; column: number } } | { error: string };
 };
 
 export function convertPage(s: ConvertState): Html {
   const op = s.op ?? "yaml";
   const form = html`<form method="post" action="/json/convert" class="query" data-ctrl-enter>
-${textarea("input", "JSON or YAML", s.input, { placeholder: '{"paste": "your JSON here"}  or  paste: your YAML here', min: 10 })}
+${textarea("input", "JSON, YAML or TOML", s.input, { placeholder: '{"paste": "your JSON here"}  or  paste: your YAML here  or  paste = "your TOML here"', min: 10 })}
 <div class="fields"><label class="field"><span class="label">Root type name</span><input type="text" name="root" value="${s.root ?? "Root"}" maxlength="60" spellcheck="false" autocomplete="off"><span class="hint">For TypeScript.</span></label></div>
 <div class="buttons">${CONVERT_OPS.map(([v, l]) => html`<button type="submit" name="op" value="${v}"${v === op ? ' class="primary"' : ""}>${l}</button>`)}</div>
 <p class="t3 sm">Types and schemas are guessed from this one sample: a key missing from some items is optional, and items of one array are merged.</p>${PRIVATE}</form>`;
@@ -219,12 +222,14 @@ ${textarea("input", "JSON or YAML", s.input, { placeholder: '{"paste": "your JSO
   let out: Html | "" = "";
   if (r && "out" in r) out = Panel({ title: label, children: html`<pre class="code" data-copy>${r.out}</pre>` });
   else if (r && "json" in r) out = Panel({ title: label, children: parseError(s.input, r.json) });
-  else if (r && "yaml" in r)
+  else if (r && ("yaml" in r || "toml" in r)) {
+    const [what, e] = "yaml" in r ? ["YAML", r.yaml] : ["TOML", r.toml];
     out = Panel({
       title: label,
-      children: html`${Notice({ tone: "bad", children: html`<strong>Input isn't valid YAML</strong>: ${r.yaml.error} — line ${r.yaml.line}, column ${r.yaml.column}.` })}<pre class="code">${excerpt(s.input, r.yaml.line, r.yaml.column)}</pre>`,
+      children: html`${Notice({ tone: "bad", children: html`<strong>Input isn't valid ${what}</strong>: ${e.error} — line ${e.line}, column ${e.column}.` })}<pre class="code">${excerpt(s.input, e.line, e.column)}</pre>`,
     });
-  return html`${header("convert", "JSON to YAML and back; types and a schema from a sample.")}${Panel({ children: form })}${out}`;
+  } else if (r && "error" in r) out = Panel({ title: label, children: Notice({ tone: "bad", children: r.error }) });
+  return html`${header("convert", "JSON to YAML or TOML and back; types and a schema from a sample.")}${Panel({ children: form })}${out}`;
 }
 
 // ── Decode ───────────────────────────────────────────────────────────────────
@@ -290,6 +295,13 @@ ${PRIVATE}</form>`;
 }
 
 export const styles = `
+.jq-filter { font-family: var(--mono); width: 100%; }
+.jq-err pre.jq-stderr { margin: 0; white-space: pre-wrap; background: transparent; border: 0; padding: 0; }
+.jq-err { margin-bottom: 8px; }
+.json-dock textarea { width: 100%; font: var(--fs-xs)/1.5 var(--mono); resize: vertical; }
+.json-dock .buttons { flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.json-dock .buttons button { font-size: var(--fs-xs); padding: 3px 8px; }
+pre.json-dock-out { max-height: 50vh; overflow: auto; font-size: var(--fs-xs); }
 .json-tree { list-style: none; margin: 0; padding: 0 0 0 1.1rem; font: var(--fs-xs)/1.6 var(--mono); }
 .json-tree.json-root, .json-tree.json-matches { padding-left: 0; }
 .json-node { margin: 0; padding: 1px 0; overflow-wrap: anywhere; }
@@ -306,3 +318,61 @@ export const styles = `
 .json-side { padding-left: .5rem; }
 .json-node > pre.code { margin: .3rem 0 0; }
 `;
+
+// ── jq ───────────────────────────────────────────────────────────────────────
+
+export const JQ_FLAGS: [string, string][] = [
+  ["c", "Compact (-c)"],
+  ["r", "Raw strings (-r)"],
+  ["s", "Slurp (-s)"],
+  ["S", "Sort keys (-S)"],
+  ["n", "Null input (-n)"],
+];
+
+/** Where the page's script finds jq: the worker, jq's runtime and its WebAssembly (hashed paths). */
+export type JqAt = { worker: string; core?: string; wasm?: string };
+
+/**
+ * jq runs in the browser (the pack's script, in a Web Worker it stops after 5 s): what's pasted
+ * never reaches the server for it. Without the script, posting says so instead of running anything.
+ */
+export function jqPage(s: { input: string; filter: string; at: JqAt; posted?: boolean }): Html {
+  const ready = !!(s.at.core && s.at.wasm);
+  const form = html`<form method="post" action="/json/jq" class="query" data-ctrl-enter${ready ? html` data-jq data-worker="${s.at.worker}" data-core="${s.at.core}" data-wasm="${s.at.wasm}"` : ""}>
+${textarea("input", "JSON", s.input, { placeholder: '{"paste": "your JSON here"}', min: 10 })}
+<label class="field"><span class="label">Filter</span><input type="text" name="filter" value="${s.filter}" maxlength="4000" spellcheck="false" autocomplete="off" class="jq-filter" placeholder=".items[] | select(.ok) | .name"></label>
+<div class="fields">${JQ_FLAGS.map(([f, l]) => html`<label class="check"><input type="checkbox" name="f-${f}" value="1"> ${l}</label>`)}</div>
+<div class="buttons"><button type="submit" class="primary">Run</button></div>
+<p class="t3 sm">Real jq (1.8), as WebAssembly in this browser: what's pasted doesn't leave it. A filter still running after 5 seconds is stopped.</p></form>`;
+  const out = html`<div data-jq-out hidden>${Panel({
+    title: "Output",
+    meta: html`<span data-jq-meta></span>`,
+    children: html`<div class="jq-err" data-jq-err hidden>${Notice({ tone: "bad", children: html`<pre class="code jq-stderr" data-jq-stderr></pre>` })}</div><pre class="code" data-copy data-jq-stdout></pre>`,
+  })}</div>`;
+  const note = !ready
+    ? Notice({ tone: "warn", children: "jq isn't served here (its files didn't load); the JSONPath query works on the Query tab." })
+    : s.posted
+      ? Notice({ tone: "warn", children: "jq runs in your browser, and this page's script didn't run: nothing was sent to jq. Turn on scripts, or use the JSONPath query on the Query tab." })
+      : "";
+  return html`${header("jq", "Filter and reshape JSON with jq.")}${note}${Panel({ children: form })}${out}`;
+}
+
+// ── Dock ─────────────────────────────────────────────────────────────────────
+
+export type DockOp = "format" | "minify" | "jwt" | "b64d" | "epoch";
+export const DOCK_OPS: [DockOp, string][] = [
+  ["format", "Format"],
+  ["minify", "Minify"],
+  ["jwt", "JWT"],
+  ["b64d", "Base64"],
+  ["epoch", "Epoch"],
+];
+
+/** The dock beside Bino's: paste, one click, the answer below. The full tools are a link away. */
+export function dockView(s: { input: string; op?: DockOp; out?: string; error?: string }): Html {
+  const form = html`<form method="post" action="/json/dock" class="json-dock" data-ctrl-enter>
+<textarea name="input" rows="7" spellcheck="false" autocomplete="off" aria-label="JSON, a JWT, base64 or a Unix time" placeholder="Paste JSON, a JWT, base64 or a Unix time">${s.input}</textarea>
+<div class="buttons">${DOCK_OPS.map(([v, l]) => html`<button type="submit" name="op" value="${v}"${v === (s.op ?? "format") ? ' class="primary"' : ""}>${l}</button>`)}</div></form>`;
+  const out = s.error ? Notice({ tone: "bad", children: s.error }) : s.out !== undefined ? html`<pre class="code json-dock-out" data-copy>${s.out}</pre>` : "";
+  return html`${form}${out}<p class="t3 sm"><a href="/json" target="_top">All JSON tools</a> · nothing pasted is kept or sent.</p>`;
+}

@@ -1,9 +1,57 @@
 /**
- * JSON tools (`json`): conversions. JSON ↔ YAML (the `yaml` package), and a shape inferred from a
+ * JSON tools (`json`): conversions. JSON ↔ YAML (the `yaml` package), JSON ↔ TOML (`smol-toml`), and a shape inferred from a
  * sample, written out as TypeScript types or a JSON Schema. Pure, like tools.ts.
  */
 import { parseDocument, stringify, YAMLParseError } from "yaml";
+import { parse as parseToml, stringify as stringifyToml, TomlError } from "smol-toml";
 import { type Json, MAX_DEPTH, MAX_INPUT, lineCol } from "./tools.ts";
+
+// ── TOML ─────────────────────────────────────────────────────────────────────
+
+export type FromToml = FromYaml;
+
+/** TOML to a JSON value: dates become their ISO text; `__proto__` keys and integers JSON can't hold are refused. */
+export function fromToml(text: string): FromToml {
+  if (text.length > MAX_INPUT) return { ok: false, error: `Too long: ${text.length} characters (${MAX_INPUT} at most)`, line: 1, column: 1 };
+  try {
+    const v = parseToml(text, { maxDepth: MAX_DEPTH, unsafeKeyBehaviour: "throw" });
+    return { ok: true, value: JSON.parse(JSON.stringify(v)) as Json };
+  } catch (e) {
+    if (e instanceof TomlError) return { ok: false, error: e.message.split("\n")[0]!.replace(/^Invalid TOML document: /, "").slice(0, 200), line: e.line, column: e.column };
+    return { ok: false, error: String((e as Error)?.message ?? e).split("\n")[0]!.slice(0, 200), line: 1, column: 1 };
+  }
+}
+
+/** Where the first null is (`$.a[2]`): TOML has none. */
+function nullAt(v: Json, path = "$"): string | undefined {
+  if (v === null) return path;
+  if (Array.isArray(v)) {
+    for (let i = 0; i < v.length; i++) {
+      const at = nullAt(v[i]!, `${path}[${i}]`);
+      if (at) return at;
+    }
+  } else if (typeof v === "object") {
+    for (const [k, x] of Object.entries(v)) {
+      const at = nullAt(x, /^[A-Za-z_$][\w$]*$/.test(k) ? `${path}.${k}` : `${path}[${JSON.stringify(k)}]`);
+      if (at) return at;
+    }
+  }
+  return undefined;
+}
+
+export type ToToml = { ok: true; out: string } | { ok: false; error: string };
+
+/** A JSON object as TOML. TOML has no null and its document is always a table. */
+export function toToml(v: Json): ToToml {
+  if (v === null || typeof v !== "object" || Array.isArray(v)) return { ok: false, error: "A TOML document is a table: the JSON must be an object." };
+  const at = nullAt(v);
+  if (at) return { ok: false, error: `TOML has no null: ${at} is null.` };
+  try {
+    return { ok: true, out: stringifyToml(v, { maxDepth: MAX_DEPTH }) };
+  } catch (e) {
+    return { ok: false, error: String((e as Error)?.message ?? e).split("\n")[0]!.slice(0, 200) };
+  }
+}
 
 // ── YAML ─────────────────────────────────────────────────────────────────────
 
