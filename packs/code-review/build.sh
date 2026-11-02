@@ -3,8 +3,8 @@
 # - vendor/: web-tree-sitter (its runtime .wasm and ES module) and one grammar .wasm plus its
 #   highlight queries per language, from the npm packages pinned below (npm checks each tarball
 #   against the registry's integrity hash). All MIT; their licences are copied beside them.
-# - gen.ts: the first 16 hex digits of each .wasm's SHA-256 (core's WasmFile), the queries, the
-#   runtime and engine.js as strings (the Worker can't read files), so served pages match the tests.
+# - gen.ts: the first 16 hex digits of each .wasm's and of web-tree-sitter.js's SHA-256 (core's
+#   WasmFile and Pack.files), and the queries and engine.js as strings (the Worker can't read files).
 # Everything it writes is committed: installing or testing the pack needs neither npm nor network.
 set -eu
 cd "$(dirname "$0")"
@@ -17,7 +17,8 @@ fetch() { # <package@version> <dir name>
 }
 fetch web-tree-sitter@0.27.1 runtime
 cp "$work/runtime/package/web-tree-sitter.wasm" vendor/runtime.wasm
-cp "$work/runtime/package/web-tree-sitter.js" vendor/web-tree-sitter.js
+# Without its source map comment: the map isn't shipped.
+sed '/^\/\/# sourceMappingURL=/d' "$work/runtime/package/web-tree-sitter.js" > vendor/web-tree-sitter.js
 fetch tree-sitter-javascript@0.25.0 javascript
 cp "$work/javascript/package/tree-sitter-javascript.wasm" vendor/javascript.wasm
 cat "$work/javascript/package/queries/highlights.scm" > vendor/javascript.scm

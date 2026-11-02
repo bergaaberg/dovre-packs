@@ -1,17 +1,17 @@
 /**
  * Markdown (`markdown`) rendering: GitHub-flavoured Markdown on the server (markdown-it), plus
- * task lists, alerts (`> [!NOTE]`), footnotes, front matter as a table, math as MathML (KaTeX, no
- * fonts or styles needed) and `mermaid` blocks left for the browser (the pack's script draws them).
+ * task lists, alerts (`> [!NOTE]`), footnotes and front matter as a table. Math and `mermaid` blocks
+ * are left as their source for the browser: the pack's script draws them (KaTeX as MathML, and
+ * mermaid), each loaded only where a document needs it, so neither is in the Worker bundle.
  *
  * The source is hostile. Raw HTML in it is shown as text (`html: false`), so the only markup in the
- * output is what markdown-it and KaTeX write, with every piece of text escaped. Links go only to
+ * output is what markdown-it writes, with every piece of text escaped. Links go only to
  * http(s), mailto and the document's own headings; anything else (a relative path, `javascript:`)
  * is plain text, unless the caller resolves it (a doc in a checkout links to its neighbours).
  * Images are links: pages may load images only from Dovre itself, never from where a document says.
  */
 import MarkdownIt, { type MarkdownIt as Md, type StateBlock, type StateInline, type Token } from "markdown-it";
 import footnote from "markdown-it-footnote";
-import katex from "katex";
 import { parse as parseYaml } from "yaml";
 
 /** Characters at most per document. */
@@ -26,7 +26,7 @@ export type RenderOptions = {
 
 export type Heading = { level: number; text: string; id: string };
 export type Rendered = {
-  /** Markup built only by markdown-it and KaTeX from escaped text: safe to put on a page as it is. */
+  /** Markup built only by markdown-it from escaped text: safe to put on a page as it is. */
   html: string;
   /** Front matter: key and value as text, or the block as written when it isn't a map. */
   front?: { pairs: [string, string][] } | { text: string };
@@ -49,8 +49,10 @@ export function slug(text: string): string {
     .replace(/\s/g, "-");
 }
 
-function math(src: string, display: boolean): string {
-  return katex.renderToString(src, { output: "mathml", displayMode: display, throwOnError: false, trust: false, strict: "ignore", maxSize: 50, maxExpand: 500 });
+/** A formula as its TeX, for the browser to draw (script.ts): code, so it reads as such without script. */
+function math(md: Md, src: string, display: boolean): string {
+  const tex = md.utils.escapeHtml(src);
+  return display ? `<div class="md-math"><pre class="md-tex" data-display>${tex}</pre></div>\n` : `<code class="md-tex">${tex}</code>`;
 }
 
 /** `$…$` and `$`…`$` (GitHub's two inline forms). */
@@ -149,14 +151,14 @@ function build(opts: RenderOptions, out: { broken: string[]; headings: Heading[]
   md.renderer.rules.footnote_anchor_name = (...a) => ID_PREFIX + anchor(...a);
   md.inline.ruler.after("escape", "math_inline", mathInline);
   md.block.ruler.after("blockquote", "math_block", mathBlock, { alt: ["paragraph", "reference", "blockquote", "list"] });
-  md.renderer.rules.math_inline = (tokens, i) => (out.math++, math(tokens[i]!.content, false));
-  md.renderer.rules.math_block = (tokens, i) => (out.math++, `<div class="md-math">${math(tokens[i]!.content, true)}</div>\n`);
+  md.renderer.rules.math_inline = (tokens, i) => (out.math++, math(md, tokens[i]!.content, false));
+  md.renderer.rules.math_block = (tokens, i) => (out.math++, math(md, tokens[i]!.content, true));
 
   const fence = md.renderer.rules.fence!;
   md.renderer.rules.fence = (tokens, i, o, env, self) => {
     const t = tokens[i]!;
     const lang = t.info.trim().split(/\s+/)[0]!.toLowerCase();
-    if (lang === "math") return (out.math++, `<div class="md-math">${math(t.content, true)}</div>\n`);
+    if (lang === "math") return (out.math++, math(md, t.content, true));
     if (lang === "mermaid") return (out.mermaid++, `<pre class="md-mermaid">${md.utils.escapeHtml(t.content)}</pre>\n`);
     return fence(tokens, i, o, env, self);
   };

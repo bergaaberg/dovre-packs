@@ -4078,4 +4078,3 @@ export {
   Tree,
   TreeCursor
 };
-//# sourceMappingURL=web-tree-sitter.js.map

@@ -1,7 +1,7 @@
 /**
  * Markdown (`markdown`) views. A document's rendered markup is put on the page with raw(): it's
- * built only by markdown-it (raw HTML off) and KaTeX from escaped text (render.ts, and the
- * hostile-input tests). Everything else goes through `html` escaping.
+ * built only by markdown-it (raw HTML off) from escaped text (render.ts, and the hostile-input
+ * tests). Everything else goes through `html` escaping.
  */
 import { html, raw } from "hono/html";
 import { Empty, KeyValues, Notice, PageHeader, Panel, Tabs, type Html } from "dovre/ui/kit.ts";
@@ -16,9 +16,14 @@ function header(current: Tab, sub: string, hosted: boolean, title = "Markdown") 
   return PageHeader({ title, sub, tabs: Tabs({ label: "Markdown", items }) });
 }
 
-/** The rendered document, with mermaid's file named so the pack's script can draw diagrams. */
-export function body(r: Rendered, mermaidSrc: string | undefined): Html {
-  return html`<div class="md-body" data-md-doc${mermaidSrc ? html` data-mermaid="${mermaidSrc}"` : ""}>${front(r)}${raw(r.html)}</div>`;
+/** Where the browser libraries are (Pack.files), so the pack's script can draw diagrams and math. */
+export type DocFiles = { mermaid?: string; katex?: string };
+
+const docAttrs = (f: DocFiles | undefined) => html`${f?.mermaid ? html` data-mermaid="${f.mermaid}"` : ""}${f?.katex ? html` data-katex="${f.katex}"` : ""}`;
+
+/** The rendered document, with the libraries' files named so the pack's script can draw it. */
+export function body(r: Rendered, files: DocFiles | undefined): Html {
+  return html`<div class="md-body" data-md-doc${docAttrs(files)}>${front(r)}${raw(r.html)}</div>`;
 }
 
 function front(r: Rendered): Html | "" {
@@ -29,7 +34,7 @@ function front(r: Rendered): Html | "" {
 
 const PLACEHOLDER = "# A title\n\nSome **bold** text, a [link](https://example.com), and math: $e^{i\\pi} + 1 = 0$.\n\n```mermaid\ngraph LR; Write --> Preview --> Export\n```";
 
-export type WriteState = { src: string; rendered?: Rendered; mermaidSrc?: string; hosted: boolean; from?: string };
+export type WriteState = { src: string; rendered?: Rendered; files?: DocFiles; hosted: boolean; from?: string };
 
 export function writePage(s: WriteState): Html {
   const r = s.rendered;
@@ -40,13 +45,13 @@ export function writePage(s: WriteState): Html {
 <div class="buttons"><button type="submit" class="primary">Preview</button><button type="submit" formaction="/markdown/export" data-md-export>Export HTML</button><button type="submit" formaction="/markdown/print" formtarget="_blank">Print or PDF</button></div>
 <p class="t3 sm">Rendered on this Dovre's server as you type: nothing is sent elsewhere, logged or kept. Raw HTML shows as text; images show only from a checkout's own files.</p>
 </form>`;
-  const preview = html`<div class="md-preview" data-md-preview>${r ? body(r, s.mermaidSrc) : html`<div class="md-body" data-md-doc${s.mermaidSrc ? html` data-mermaid="${s.mermaidSrc}"` : ""}><p class="t3">The preview shows here.</p></div>`}</div>`;
+  const preview = html`<div class="md-preview" data-md-preview>${r ? body(r, s.files) : html`<div class="md-body" data-md-doc${docAttrs(s.files)}><p class="t3">The preview shows here.</p></div>`}</div>`;
   return html`${header("write", "GitHub-flavoured Markdown with math and mermaid diagrams: write, preview, export.", s.hosted)}<div class="md-split">${Panel({ children: form })}${Panel({ title: "Preview", children: preview })}</div>`;
 }
 
 /** The live preview's answer: the rendered document alone. */
-export function previewFragment(r: Rendered, mermaidSrc: string | undefined): Html {
-  return body(r, mermaidSrc);
+export function previewFragment(r: Rendered, files: DocFiles | undefined): Html {
+  return body(r, files);
 }
 
 export function hostedDocsPage(): Html {
@@ -67,7 +72,7 @@ export function docsPage(repo: string, files: string[], more: boolean): Html {
   return html`${header("docs", `Markdown in ${repo}`, false, repo)}${Panel({ title: "Docs", meta: `${files.length}${more ? "+" : ""}`, children: list })}`;
 }
 
-export function docPage(o: { repo: string; path: string; rendered: Rendered; mermaidSrc?: string; src: string }): Html {
+export function docPage(o: { repo: string; path: string; rendered: Rendered; files?: DocFiles; src: string }): Html {
   const r = o.rendered;
   const crumbs = html`<p class="t3 sm"><a href="/markdown/docs">Checkouts</a> / <a href="/markdown/docs/${encodeURIComponent(o.repo)}">${o.repo}</a> / ${o.path}</p>`;
   const outline = r.headings.filter((h) => h.level <= 3);
@@ -82,7 +87,7 @@ export function docPage(o: { repo: string; path: string; rendered: Rendered; mer
   }${Panel({
     children: html`<form method="post" action="/markdown" class="md-copy"><input type="hidden" name="from" value="${o.repo}/${o.path}"><textarea name="src" hidden>${o.src}</textarea><button type="submit">Edit a copy</button></form><p class="t3 sm">The copy is yours to change and export; the file stays as it is.</p>`,
   })}`;
-  return html`${header("docs", o.path, false, o.repo)}${crumbs}<div class="md-doc">${Panel({ children: body(r, o.mermaidSrc) })}<div class="md-side">${side}</div></div>`;
+  return html`${header("docs", o.path, false, o.repo)}${crumbs}<div class="md-doc">${Panel({ children: body(r, o.files) })}<div class="md-side">${side}</div></div>`;
 }
 
 export function notFound(why: string): Html {
@@ -107,16 +112,16 @@ li.md-task-item { list-style: none; } li.md-task-item .md-task { margin: 0 .3em 
 .md-alert { border-left-color: var(--accent); } .md-alert-title { font-weight: 600; color: var(--accent); }
 .md-alert-warning { border-left-color: #9a6700; } .md-alert-warning .md-alert-title { color: #9a6700; }
 .md-alert-caution { border-left-color: #cf222e; } .md-alert-caution .md-alert-title { color: #cf222e; }
-.md-math { overflow-x: auto; margin: 1em 0; } .md-broken { text-decoration: line-through wavy; }
+.md-math { overflow-x: auto; margin: 1em 0; } .md-math pre.md-tex { margin: 0; } .md-broken { text-decoration: line-through wavy; }
 .md-diagram { margin: 1em 0; text-align: center; } .md-diagram svg { max-width: 100%; height: auto; }
 .md-front { margin-bottom: 1.5em; font-size: 90%; color: var(--ink-3); }
 @media print { article { max-width: none; padding: 0; } pre { white-space: pre-wrap; } a { color: inherit; } }
 `;
 
 /** A standalone document: Export downloads it; Print opens it and prints once diagrams are drawn. */
-export function standalone(o: { title: string; rendered: Rendered; scripts?: string[]; mermaidSrc?: string }): string {
+export function standalone(o: { title: string; rendered: Rendered; scripts?: string[]; files?: DocFiles }): string {
   const scripts = (o.scripts ?? []).map((s) => html`<script src="${s}" defer></script>`);
-  return `<!doctype html>${html`<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${o.title}</title><style>${raw(DOC_CSS)}</style>${scripts}</head><body><article>${body(o.rendered, o.mermaidSrc)}</article></body></html>`}`;
+  return `<!doctype html>${html`<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${o.title}</title><style>${raw(DOC_CSS)}</style>${scripts}</head><body><article>${body(o.rendered, o.files)}</article></body></html>`}`;
 }
 
 /** The title of a document: its first heading, else what's given. */

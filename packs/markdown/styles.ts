@@ -40,6 +40,7 @@ export const styles = `
 .md-body .md-alert-caution { border-left-color: var(--bad); }
 .md-body .md-alert-caution .md-alert-title { color: var(--bad); }
 .md-body .md-math { overflow-x: auto; margin: .8em 0; }
+.md-body .md-math pre.md-tex { margin: 0; }
 .md-body .md-broken { text-decoration: line-through wavy var(--bad); }
 .md-body .md-nolink { border-bottom: 1px dotted var(--ink-3); }
 .md-body .md-img { font-size: var(--fs-s); }
