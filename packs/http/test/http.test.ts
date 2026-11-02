@@ -165,6 +165,11 @@ test("send: one click, out from here with no redirects followed, the response in
   assert.ok(m.published.some((t) => t.includes(`http-sent:${s.id}`)));
   // Raw view.
   assert.ok((await (await m.get(`${at}?view=raw`)).text()).includes("{&quot;echoed&quot;"));
+  // No editor here: Open takes the request back to the Quick view, a case from a file by its link.
+  assert.ok(!page.includes('action="/http/save"'));
+  assert.match(page, /<form method="post" action="\/http\/open" class="inline">/);
+  const fromFile = await landed(m.get, sentPath(await m.post("/http/send", send({ url: "https://api.example.com/x", repo: "shop", opened: "c.http", n: "0", env: "dev" }))));
+  assert.match(fromFile, /href="\/http\?repo=shop&amp;env=dev&amp;file=c.http&amp;n=0">Open it in the client/);
   // An unknown id goes home.
   assert.equal((await m.get("/http/r/nope")).status, 303);
 });
@@ -623,127 +628,9 @@ test("the send tool (agents, over Dovre's MCP): GET/HEAD to this machine or list
   assert.match(log[0]!.detail!, /by an agent$/);
 });
 
-// ── Running a file as a smoke test ──────────────────────────────────────────────────────────
+// ── Checks and chaining in the editor ───────────────────────────────────────────────────────
 
-const SMOKE = `### Health
-# @expect status 200
-# @expect json $.ok == true
-GET {{baseUrl}}/health
-
-### ${H}
-# @expect status 201
-# @expect body contains ${H}
-POST {{baseUrl}}/items
-Authorization: Bearer {{API_TOKEN}}
-
-### Missing a variable
-GET {{nowhere}}/x
-
-### Who
-# @expect json $.token exists
-# @expect launch rockets
-GET {{baseUrl}}/me
-`;
-
-function smokeFile(m: ReturnType<typeof mounted>, text = SMOKE) {
-  mkdirSync(join(m.code, "shop", ".http"), { recursive: true });
-  writeFileSync(join(m.code, "shop", ".http", "smoke.http"), text);
-}
 const hashIn = (page: string) => /name="hash" value="([0-9a-f]+)"/.exec(page)![1]!;
-
-test("run: the page shows what it will send and its checks, and sends nothing; the file list links to it", async () => {
-  const m = mounted();
-  smokeFile(m);
-  const home = await (await m.get("/http?repo=shop")).text();
-  assert.match(home, /href="\/http\/run\?repo=shop&amp;file=smoke.http"/);
-  const res = await m.get("/http/run?repo=shop&file=smoke.http&env=dev");
-  assert.equal(res.status, 200);
-  const page = await res.text();
-  inert(page);
-  assert.match(page, /Run 4 requests/);
-  assert.match(page, /https:\/\/api.example.com\/health/);
-  assert.match(page, /1 of them isn&#39;t a read|1 of them isn't a read/);
-  assert.match(page, /1 check can&#39;t be read|1 check can't be read/);
-  assert.ok(!page.includes(SECRET));
-  assert.equal(m.calls.length, 0);
-  for (const bad of ["/http/run?repo=shop&file=../x.http", "/http/run?repo=..&file=smoke.http", "/http/run?repo=shop&file=gone.http"]) {
-    assert.equal((await m.get(bad)).status, 400, bad);
-  }
-  assert.equal((await m.get("/http/run?repo=shop&file=smoke.http", { "sec-fetch-site": "cross-site" })).status, 404);
-  assert.equal(m.calls.length, 0);
-});
-
-test("run: one click sends each request in turn, holds it to its checks, fills in live, logs http.run", async () => {
-  const fake = fakeFetch((url) => {
-    const p = new URL(url).pathname;
-    if (p === "/health") return new Response('{"ok":true}', { status: 200, headers: { "content-type": "application/json" } });
-    if (p === "/items") return new Response(`made ${H}`, { status: 201 });
-    return new Response(JSON.stringify({ token: SECRET }), { status: 200, headers: { "content-type": "application/json" } });
-  });
-  const m = mounted({ fetchFn: fake.fetchFn });
-  smokeFile(m);
-  const plan = await (await m.get("/http/run?repo=shop&file=smoke.http&env=dev")).text();
-  // Another site can't start a run, and a wrong Origin is refused.
-  const body = { repo: "shop", file: "smoke.http", env: "dev", hash: hashIn(plan) };
-  assert.equal((await m.post("/http/run", body, { origin: ORIGIN, "sec-fetch-site": "cross-site" })).status, 404);
-  assert.equal((await m.post("/http/run", body, { origin: "https://evil.example" })).status, 403);
-  assert.equal(m.calls.length, 0);
-
-  const res = await m.post("/http/run", body);
-  assert.equal(res.status, 303);
-  const at = res.headers.get("location")!;
-  assert.match(at, /^\/http\/run\/[0-9a-f-]{36}$/);
-  const first = await (await m.get(at)).text();
-  assert.match(first, /<meta name="u-topics" content="http http-run:/);
-  const page = await landed(m.get, at);
-  inert(page);
-  assert.ok(!page.includes(SECRET), "a secret came back in the run");
-  // Three were sent (the one missing a variable wasn't), in file order.
-  assert.deepEqual(fake.calls.map((c) => new URL(c.url).pathname), ["/health", "/items", "/me"]);
-  assert.equal(new Headers(fake.calls[1]!.init.headers).get("authorization"), `Bearer ${SECRET}`);
-  assert.match(page, /2 of 4 failed/);
-  assert.match(page, /Not sent: /);
-  assert.match(page, /got not understood: a check starts with/);
-  assert.equal((page.match(/>passed</g) ?? []).length, 2);
-  // Each send is in history, and the run's steps link to it.
-  assert.equal(m.pack.history().list().length, 3);
-  assert.match(page, /href="\/http\/r\/[0-9a-f-]{36}"/);
-  const id = at.split("/").pop()!;
-  assert.ok(m.published.some((t) => t.includes(`http-run:${id}`)));
-  const acts = await m.actions();
-  assert.equal(acts.filter((a) => a.kind === "http.send").length, 3);
-  const run = acts.find((a) => a.kind === "http.run")!;
-  assert.equal(run.target, "shop/.http/smoke.http");
-  assert.equal(run.detail, "2 of 4 passed · dev");
-  assert.equal(run.ok, 0);
-  assert.equal(run.error, "2 failed");
-});
-
-test("run: a file that changed since it was shown sends nothing and is shown again", async () => {
-  const m = mounted();
-  smokeFile(m);
-  const plan = await (await m.get("/http/run?repo=shop&file=smoke.http&env=dev")).text();
-  smokeFile(m, "### Other\nDELETE https://api.example.com/all\n");
-  const res = await m.post("/http/run", { repo: "shop", file: "smoke.http", env: "dev", hash: hashIn(plan) });
-  assert.equal(res.status, 409);
-  const page = await res.text();
-  assert.match(page, /changed since it was shown: nothing was sent/);
-  assert.match(page, /DELETE/);
-  assert.equal((await m.post("/http/run", { repo: "shop", file: "smoke.http", env: "dev", hash: "" })).status, 409);
-  assert.equal(m.calls.length, 0);
-});
-
-test("run: all passing says so; a gone run goes back to the client", async () => {
-  const m = mounted();
-  smokeFile(m, "### A\nGET https://api.example.com/a\n\n### B\n# @expect json $.ok == true\nGET https://api.example.com/b\n");
-  const plan = await (await m.get("/http/run?repo=shop&file=smoke.http")).text();
-  const res = await m.post("/http/run", { repo: "shop", file: "smoke.http", env: "", hash: hashIn(plan) });
-  const page = await landed(m.get, res.headers.get("location")!);
-  assert.match(page, /All 2 passed/);
-  assert.equal((await m.actions()).find((a) => a.kind === "http.run")!.ok, 1);
-  const gone = await m.get("/http/run/00000000-0000-0000-0000-000000000000");
-  assert.equal(gone.status, 303);
-});
 
 test("the editor's checks are saved as # @expect lines", async () => {
   const m = mounted();
@@ -754,46 +641,16 @@ test("the editor's checks are saved as # @expect lines", async () => {
   assert.match(page, /<textarea name="expect"[^>]*>status 200\njson \$.id exists<\/textarea>/);
 });
 
-test("chaining: a run passes login's token on; the plan shows it as written; the editor reuses the newest send of that name", async () => {
+test("chaining: the editor reuses the newest send of that name; with none, nothing is sent", async () => {
   const fake = fakeFetch((url) => {
     const p = new URL(url).pathname;
-    if (p === "/login") return new Response(JSON.stringify({ token: "tok-123", user: { id: 7 }, echo: SECRET }), { status: 200, headers: { "content-type": "application/json", location: "/orders/7" } });
+    if (p === "/login") return new Response(JSON.stringify({ token: "tok-123", user: { id: 7 } }), { status: 200, headers: { "content-type": "application/json" } });
     return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
   });
   const m = mounted({ fetchFn: fake.fetchFn });
-  smokeFile(m, `### early
-GET {{baseUrl}}/too-soon/{{login.response.body.token}}
-
-###
-# @name login
-POST {{baseUrl}}/login
-Content-Type: application/json
-
-{"user": "me"}
-
-### orders
-GET {{baseUrl}}{{login.response.headers.Location}}?by={{login.response.body.user.id}}
-Authorization: Bearer {{login.response.body.token}}
-
-### leak
-GET {{baseUrl}}/x/{{login.response.body.echo}}
-`);
-  const plan = await (await m.get("/http/run?repo=shop&file=smoke.http&env=dev")).text();
-  assert.match(plan, /https:\/\/api\.example\.com\/x\/\{\{login\.response\.body\.echo\}\}/, "a later value shows as written");
-  assert.match(plan, /Where it goes depends on login&#39;s response/);
-  assert.match(plan, /No response from login yet/, "one above login can't have it");
-  assert.equal(fake.calls.length, 0);
-
-  const at = (await m.post("/http/run", { repo: "shop", file: "smoke.http", env: "dev", hash: hashIn(plan) })).headers.get("location")!;
-  const page = await landed(m.get, at);
-  assert.deepEqual(fake.calls.map((c) => new URL(c.url).pathname + new URL(c.url).search), ["/login", "/orders/7?by=7"]);
-  assert.equal(new Headers(fake.calls[1]!.init.headers).get("authorization"), "Bearer tok-123");
-  assert.match(page, /No response from login yet/);
-  assert.match(page, /secret there \(masked\)/, "a secret echoed back isn't passed on");
-  assert.ok(!page.includes(SECRET) && !page.includes("tok-123"), "the token isn't shown in the run");
-
+  await landed(m.get, sentPath(await m.post("/http/send", send({ name: "login", method: "POST", url: "https://api.example.com/login" }))));
   // The editor: the newest send named login.
-  const sent = await m.post("/http/send", send({ name: "orders", url: "https://api.example.com/o/{{login.response.body.user.id}}", repo: "shop", file: "smoke.http" }));
+  const sent = await m.post("/http/send", send({ name: "orders", url: "https://api.example.com/o/{{login.response.body.user.id}}", repo: "shop" }));
   assert.equal(sent.status, 303);
   assert.equal(new URL(fake.calls.at(-1)!.url).pathname, "/o/7");
   const editor = await (await m.get("/http?repo=shop")).text();
