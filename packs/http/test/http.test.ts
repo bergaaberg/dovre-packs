@@ -21,6 +21,7 @@ import { readdirSync } from "node:fs";
 import { createHttpPack, httpPack } from "../index.ts";
 import { MAX_RESPONSE } from "../send.ts";
 import { quickStyles } from "../quick-view.ts";
+import { storiesStyles } from "../stories-view.ts";
 import { checkHtml } from "dovre/packs/guard.ts";
 
 const H = `<script>alert(1)</script><img src=x onerror=alert(1)>`;
@@ -241,14 +242,14 @@ test("hostile input: response body, headers, status text, URLs, names and file n
 });
 
 test("every class the views use is styled by core's stylesheet or the pack's own", () => {
-  const src = ["view.ts", "index.ts", "quick-view.ts", "stories-view.ts"].map((f) => readFileSync(new URL(`../${f}`, import.meta.url), "utf8")).join("\n");
+  const src = ["view.ts", "index.ts", "quick-view.ts", "stories-view.ts", "stories-routes.ts"].map((f) => readFileSync(new URL(`../${f}`, import.meta.url), "utf8")).join("\n");
   const styled = STYLE + (httpPack.styles ?? "");
   const missing = new Set<string>();
   for (const m of src.matchAll(/class="([^"]*)"/g))
     for (const name of m[1]!.replace(/\$\{[^}]*\}/g, " ").split(/\s+/).filter(Boolean)) if (/^[a-z][a-z0-9-]*$/.test(name) && !new RegExp(`\\.${name}(?![a-z0-9-])`).test(styled)) missing.add(name);
   assert.deepEqual([...missing], []);
   // The pack's own rules style only its own classes: none would be dropped as restyling core.
-  for (const sel of (quickStyles.match(/[^{}]+(?=\{)/g) ?? []).filter((x) => !x.trim().startsWith("@"))) assert.match(sel, /\.http-/, sel);
+  for (const sel of ((quickStyles + storiesStyles).match(/[^{}]+(?=\{)/g) ?? []).filter((x) => !x.trim().startsWith("@"))) assert.match(sel, /\.http-/, sel);
 });
 
 test("save: a new file is one click, logged; secrets' values are never written", async () => {
@@ -1134,8 +1135,12 @@ test("stories: the story page sends nothing; one click runs it, values flow, alw
   const page = await (await m.get(`/http/story?${qs({ repo: "shop", story: "cancel.story", env: "dev" })}`)).text();
   assert.equal(fake.calls.length, 0);
   assert.match(page, /A customer orders and cancels/);
-  assert.match(page, /Given · one customer/);
-  assert.match(page, /POST \{\{baseUrl\}\}\/orders/);
+  assert.match(page, /Given one customer\./);
+  assert.match(page, /<h3 class="http-lane">Given<\/h3>/);
+  assert.match(page, /setup &quot;one customer&quot;/);
+  assert.match(page, /<span class="http-m">POST<\/span> \/orders<span class="t3"> · case &quot;Order&quot;/);
+  assert.match(page, /uses order\.id/);
+  assert.match(page, /needs your click/);
   assert.match(page, /Run the story/);
   assert.equal(checkHtml(page.replace(/^<meta[^>]*>/, "")), undefined);
 
@@ -1214,4 +1219,102 @@ test("stories: hostile titles, steps, file names and repos come out inert", asyn
     const r = await m.get(p);
     inert(await r.text());
   }
+});
+
+// ── The stories overview (H-05) ───────────────────────────────────────────────────────────────
+
+const STORY_SPEC = JSON.stringify({ openapi: "3.0.0", info: { title: "Shop" }, paths: { "/orders": { post: {} }, "/customers": { post: {} }, "/refunds": { post: {} } } });
+const LOOK = "# Look around\nstep: List\n  GET {{baseUrl}}/orders\n";
+const runHash = (page: string, story: string) => new RegExp(`name="story" value="${story.replace(".", "\\.")}"><input type="hidden" name="env" value="dev"><input type="hidden" name="hash" value="([0-9a-f]+)"`).exec(page)![1]!;
+
+test("stories overview: who can run each, Run from the table, pips and the failing filter, gaps and setups; nothing sent on a GET", async () => {
+  let refuse = false;
+  const fake = fakeFetch((url, init) => (refuse && url.endsWith("/cancel") ? new Response('{"status":"open"}', { status: 200, headers: { "content-type": "application/json" } }) : shopApi(url)));
+  const m = mounted({ fetchFn: fake.fetchFn });
+  storyRepo(m);
+  writeFileSync(join(m.code, "shop", ".http", "stories", "look.story"), LOOK);
+  writeFileSync(join(m.code, "shop", "openapi.yaml"), STORY_SPEC);
+
+  const page = await (await m.get("/http/stories?repo=shop")).text();
+  assert.equal(fake.calls.length, 0);
+  assert.equal(checkHtml(page.replace(/^<meta[^>]*>/, "")), undefined);
+  assert.match(page, /2 stories, 1 setup, 1 case in \.http\//);
+  assert.match(page, /<option value="dev" selected>dev<\/option>/);
+  assert.match(page, /A customer orders and cancels<\/a><span class="t3">given one customer<\/span>/);
+  assert.match(page, /Look around<\/a><span class="t3">given nothing<\/span>/);
+  assert.equal(page.match(/needs your click/g)?.length, 1);
+  assert.equal(page.match(/agent can run<\/span>/g)?.length, 1);
+  // Not covered: refunds has nothing; customers only a setup's own request.
+  assert.match(page, /Not covered yet/);
+  assert.match(page, /\/refunds<\/a><span class="t3">no cases/);
+  assert.match(page, /\/customers<\/a><span class="t3">only in a story/);
+  assert.doesNotMatch(page, /mono" href="[^"]*">\/orders<\/a>/);
+  assert.match(page, /one-customer\.story<\/span><span class="t3">used by 1 story/);
+  assert.match(page, /href="\/agents\/new\?repo=shop&amp;prompt=Write\+cases/);
+
+  // Run straight from the table: the overview's hash is the story page's.
+  const res = await m.post("/http/story/run", { repo: "shop", story: "cancel.story", env: "dev", hash: runHash(page, "cancel.story") });
+  assert.equal(res.status, 303);
+  assert.match(await landed(m.get, res.headers.get("location")!), /It passed: all 4 passed/);
+  refuse = true;
+  const res2 = await m.post("/http/story/run", { repo: "shop", story: "cancel.story", env: "dev", hash: runHash(page, "cancel.story") });
+  const failed = await landed(m.get, res2.headers.get("location")!);
+  assert.match(failed, /It failed: failed at Cancel/);
+  assert.match(failed, /class="http-step http-st-bad"/);
+  assert.match(failed, /Debug the failed run with an agent/);
+
+  const after = await (await m.get("/http/stories?repo=shop")).text();
+  assert.match(after, /aria-label="dev, last 10: 1 passed, 1 failed"/);
+  assert.match(after, /<span class="http-bad">step 3: json \$\.status == cancelled<\/span><a href="\/agents\/new\?repo=shop&amp;prompt=[^"]+"[^>]*>debug with an agent<\/a>/);
+  assert.match(after, /Failing<span class="n">1<\/span>/);
+  assert.match(after, /Recent runs/);
+  const table = async (p: string) => /<tbody>([\s\S]*?)<\/tbody>/.exec(await (await m.get(p)).text())![1]!;
+  const failing = await table("/http/stories?repo=shop&show=failing");
+  assert.match(failing, /A customer orders and cancels/);
+  assert.doesNotMatch(failing, /Look around/);
+  const agent = await table("/http/stories?repo=shop&show=agent");
+  assert.match(agent, /Look around/);
+  assert.doesNotMatch(agent, /A customer orders and cancels/);
+
+  // An environment that lets an agent write: then it can run the writing story too.
+  writeFileSync(join(m.code, "shop", ".http", "http-client.env.json"), '{"dev": {"$agent": "writes"}}');
+  const marked = await (await m.get("/http/stories?repo=shop")).text();
+  assert.doesNotMatch(marked, /needs your click/);
+  // No environment: Run still posts env="" for the stories that can.
+  const none = await (await m.get("/http/stories?repo=shop&env=")).text();
+  assert.match(none, /<option value="">No environment<\/option>/);
+  assert.match(none, /name="env" value=""/);
+});
+
+test("stories overview: an ask is an agent session with the prompt drafted; empty goes back; a repo that isn't a checkout is left out", async () => {
+  const m = mounted();
+  const res = await m.get(`/http/stories/ask?${qs({ repo: "shop", ask: "A refund for one of two lines" })}`);
+  assert.equal(res.status, 303);
+  const at = new URL(res.headers.get("location")!, "http://x");
+  assert.equal(at.pathname, "/agents/new");
+  assert.equal(at.searchParams.get("repo"), "shop");
+  assert.match(at.searchParams.get("prompt")!, /"A refund for one of two lines"/);
+  assert.match(at.searchParams.get("prompt")!, /Don't send requests that change data/);
+  assert.equal((await m.get("/http/stories/ask?repo=shop&ask=+")).headers.get("location"), "/http/stories?repo=shop");
+  const away = new URL((await m.get("/http/stories/ask?repo=nope&ask=x")).headers.get("location")!, "http://x");
+  assert.equal(away.searchParams.get("repo"), null);
+  assert.equal(m.calls.length, 0);
+});
+
+test("stories overview: hostile stories, setups, spec paths, failed checks and query come out inert", async () => {
+  const m = mounted({ fetchFn: fakeFetch(() => new Response(H, { status: 500 })).fetchFn });
+  storyRepo(m, `# ${H}\ngiven: one customer\nstep: ${H}\n  GET {{baseUrl}}/x?q=${encodeURIComponent(H)}\n  expect: body contains ${H}\n`);
+  writeFileSync(join(m.code, "shop", ".http", "setups", "one-customer.story"), `# ${H}\nonly: dev\nstep: ${H}\n  POST {{baseUrl}}/customers\n  take: customer.id = $.id\n`);
+  writeFileSync(join(m.code, "shop", "openapi.yaml"), JSON.stringify({ openapi: "3.0.0", info: { title: H }, paths: { [`/x/${H}`]: { post: { summary: H } } } }));
+  const page = await (await m.get("/http/stories?repo=shop")).text();
+  inert(page);
+  assert.equal(checkHtml(page.replace(/^<meta[^>]*>/, "")), undefined);
+  const res = await m.post("/http/story/run", { repo: "shop", story: "cancel.story", env: "dev", hash: runHash(page, "cancel.story") });
+  inert(await landed(m.get, res.headers.get("location")!));
+  const after = await (await m.get("/http/stories?repo=shop")).text();
+  inert(after);
+  assert.equal(checkHtml(after.replace(/^<meta[^>]*>/, "")), undefined);
+  for (const p of [`/http/stories?${qs({ repo: "shop", env: H, show: H })}`, `/http/stories?${qs({ repo: H })}`]) inert(await (await m.get(p)).text());
+  const ask = await m.get(`/http/stories/ask?${qs({ repo: H, ask: H })}`);
+  assert.match(ask.headers.get("location")!, /^\/agents\/new\?prompt=/);
 });

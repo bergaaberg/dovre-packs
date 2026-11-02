@@ -50,6 +50,7 @@ import { blanksOfForm, fillBlanks } from "./quick.ts";
 import { createQuick } from "./quick-routes.ts";
 import { createStories } from "./stories-routes.ts";
 import { quickHref, quickStyles } from "./quick-view.ts";
+import { storiesStyles } from "./stories-view.ts";
 import type { Child, Tone } from "dovre/ui/kit.ts";
 import { fileNameOf, fromOpenApi, MAX_SPEC } from "./openapi.ts";
 import { fromCollection, varLines } from "./collections.ts";
@@ -276,7 +277,7 @@ export function createHttpPack(opts: CreateHttpPackOpts = {}): Pack & { history(
     history: () => history,
     results: () => results,
     // The JSON tools' tree and diff classes, for a response body shown as a tree or compared.
-    styles: jsonStyles + quickStyles,
+    styles: jsonStyles + quickStyles + storiesStyles,
     manifest: {
       api: PACK_API,
       id: "http",

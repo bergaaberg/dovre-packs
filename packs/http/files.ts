@@ -12,7 +12,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { parseEnvs, parseHttp, type Envs, type Parsed } from "./model.ts";
+import { agentEnvsOf, parseEnvs, parseHttp, type Envs, type Parsed } from "./model.ts";
 
 export const DIR = ".http";
 /** The JetBrains HTTP Client's environment file (public values only: secrets come from HTTP_SECRETS). */
@@ -161,20 +161,26 @@ export function readFile(root: string, file: unknown): { name: string; text: str
   return { name: f.name, text, hash: hashOf(text) };
 }
 
-/** The repo's environments (its .http/http-client.env.json), {} when there's none or it's unsafe. */
-export function repoEnvs(root: string | null): Envs {
-  if (!root) return {};
+/** The repo's .http/http-client.env.json as text, undefined when there's none or it's unsafe. */
+function envText(root: string | null): string | undefined {
+  if (!root) return undefined;
   try {
     const dir = httpDir(root);
-    if (!dir) return {};
+    if (!dir) return undefined;
     const path = join(dir, ENV_FILE);
     const st = lst(path);
-    if (!st || st.isSymbolicLink() || !st.isFile() || st.size > 64_000) return {};
-    return parseEnvs(readFileSync(path, "utf8"));
+    if (!st || st.isSymbolicLink() || !st.isFile() || st.size > 64_000) return undefined;
+    return readFileSync(path, "utf8");
   } catch {
-    return {};
+    return undefined;
   }
 }
+
+/** The repo's environments, {} when there's no env file or it's unsafe. */
+export const repoEnvs = (root: string | null): Envs => parseEnvs(envText(root));
+
+/** The repo's environments marked `"$agent": "writes"`, as the working tree has them (H-06 reads HEAD before a run). */
+export const repoAgentEnvs = (root: string | null): Set<string> => agentEnvsOf(envText(root));
 
 export type Written = { ok: true; created: boolean; hash: string } | { ok: false; error: string };
 
