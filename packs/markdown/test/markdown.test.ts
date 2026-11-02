@@ -266,3 +266,62 @@ test("markdown: paths in a checkout", () => {
   const { files } = listDocs(repo);
   assert.deepEqual(files, ["README.md", "docs/guide.md", "docs/guide/README.md"], "a symlink isn't listed");
 });
+
+test("markdown: a PR's .md file read rendered at its head commit, through the forge's reads only", async () => {
+  const { prDocHref, prDocOf } = await import("../pr.ts");
+  const SHA = "c".repeat(40);
+  const asked: string[] = [];
+  const forge = {
+    id: "github", name: "GitHub", host: "github.com", login: "me", owners: "acme",
+    file: async (repo: string, path: string, at?: string) => {
+      asked.push(`${repo} ${path} ${at}`);
+      if (path === "docs/guide.md") return `# Guide ${HOSTILE}\n\n[next](./next.md#Part-2) · [code](../src/a.ts) · [up](../../../etc/passwd)\n\n![logo](logo.png)\n\n\`\`\`mermaid\ngraph TD; A-->B\n\`\`\`\n`;
+      return undefined;
+    },
+  };
+  const a = new Hono();
+  const ctx = testContext({ forge: () => forge, file: (n) => `/files/${n}`, page: async (_c, o) => new Response(String(await o.body), { headers: { "content-type": "text/html" } }) });
+  markdownPack.routes!(a as never, ctx);
+  const get = (p: string) => a.request(`http://localhost${p}`);
+
+  // The slot: a button on .md files that are still there, nothing on others.
+  const slot = markdownPack.slots!(ctx)["pr.file"]!;
+  const pr = { repo: "acme/site", number: 7, branch: "b", title: "t", url: "https://github.com/acme/site/pull/7", sha: SHA };
+  const btn = String(await slot({ ...pr, path: "docs/guide.md", status: "modified" }));
+  assert.match(btn, new RegExp(`href="/markdown/pr/acme/site/7/${SHA}/docs/guide.md">Rendered</a>`));
+  assert.equal(slot({ ...pr, path: "docs/guide.md", status: "removed" }), "");
+  assert.equal(slot({ ...pr, path: "src/a.ts", status: "added" }), "");
+  assert.equal(markdownPack.slots!(testContext({ forge: () => undefined }))["pr.file"]!({ ...pr, path: "a.md", status: "added" }), "", "no forge reads, no button");
+
+  const res = await get(prDocHref({ repo: "acme/site", n: 7, sha: SHA, path: "docs/guide.md" }));
+  assert.equal(res.status, 200);
+  const out = await res.text();
+  assertInert("pr doc", out);
+  assert.deepEqual(asked, [`acme/site docs/guide.md ${SHA}`]);
+  assert.match(out, new RegExp(`href="/markdown/pr/acme/site/7/${SHA}/docs/next.md#md-part-2"`), "a doc link stays at that commit");
+  assert.match(out, new RegExp(`href="https://github.com/acme/site/blob/${SHA}/src/a.ts"`), "other files on the forge");
+  assert.match(out, /md-broken[^>]*etc\/passwd/, "a link out of the repo is broken");
+  assert.doesNotMatch(out, /<img/, "pictures aren't fetched");
+  assert.match(out, /data-mermaid="\/files\/mermaid.js"/);
+  assert.match(out, /href="\/prs\/acme\/site\/7\/files">acme\/site#7</);
+
+  for (const bad of [`/markdown/pr/acme/site/7/main/docs/guide.md`, `/markdown/pr/acme/site/7/${SHA}/src/a.ts`, `/markdown/pr/acme/site/0/${SHA}/a.md`, `/markdown/pr/acme/site/7/${SHA}/..%2F..%2Fx.md`, `/markdown/pr/acme/site/7/${SHA}/missing.md`]) {
+    assert.equal((await get(bad)).status, 404, bad);
+  }
+  assert.equal(asked.length, 2, "only a well-formed path reaches the forge");
+  assert.equal(prDocOf("a b", "site", "1", SHA, "a.md"), null);
+});
+
+test("markdown: the dock, a scratch pad with a live preview that goes on to the editor", async () => {
+  assert.deepEqual(markdownPack.dock!({} as never), { label: "Markdown", key: "M", title: "A scratch pad with a live preview: math and mermaid too" });
+  const { get, post } = packApp([markdownPack]);
+  const dock = await (await get("/markdown/dock")).text();
+  assert.match(dock, /<form method="post" action="\/markdown\/dock" class="md-editor" data-md-live/);
+  assert.match(dock, /formaction="\/markdown" formtarget="_top">Open in the editor/);
+  assert.match(dock, /data-mermaid="\/assets\/files\/markdown\.mermaid\./);
+  const out = await (await post("/markdown/dock", { src: `# ${HOSTILE}\n\n$x^2$` })).text();
+  assertInert("dock", out);
+  assertFragment("dock", out);
+  assert.match(out, /class="md-tex"/);
+  assert.equal((await post("/markdown/dock", { src: "x" }, { origin: "https://evil.example" })).status, 403);
+});

@@ -8,7 +8,7 @@ import { Empty, KeyValues, Notice, PageHeader, Panel, Tabs, type Html } from "do
 import { type Rendered, MAX_SOURCE } from "./render.ts";
 import { docHref } from "./docs.ts";
 
-export type Tab = "write" | "docs";
+export type Tab = "write" | "docs" | "pr";
 
 function header(current: Tab, sub: string, hosted: boolean, title = "Markdown") {
   const items = [{ href: "/markdown", label: "Write", current: current === "write" }];
@@ -49,6 +49,15 @@ export function writePage(s: WriteState): Html {
   return html`${header("write", "GitHub-flavoured Markdown with math and mermaid diagrams: write, preview, export.", s.hosted)}<div class="md-split">${Panel({ children: form })}${Panel({ title: "Preview", children: preview })}</div>`;
 }
 
+/** The dock beside Bino's: a scratch pad with its preview under it, to take to the full editor. */
+export function dockView(s: { src: string; rendered?: Rendered; files?: DocFiles }): Html {
+  const form = html`<form method="post" action="/markdown/dock" class="md-editor" data-md-live data-ctrl-enter>
+<textarea name="src" rows="8" spellcheck="false" autocomplete="off" maxlength="${MAX_SOURCE}" aria-label="Markdown" placeholder="Markdown, math or a mermaid block">${s.src}</textarea>
+<div class="buttons"><button type="submit" class="primary">Preview</button><button type="submit" formaction="/markdown" formtarget="_top">Open in the editor</button><button type="submit" formaction="/markdown/print" formtarget="_blank">Print</button></div></form>`;
+  const preview = html`<div class="md-preview md-dock-preview" data-md-preview>${s.rendered ? body(s.rendered, s.files) : html`<div class="md-body" data-md-doc${docAttrs(s.files)}><p class="t3">The preview shows here.</p></div>`}</div>`;
+  return html`${form}${preview}<p class="t3 sm">Kept while the dock is open, and nowhere else.</p>`;
+}
+
 /** The live preview's answer: the rendered document alone. */
 export function previewFragment(r: Rendered, files: DocFiles | undefined): Html {
   return body(r, files);
@@ -72,9 +81,11 @@ export function docsPage(repo: string, files: string[], more: boolean): Html {
   return html`${header("docs", `Markdown in ${repo}`, false, repo)}${Panel({ title: "Docs", meta: `${files.length}${more ? "+" : ""}`, children: list })}`;
 }
 
-export function docPage(o: { repo: string; path: string; rendered: Rendered; files?: DocFiles; src: string }): Html {
+export function docPage(o: { repo: string; path: string; rendered: Rendered; files?: DocFiles; src: string; /** A PR's file (pr.ts): its crumbs instead of the checkout's. */ pr?: { n: number; sha: string; hosted: boolean } }): Html {
   const r = o.rendered;
-  const crumbs = html`<p class="t3 sm"><a href="/markdown/docs">Checkouts</a> / <a href="/markdown/docs/${encodeURIComponent(o.repo)}">${o.repo}</a> / ${o.path}</p>`;
+  const crumbs = o.pr
+    ? html`<p class="t3 sm"><a href="/prs/${o.repo.split("/").map(encodeURIComponent).join("/")}/${o.pr.n}/files">${o.repo}#${o.pr.n}</a> / ${o.path} at <code>${o.pr.sha.slice(0, 7)}</code></p>`
+    : html`<p class="t3 sm"><a href="/markdown/docs">Checkouts</a> / <a href="/markdown/docs/${encodeURIComponent(o.repo)}">${o.repo}</a> / ${o.path}</p>`;
   const outline = r.headings.filter((h) => h.level <= 3);
   const side = html`${
     r.broken.length
@@ -87,7 +98,7 @@ export function docPage(o: { repo: string; path: string; rendered: Rendered; fil
   }${Panel({
     children: html`<form method="post" action="/markdown" class="md-copy"><input type="hidden" name="from" value="${o.repo}/${o.path}"><textarea name="src" hidden>${o.src}</textarea><button type="submit">Edit a copy</button></form><p class="t3 sm">The copy is yours to change and export; the file stays as it is.</p>`,
   })}`;
-  return html`${header("docs", o.path, false, o.repo)}${crumbs}<div class="md-doc">${Panel({ children: body(r, o.files) })}<div class="md-side">${side}</div></div>`;
+  return html`${o.pr ? header("pr", o.path, o.pr.hosted, `${o.repo}#${o.pr.n}`) : header("docs", o.path, false, o.repo)}${crumbs}<div class="md-doc">${Panel({ children: body(r, o.files) })}<div class="md-side">${side}</div></div>`;
 }
 
 export function notFound(why: string): Html {
