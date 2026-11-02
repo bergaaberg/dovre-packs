@@ -59,7 +59,7 @@ const STORY_FORMAT = `A story is .http/stories/<name>.story (lowercase, dashes):
   always: <teardown: runs last, whatever happened>
 A later step uses a taken value as \${order.id}. Cases are named requests (### Name) in .http/*.http with "# @expect" lines above the request line. URLs start with {{baseUrl}}; secrets are {{NAME}} placeholders, never values.`;
 
-const RULES = "Work on a new branch and commit there; I review it like code. Don't send requests that change data: I run those stories myself.";
+const RULES = "Work on a new branch and commit there; I review it like code. To try a story, commit it and use Dovre's http_run tool if you have it (http_catalog lists what you may run): it refuses a story that writes unless its environment allows agents to. Don't send requests that change data any other way.";
 
 /** For what I typed on the stories page: a story, cases or a setup, drafted on a branch. */
 export const storyAskPrompt = (ask: string) =>
