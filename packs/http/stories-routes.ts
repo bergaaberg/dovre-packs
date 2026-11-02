@@ -224,7 +224,7 @@ export function createStories(d: StoriesDeps) {
   async function board(ctx: PackContext, repo: string, root: string, asked: string | undefined) {
     const envs = d.varsFor(ctx, { ...noWhere(), repo }).envs;
     const env = asked === undefined ? defaultEnv(envs) : asked.slice(0, 64);
-    const agentEnvs = repoAgentEnvs(root);
+    const agentEnvs = (await repoAgentEnvs(root)).envs;
     const git = await uncommitted(root, ["."]);
     // Committed as an agent's run checks it (git that can't tell counts as not committed).
     const committed = (paths: string[]) => git.ok && !notCommitted(git.changed, [...paths, ENV_FILE]).length;
@@ -285,7 +285,7 @@ export function createStories(d: StoriesDeps) {
   /** Who may run a story now, as an agent's run checks it. */
   async function whoNow(root: string, methods: string[], env: string, paths: string[]) {
     const git = await uncommitted(root, [...paths, ENV_FILE]);
-    return whoOf(methods, repoAgentEnvs(root).has(env), git.ok && !notCommitted(git.changed, [...paths, ENV_FILE]).length);
+    return whoOf(methods, (await repoAgentEnvs(root)).envs.has(env), git.ok && !notCommitted(git.changed, [...paths, ENV_FILE]).length);
   }
 
   async function renderStory(ctx: PackContext, c: Context<AppEnv>, o: { repo: string; story: string; env: string; flash?: string; status?: number }) {

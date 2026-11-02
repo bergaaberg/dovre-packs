@@ -180,8 +180,31 @@ function envText(root: string | null): string | undefined {
 /** The repo's environments, {} when there's no env file or it's unsafe. */
 export const repoEnvs = (root: string | null): Envs => parseEnvs(envText(root));
 
-/** The repo's environments marked `"$agent": "writes"`, as the working tree has them (an agent's run first checks the env file is committed: `uncommitted`). */
-export const repoAgentEnvs = (root: string | null): Set<string> => agentEnvsOf(envText(root));
+const git = (root: string, args: string[]) =>
+  new Promise<string | undefined>((resolve) => {
+    execFile("git", ["-C", root, ...args], { timeout: 10_000, maxBuffer: 128_000 }, (err, out) => resolve(err ? undefined : String(out)));
+  });
+
+/**
+ * The repo's environments marked `"$agent": "writes"`, read from the env file on origin's default
+ * branch (origin/HEAD, else origin/main or origin/master), never the working tree: an agent that
+ * commits the flag in its checkout can't open writes to itself; the flag counts once it's merged
+ * (and fetched). No such branch, or no env file on it: no environment is open to agents' writes.
+ */
+export async function repoAgentEnvs(root: string | null): Promise<{ envs: Set<string>; branch?: string }> {
+  if (!root) return { envs: new Set() };
+  const head = (await git(root, ["symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD"]))?.trim();
+  let branch: string | undefined;
+  for (const ref of [head, "origin/main", "origin/master"]) {
+    if (ref && /^origin\/[\w./-]{1,200}$/.test(ref) && (await git(root, ["rev-parse", "-q", "--verify", `refs/remotes/${ref}^{commit}`])) !== undefined) {
+      branch = ref;
+      break;
+    }
+  }
+  if (!branch) return { envs: new Set() };
+  const text = await git(root, ["show", `refs/remotes/${branch}:${DIR}/${ENV_FILE}`]);
+  return { envs: agentEnvsOf(text), branch };
+}
 
 export type Written = { ok: true; created: boolean; hash: string } | { ok: false; error: string };
 
