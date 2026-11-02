@@ -50,4 +50,6 @@ export const styles = `
 .md-body .md-front { margin-bottom: 1.2em; font-size: var(--fs-s); color: var(--ink-2); }
 .md-body .footnotes { font-size: var(--fs-s); color: var(--ink-2); }
 .md-preview .md-body { min-height: 200px; }
+.md-dock-preview { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 12px; }
+.md-dock-preview .md-body { min-height: 80px; }
 `;

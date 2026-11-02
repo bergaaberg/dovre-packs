@@ -14,15 +14,18 @@
  */
 import { readFileSync } from "node:fs";
 import type { Context } from "hono";
+import { html } from "hono/html";
 import type { AppEnv } from "dovre/env.ts";
 import { type Pack, PACK_API, type WasmFile } from "dovre/packs/types.ts";
 import { strictOrigin } from "dovre/strict.ts";
 import { MAX_SOURCE, render } from "./render.ts";
 import { codeDirOf, listDocs, listRepos, readDoc, readImage, repoRoot, resolver } from "./docs.ts";
-import { docPage, docsPage, hostedDocsPage, notFound, previewFragment, reposPage, standalone, titleOf, writePage } from "./view.ts";
+import { dockView, docPage, docsPage, hostedDocsPage, notFound, previewFragment, reposPage, standalone, titleOf, writePage } from "./view.ts";
 import { PRINT_JS, SCRIPT } from "./script.ts";
 import { styles } from "./styles.ts";
 import { KATEX_SHA, MERMAID_SHA } from "./gen.ts";
+import { prDocHref, prDocOf, prResolver } from "./pr.ts";
+import { isDoc } from "./docs.ts";
 
 /** A browser library from vendor/ (under Node only: hosted, core serves the built copy). */
 const vendored = (sha256: string, name: string): WasmFile => ({ sha256, load: () => new Uint8Array(readFileSync(new URL(`./vendor/${name}`, import.meta.url))) });
@@ -76,7 +79,11 @@ export function createMarkdownPack(): Pack {
       { title: "Markdown: write & preview", href: "/markdown", icon: "pen", about: "Write Markdown with a live preview, math and mermaid; export or print", also: ["markdown", "md", "mermaid", "diagram", "math", "katex", "preview", "readme"] },
       ...(ctx.hosted ? [] : [{ title: "Markdown: docs in checkouts", href: "/markdown/docs", icon: "pen", about: "Read a checkout's README and docs rendered, with broken links flagged", also: ["docs", "readme", "documentation"] }]),
     ],
-    about: (_ctx, path) => (path.startsWith("/markdown/docs/") ? "A Markdown doc in a local checkout" : path.startsWith("/markdown") ? "Markdown editor (what's pasted here isn't shared)" : undefined),
+    dock: () => ({ label: "Markdown", key: "M", title: "A scratch pad with a live preview: math and mermaid too" }),
+    slots: (ctx) => ({
+      "pr.file": (f) => (isDoc(f.path) && f.status !== "removed" && ctx.forge()?.file ? html`<a class="btn sm ghost" href="${prDocHref({ repo: f.repo, n: f.number, sha: f.sha, path: f.path })}">Rendered</a>` : ""),
+    }),
+    about: (_ctx, path) => (path.startsWith("/markdown/docs/") ? "A Markdown doc in a local checkout" : path.startsWith("/markdown/pr/") ? "A PR's Markdown file, rendered" : path.startsWith("/markdown") ? "Markdown editor (what's pasted here isn't shared)" : undefined),
     routes(app, ctx) {
       const files = () => ({ mermaid: ctx.file("mermaid.js"), katex: ctx.file("katex.js") });
       const codeDir = () => ctx.codeDir ?? codeDirOf(ctx.env);
@@ -93,6 +100,12 @@ export function createMarkdownPack(): Pack {
         if (!f) return tooBig(c);
         const src = f.src ?? "";
         return page(c, "Markdown", writePage({ src, rendered: render(src), hosted: ctx.hosted, files: files(), from: f.from?.slice(0, 300) || undefined }));
+      });
+      app.get("/markdown/dock", (c) => ctx.dockPage(c, { title: "Markdown", body: dockView({ src: "", files: files() }) }));
+      app.post("/markdown/dock", strictOrigin, async (c) => {
+        const f = await form(c);
+        if (!f) return tooBig(c);
+        return ctx.dockPage(c, { title: "Markdown", body: dockView({ src: f.src ?? "", rendered: render(f.src ?? ""), files: files() }) });
       });
       app.post("/markdown/preview", strictOrigin, async (c) => {
         const f = await form(c);
@@ -140,6 +153,18 @@ export function createMarkdownPack(): Pack {
         if (!got.ok) return missing(c, got.why);
         const rendered = render(got.text, { resolve: resolver(root!, repo, path!) });
         return page(c, `${path} · ${repo}`, docPage({ repo, path: path!, rendered, src: got.text, files: files() }));
+      });
+      // A PR's Markdown file at its head commit (the "pr.file" slot), read through the forge.
+      app.get("/markdown/pr/:owner/:name/:n/:sha/*", async (c) => {
+        const p = c.req.param();
+        const prefix = `/markdown/pr/${encodeURIComponent(p.owner)}/${encodeURIComponent(p.name)}/${p.n}/${p.sha}/`;
+        const d = prDocOf(p.owner, p.name, p.n, p.sha, restOf(c.req.path, prefix));
+        const forge = ctx.forge();
+        if (!d || !forge?.file) return missing(c, "No such file in a PR.");
+        const text = await forge.file(d.repo, d.path, d.sha).catch(() => undefined);
+        if (text === undefined) return missing(c, "That file isn't in your repos at that commit.");
+        const rendered = render(text, { resolve: prResolver(d, forge.host) });
+        return page(c, `${d.path} · ${d.repo}#${d.n}`, docPage({ repo: d.repo, path: d.path, rendered, src: text, files: files(), pr: { n: d.n, sha: d.sha, hosted: ctx.hosted } }));
       });
       // A picture a doc shows, from the same checkout.
       app.get("/markdown/raw/:repo/*", (c) => {
