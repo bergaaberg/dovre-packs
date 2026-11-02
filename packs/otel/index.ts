@@ -3,7 +3,7 @@
  * API, firing alerts, a 24h error lane on Today's horizon, avatar storm/fire, and the running
  * version beside mapped repos on /deploys. Reads only in `refresh()`; everything else is memory.
  */
-import { type Pack, PACK_API } from "dovre/packs/types.ts";
+import { type Pack } from "dovre/packs/types.ts";
 import { type OtelKept, readOtel } from "./data.ts";
 import { otelCard, otelPage, otelProd } from "./view.ts";
 
@@ -12,7 +12,8 @@ export function createOtelPack(opts: { fetchFn?: typeof fetch } = {}): Pack & { 
   return {
     kept: () => kept,
     manifest: {
-      api: PACK_API,
+      api: "1.6",
+      version: "1.0.0",
       id: "otel",
       name: "OpenTelemetry & Prometheus",
       description: "RED metrics, firing alerts and prod versions from Prometheus / Mimir / VictoriaMetrics / Grafana Cloud.",

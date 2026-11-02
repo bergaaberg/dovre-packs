@@ -19,7 +19,7 @@
 import { listRepos } from "dovre/sources/claude.ts";
 import { strictOrigin } from "dovre/strict.ts";
 import { WORK } from "dovre/agents/workdir.ts";
-import { type Pack, PACK_API, type PackContext } from "dovre/packs/types.ts";
+import { type Pack, type PackContext } from "dovre/packs/types.ts";
 import type { Snapshot } from "dovre/gather.ts";
 import { TopoCatalog } from "./catalog.ts";
 import { CloudInventory } from "./cloud.ts";
@@ -117,7 +117,8 @@ export function createTopoPack(o: TopoDeps = {}): Pack {
   };
   return {
     manifest: {
-      api: PACK_API,
+      api: "1.6",
+      version: "1.0.0",
       id: "topo",
       name: "Topo",
       description: "What each repo is, from its peak.yaml: tier, components, rules and docs, and which repos have none",

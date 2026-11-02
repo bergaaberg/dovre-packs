@@ -5,7 +5,7 @@
 import { existsSync } from "node:fs";
 import { html } from "hono/html";
 import { bodyLimit } from "hono/body-limit";
-import { type Pack, PACK_API } from "dovre/packs/types.ts";
+import { type Pack } from "dovre/packs/types.ts";
 import { strictOrigin } from "dovre/strict.ts";
 import {
   cleanUrl,
@@ -102,7 +102,8 @@ export function createDuckDbPack(opts: CreateDuckDbPackOpts = {}): Pack & {
     },
 
     manifest: {
-      api: PACK_API,
+      api: "1.6",
+      version: "1.0.0",
       id: "duckdb",
       name: "DuckDB",
       description: "Agentic analytics on local DuckDB databases, Parquet, CSV, and JSON lines files.",

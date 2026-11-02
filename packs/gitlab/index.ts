@@ -3,13 +3,14 @@
  * project activity and blocked deployments come from GitLab instead of GitHub (one forge per instance).
  * REPO_OWNERS lists the top-level groups to track; their subgroups come along.
  */
-import { type Pack, PACK_API } from "dovre/packs/types.ts";
+import { type Pack } from "dovre/packs/types.ts";
 import { createGitLab, type Fetch, gitlabForge, hostOf } from "./forge.ts";
 
 export function createGitlabPack(opts: { fetchFn?: Fetch } = {}): Pack {
   return {
     manifest: {
-      api: PACK_API,
+      api: "1.6",
+      version: "1.0.0",
       id: "gitlab",
       name: "GitLab",
       description: "GitLab as the forge: merge requests, pipelines, todos, activity and blocked deployments (set FORGE=gitlab).",

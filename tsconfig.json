@@ -11,5 +11,5 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["packs/**/*.ts", "test/*.ts", "index.ts"]
+  "include": ["packs/**/*.ts", "test/*.ts", "scripts/*.ts", "index.ts"]
 }

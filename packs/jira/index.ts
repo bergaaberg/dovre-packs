@@ -16,7 +16,6 @@ import type { Context } from "hono";
 import { html } from "hono/html";
 import type { AppEnv } from "dovre/env.ts";
 import type { ActKind, FindItem, Pack, PackContext } from "dovre/packs/types.ts";
-import { PACK_API } from "dovre/packs/types.ts";
 import { type Html, Notice } from "dovre/ui/kit.ts";
 import { browseHref, type JiraKept, projectsOf, readJira, siteOf, siteOk, viaOf } from "./data.ts";
 import { type Agent, JiraSetupError, loadViaMcp } from "./mcp.ts";
@@ -150,7 +149,8 @@ export function createJiraPack(
   return {
     kept: () => kept,
     manifest: {
-      api: PACK_API,
+      api: "1.6",
+      version: "1.0.0",
       id: "jira",
       name: "Jira",
       description: "Jira issues assigned to me, what moved in my projects, ticket keys as links, and filing tickets.",

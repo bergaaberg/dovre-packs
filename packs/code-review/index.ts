@@ -11,7 +11,7 @@
  * Pack.files script). Without script, the diff is core's.
  */
 import { readFileSync } from "node:fs";
-import { type Pack, PACK_API, type WasmFile } from "dovre/packs/types.ts";
+import { type Pack, type WasmFile } from "dovre/packs/types.ts";
 import { ENGINE_JS, QUERIES, RUNTIME_JS_SHA, SHA } from "./gen.ts";
 
 /** A file from vendor/ (under Node only: hosted, core serves the built copy). */
@@ -66,7 +66,8 @@ const js = (body: string) => new Response(body, { headers: { "Content-Type": "te
 export function createCodeReviewPack(): Pack {
   return {
     manifest: {
-      api: PACK_API,
+      api: "1.6",
+      version: "1.0.0",
       id: "code-review",
       name: "Code review",
       description: "Diffs read as a reviewer does: highlighting, changes marked by token, whitespace and layout changes folded. Runs in your browser (tree-sitter, as WebAssembly).",
