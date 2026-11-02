@@ -5,17 +5,15 @@
  */
 import { html } from "hono/html";
 import { safeUrl } from "dovre/pages/parts.ts";
-import { type Child, Confirm, Empty, KeyValues, Notice, PageHeader, Panel, Pill, type Tone } from "dovre/ui/kit.ts";
+import { type Child, Confirm, KeyValues, Notice, PageHeader, Panel, Pill, type Tone } from "dovre/ui/kit.ts";
 import { FILE_RE } from "./files.ts";
-import { headersText, MAX_BODY_IN, MAX_HEADERS, MAX_NAME, MAX_URL, METHODS, MODES, type Req, type Secret } from "./model.ts";
+import { headersText, MAX_BODY_IN, type Req } from "./model.ts";
 import type { Sent } from "./send.ts";
 import { compare } from "./compare.ts";
 import { parse } from "../json/tools.ts";
 import { changesList, tree } from "../json/view.ts";
 import { type Imported, MAX_SPEC } from "./openapi.ts";
 import { agentHref, debugPrompt, failing } from "./agent.ts";
-import { MAX_CHECK, MAX_CHECKS } from "./checks.ts";
-import { failedSteps, MAX_RUN, passed, type Run, type Step } from "./run.ts";
 
 /** Where the editor's request is from: the environment, the repo and file it's saved to, and the file it was opened from (`opened`, its request `n`, the file's `hash` then). */
 export type Where = { env: string; repo: string; file: string; opened: string; n: string; hash: string };
@@ -25,8 +23,6 @@ export const homeHref = (q: Partial<Where> & { saved?: string } = {}) => {
   const p = new URLSearchParams(Object.entries(q).filter(([, v]) => v) as [string, string][]).toString();
   return safeUrl(`/http${p ? `?${p}` : ""}`);
 };
-export const runHref = (q: { repo: string; file: string; env?: string }) => safeUrl(`/http/run?${new URLSearchParams(Object.entries(q).filter(([, v]) => v) as [string, string][]).toString()}`);
-export const runPageHref = (id: string) => safeUrl(`/http/run/${encodeURIComponent(id)}`);
 export const sentHref = (id: string, view?: string) => safeUrl(`/http/r/${encodeURIComponent(id)}${view ? `?view=${encodeURIComponent(view)}` : ""}`);
 
 const crumbs = [{ href: "/http", label: "HTTP" }];
@@ -37,46 +33,9 @@ const sizeText = (n: number) => (n < 1000 ? `${n} B` : n < 1_000_000 ? `${(n / 1
 
 const options = (values: readonly string[], current: string, label: (v: string) => string = (v) => v) => values.map((v) => html`<option value="${v}"${v === current ? html` selected` : ""}>${label(v)}</option>`);
 
-/** The editor's fields as hidden inputs (a Confirm's second click posts them again). */
+/** A request's fields as hidden inputs (a Confirm's second click posts them again; Open posts them to the Quick view). */
 export function formFields(r: Req, w: Where): Record<string, string> {
   return { name: r.name, method: r.method, url: r.url, headers: headersText(r.headers), query: r.query.join("\n"), mode: r.mode, body: r.body, expect: (r.expect ?? []).join("\n"), env: w.env, repo: w.repo, file: w.file, opened: w.opened, n: w.n, hash: w.hash };
-}
-
-export type EditorOpts = {
-  req: Req;
-  where: Where;
-  envs: string[];
-  repos: string[];
-  /** Where it would go (resolved, masked), or why it can't: worked out without sending anything. */
-  target?: { ok: boolean; text: string };
-  secrets: Secret[];
-};
-
-export function editor(o: EditorOpts): Html {
-  const r = o.req;
-  const w = o.where;
-  return Panel({
-    title: "Request",
-    meta: w.repo && w.opened ? html`<span class="t3">from ${w.repo}/.http/${w.opened}${w.n ? ` #${Number(w.n) + 1}` : ""}</span>` : "",
-    children: html`<form method="post" action="/http/send" data-ctrl-enter>
-<input type="hidden" name="opened" value="${w.opened}"><input type="hidden" name="n" value="${w.n}"><input type="hidden" name="hash" value="${w.hash}">
-<div class="fields"><label class="field"><span class="label">Method</span><select name="method">${options(METHODS, r.method)}</select></label>
-<label class="field"><span class="label">URL</span><input name="url" value="${r.url}" maxlength="${MAX_URL}" required spellcheck="false" autocomplete="off" class="mono" placeholder="{{baseUrl}}/api/items"></label></div>
-${o.target ? html`<p class="notes">${o.target.ok ? html`Goes to <code>${o.target.text}</code>` : html`<span class="t3">${o.target.text}</span>`}</p>` : ""}
-<div class="fields"><label class="field"><span class="label">Headers</span><textarea name="headers" rows="4" maxlength="${MAX_HEADERS}" spellcheck="false" class="mono" placeholder="Accept: application/json&#10;Authorization: Bearer {{API_TOKEN}}">${headersText(r.headers)}</textarea><span class="hint">One per line, Name: value.</span></label>
-<label class="field"><span class="label">Query</span><textarea name="query" rows="4" maxlength="${MAX_URL}" spellcheck="false" class="mono" placeholder="page=1&#10;q={{term}}">${r.query.join("\n")}</textarea><span class="hint">One per line, key=value as it goes in the URL.</span></label></div>
-<div class="fields"><label class="field"><span class="label">Body</span><select name="mode">${options(MODES, r.mode, (m) => ({ none: "None", raw: "Raw", json: "JSON", form: "Form (urlencoded)" })[m] ?? m)}</select></label>
-<label class="field"><span class="label">Environment</span><select name="env"><option value="">None</option>${options(o.envs, w.env)}</select></label></div>
-<label class="field"><textarea name="body" rows="8" maxlength="${MAX_BODY_IN}" spellcheck="false" class="mono" aria-label="Body" placeholder='{ "name": "{{name}}" }'>${r.body}</textarea><span class="hint">Form: one key=value per line, as it goes on the wire. {{name}} fills in from the environment; {{$guid}}, {{$timestamp}} and {{$isoTimestamp}} too.</span></label>
-<label class="field"><span class="label">Checks</span><textarea name="expect" rows="2" maxlength="${MAX_CHECKS * (MAX_CHECK + 20)}" spellcheck="false" class="mono" placeholder="status 200&#10;json $.items[0].id exists">${(r.expect ?? []).join("\n")}</textarea><span class="hint">For running the file as a smoke test, one per line: status 2xx, time &lt; 800, header content-type contains json, body contains ok, json $.id == 3. Saved as # @expect lines. None: any status below 400 passes.</span></label>
-<div class="buttons"><button type="submit" class="primary" data-busy="Sending">Send</button><button type="submit" formaction="/http/curl">Copy as curl</button></div>
-<div class="fields"><label class="field"><span class="label">Save in repo</span><select name="repo"><option value="">Pick a repo</option>${options(o.repos, w.repo)}</select></label>
-<label class="field"><span class="label">File</span><input name="file" value="${w.file}" maxlength="85" spellcheck="false" placeholder="api.http"></label>
-<label class="field"><span class="label">Name</span><input name="name" value="${r.name}" maxlength="${MAX_NAME}" placeholder="List items"></label></div>
-<div class="buttons"><button type="submit" formaction="/http/save">Save</button></div>
-<p class="notes">Sending is one click: it goes out from this machine (it can reach localhost and your VPN), follows no redirects and gives up after 30 s. Saved to <code>.http/</code> in the repo, as written: {{placeholders}} stay, a secret's value is never saved.${o.secrets.length ? html` Secrets: ${o.secrets.map((s, i) => html`${i ? ", " : ""}<code>{{${s.name}}}</code> to ${s.hosts.join(", ")}${s.value ? "" : " (not set)"}`)}.` : ""}</p>
-</form>`,
-  });
 }
 
 function importPanel(curl = ""): Html {
@@ -208,12 +167,18 @@ ${body}`,
 
 const clock = (at: number) => `${new Date(at).toISOString().slice(11, 19)} UTC`;
 
-export function sentPage(o: EditorOpts & { sent: Sent; view: string; prev?: Sent }): Html {
+/** Back to the Quick view with this request: its case when it came from a file, else the request as it was sent (secrets as placeholders). */
+function openAgain(s: Sent): Html {
+  if (s.from.repo && s.from.file) return html`<p><a href="${homeHref({ repo: s.from.repo, env: s.from.env, file: s.from.file, n: s.from.n })}">Open it in the client</a> to change it or send it again.</p>`;
+  return html`<form method="post" action="/http/open" class="inline">${Object.entries(formFields(s.req, { ...noWhere(), env: s.from.env, repo: s.from.repo })).map(([k, v]) => html`<input type="hidden" name="${k}" value="${v}">`)}<button type="submit">Open in the client</button></form>`;
+}
+
+export function sentPage(o: { sent: Sent; view: string; prev?: Sent }): Html {
   return html`${PageHeader({ title: o.sent.req.name || `${o.sent.out.method} request`, sub: html`<span class="mono">${o.sent.out.url}</span>`, crumbs })}
 ${o.view === "diff" ? comparePanel(o.sent, o.prev) : ""}
 ${responseRegion(o.sent, o.view === "diff" ? "pretty" : o.view, o.prev)}
 ${Panel({ title: "Sent", children: o.sent.out.headers.length ? html`<div class="sheet"><table class="data"><tbody>${o.sent.out.headers.map(([k, v]) => html`<tr><th scope="row" class="mono">${k}</th><td class="mono">${v}</td></tr>`)}</tbody></table></div>` : html`<p class="notes">No headers of its own.</p>` })}
-${editor(o)}`;
+${openAgain(o.sent)}`;
 }
 
 /** Saving over what's in a file: what will change, and the second click. */
@@ -232,61 +197,3 @@ ${Confirm({ kind: "http.replace", action: "/http/save", fields: { ...formFields(
 export const fileOk = (f: string) => FILE_RE.test(f) && !f.includes("..");
 
 type Html = ReturnType<typeof html>;
-
-// ── Runs ────────────────────────────────────────────────────────────────────────────────────
-
-export type PlanItem = { method: string; name: string; target: { ok: boolean; text: string }; checks: { text: string; error?: string }[] };
-
-/** What a run of the file will send, before anything is: the second step is one click. */
-export function runPlanPage(o: { repo: string; file: string; env: string; envs: string[]; hash: string; items: PlanItem[]; more: number; problem?: string }): Html {
-  const unsure = o.items.flatMap((x) => x.checks.filter((c) => c.error));
-  const writes = o.items.filter((x) => !["GET", "HEAD", "OPTIONS"].includes(x.method)).length;
-  return html`${PageHeader({ title: html`Run ${o.file}`, sub: html`<span class="mono">${o.repo}/.http/${o.file}</span>: ${o.items.length} request${o.items.length === 1 ? "" : "s"}, one after the other`, crumbs })}
-${o.problem ? Notice({ tone: "warn", children: o.problem }) : ""}
-${o.more ? Notice({ tone: "warn", children: `Only the first ${MAX_RUN} requests run: ${o.more} more are left out.` }) : ""}
-${unsure.length ? Notice({ tone: "warn", children: `${unsure.length} check${unsure.length === 1 ? "" : "s"} can't be read and will fail: fix ${unsure.length === 1 ? "it" : "them"} in the file.` }) : ""}
-${Panel({
-  title: "Run",
-  children: html`<form method="get" action="/http/run" class="fields"><input type="hidden" name="repo" value="${o.repo}"><input type="hidden" name="file" value="${o.file}"><label class="field"><span class="label">Environment</span><select name="env"><option value="">None</option>${options(o.envs, o.env)}</select></label><div class="buttons"><button type="submit">Show it with this</button></div></form>
-<form method="post" action="/http/run"><input type="hidden" name="repo" value="${o.repo}"><input type="hidden" name="file" value="${o.file}"><input type="hidden" name="env" value="${o.env}"><input type="hidden" name="hash" value="${o.hash}">
-<div class="buttons"><button type="submit" class="primary" data-busy="Running">Run ${o.items.length} request${o.items.length === 1 ? "" : "s"}</button></div></form>
-<p class="notes">Each goes out from this machine as a send does (no redirects followed, 30 s at most), shows in history and is logged.${writes ? html` <strong>${writes} of them ${writes === 1 ? "isn't a read" : "aren't reads"}</strong> (POST, PUT, PATCH or DELETE): they change things wherever they go.` : ""} A request that can't go (a missing variable, a secret's wrong host) fails without being sent; the rest still run.</p>`,
-})}
-${Panel({
-  title: "Requests",
-  children: html`<ol class="list">${o.items.map(
-    (x) =>
-      html`<li class="item"><strong>${x.method}</strong> ${x.name} ${x.target.ok ? html`<span class="t3 mono">${x.target.text}</span>` : html`<span class="t3">${x.target.text}</span>`}${x.checks.length ? html`<ul class="list">${x.checks.map((c) => html`<li class="item mono">${c.text}${c.error ? html` <span class="t3">(${c.error})</span>` : ""}</li>`)}</ul>` : html` <span class="t3">· any status below 400</span>`}</li>`,
-  )}</ol>`,
-})}
-<p><a href="${homeHref({ repo: o.repo, env: o.env })}">Back</a></p>`;
-}
-
-const stepPill = (s: Step) =>
-  s.state === "passed" ? Pill({ tone: "ok", children: "passed" }) : s.state === "failed" ? Pill({ tone: "bad", children: "failed" }) : Pill({ tone: "neutral", children: s.state === "sending" ? "sending" : "waiting" });
-
-/** A run's results, swapped in place as each request comes back. */
-export function runRegion(r: Run, hasSent: (id: string) => boolean): Html {
-  const ok = passed(r);
-  const bad = failedSteps(r);
-  const summary =
-    r.state === "running"
-      ? html`<p class="notes" data-pending><span class="spinner"></span> Running: ${ok + bad} of ${r.steps.length} done${bad ? `, ${bad} failed` : ""}…</p>`
-      : Notice({ tone: bad ? "bad" : "ok", children: bad ? `${bad} of ${r.steps.length} failed.` : `All ${r.steps.length} passed.` });
-  return html`<div data-live id="http-run-${r.id}">${summary}${Panel({
-    title: "Requests",
-    meta: html`<span class="t3">${r.env ? `environment ${r.env}` : "no environment"}</span>`,
-    children: html`<ol class="list">${r.steps.map(
-      (s) =>
-        html`<li class="item">${stepPill(s)} <strong>${s.method}</strong> ${s.sentId && hasSent(s.sentId) ? html`<a href="${sentHref(s.sentId)}">${s.name || s.url}</a>` : s.name || s.url}${s.name ? html` <span class="t3 mono">${s.url}</span>` : ""}${s.status !== undefined ? html` <span class="t3">· ${s.status} · ${s.ms} ms</span>` : ""}
-${s.error ? html`<p class="notes">${s.error}</p>` : ""}${s.checks.length ? html`<ul class="list">${s.checks.map((c) => html`<li class="item">${Pill({ tone: c.ok ? "ok" : "bad", children: c.ok ? "ok" : "no" })} <span class="mono">${c.text}</span>${c.got !== undefined ? html` <span class="t3">got ${c.got}</span>` : ""}</li>`)}</ul>` : ""}</li>`,
-    )}</ol>`,
-  })}</div>`;
-}
-
-export function runPage(r: Run, hasSent: (id: string) => boolean): Html {
-  return html`${PageHeader({ title: html`Run ${r.file}`, sub: html`<span class="mono">${r.repo}/.http/${r.file}</span> · ${clock(r.at)}`, crumbs })}
-${runRegion(r, hasSent)}
-<div class="buttons"><a class="btn sm" href="${runHref({ repo: r.repo, file: r.file, env: r.env })}">Run it again</a> <a class="btn sm ghost" href="${homeHref({ repo: r.repo, env: r.env })}">Back to the client</a></div>`;
-}
-

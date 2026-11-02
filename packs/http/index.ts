@@ -14,268 +14,67 @@
  *    a new file or a request added to the end is one click (nothing that was there changes);
  *    replacing a request in a file is a two-click Confirm (`http.replace`, one click if I set it so on
  *    Settings → Writes). Both re-check the file first.
- *  - Agents (agent.ts): drafted prompts on core's /agents/new, and the `send` tool on Dovre's MCP
- *    server (Pack.tools): a running agent turn's GET or HEAD, only to this machine or HTTP_AGENT_HOSTS,
+ *  - Agents (agent.ts): drafted prompts on core's /agents/new, and the `send` tool (agent-send.ts) on
+ *    Dovre's MCP server (Pack.tools): a running agent turn's GET or HEAD, only to this machine or HTTP_AGENT_HOSTS,
  *    secrets bound as for any send, the answer masked and cut short, in history, logged. Its
  *    `catalog` and `run` tools (agent-tools.ts) run a committed story, writes only where the env
  *    file allows agents to, logged as `http.agentRun`.
- *  - Chaining (chain.ts): `{{login.response.body.token}}` takes a value from the response to the request
- *    named login: in a run, the one earlier in it; in the editor, its newest send in history. Masked
+ *  - Chaining (chain.ts): `{{login.response.body.token}}` takes a value from the newest send in
+ *    history of the request named login (a story carries values with take: instead). Masked
  *    values aren't reused, and the value meets the same host check and secret binding as typed text.
- *  - Running a file as a smoke test (run.ts, checks.ts): GET /http/run shows what it will send and
- *    each request's `# @expect` checks, sending nothing; one click on POST /http/run sends them one
- *    after the other (each an ordinary send, re-checked against the file as it was shown), and the
- *    results fill in over the hub. Logged as `http.run` (the file, how many passed).
+ *  - Running an endpoint's cases (quick-routes.ts, checks.ts): each held to its `# @expect` checks,
+ *    re-checked against the file as it was shown. Logged as `http.run`.
  *  - Running a story (story.ts, runner.ts, stories-routes.ts): GET /http/story shows its steps,
  *    sending nothing; one click runs them with their setups, re-checked against every file as shown.
  *    Logged as `http.run`; the newest runs of each story are kept without values or responses.
  *  - A span on otel-sink's trace page (core's "span.actions" slot, trace.ts) opens in the editor
  *    from what the trace kept (method, route, a query-less URL): nothing is sent.
- *  - Importing curl, an OpenAPI spec (openapi.ts) or a Postman / Bruno collection (collections.ts)
- *    only reads the text: nothing is fetched or sent. Saving the requests adds them to a new file or the end of one (`http.save`, one click).
+ *  - Importing curl, an OpenAPI spec or a Postman / Bruno collection (import-routes.ts) only reads
+ *    the text: nothing is fetched or sent. Saving the requests adds them to a new file or the end of one (`http.save`, one click).
+ *
+ * Routes live by view: the Quick view (quick-routes.ts), sending and the response page
+ * (send-routes.ts), saving (save-routes.ts), importing (import-routes.ts), stories
+ * (stories-routes.ts). What they all send through is sending.ts.
  */
 import { html } from "hono/html";
-import type { Context } from "hono";
-import { logAction } from "dovre/actions/deploys.ts";
-import type { AppEnv } from "dovre/env.ts";
-import { type Pack, type PackContext, PACK_API, type ToolCall, type ToolResult } from "dovre/packs/types.ts";
-import { AGENT_BODY, AGENT_METHODS, agentHosts, agentMayReach, forAgent } from "./agent.ts";
+import { type Pack, PACK_API } from "dovre/packs/types.ts";
 import { strictOrigin } from "dovre/strict.ts";
-import { codeDirOf, listFiles, listRepos, readFile, repoEnvs, repoRoot, writeFile } from "./files.ts";
-import { blankReq, CREDENTIAL_HEADERS, headerLines, MAX_URL, envNames, fromCurl, masker, parseEnvs, parseHttp, parseSecrets, placeholdSecrets, prepare, type Req, reqOfForm, secretIn, serializeReq, toCurl, varsOf, withReq } from "./model.ts";
-import { createHistory, failure, type History, type Sent, sendOnce } from "./send.ts";
-import { previous } from "./compare.ts";
 import { styles as jsonStyles } from "../json/view.ts";
-import { confirmSavePage, fileOk, homeHref, importPage, noWhere, openapiPage, runPage, runPageHref, runPlanPage, sentHref, sentPage, type Where } from "./view.ts";
-import { createResults, type Results } from "./cases.ts";
-import { blanksOfForm, fillBlanks } from "./quick.ts";
-import { createQuick } from "./quick-routes.ts";
-import { createStories } from "./stories-routes.ts";
+import { agentHosts } from "./agent.ts";
+import { sendTool } from "./agent-send.ts";
 import { createAgentTools } from "./agent-tools.ts";
-import { quickHref, quickStyles } from "./quick-view.ts";
+import { createResults, type Results } from "./cases.ts";
+import { mountImport } from "./import-routes.ts";
+import { createQuick } from "./quick-routes.ts";
+import { quickStyles } from "./quick-view.ts";
+import { mountSave } from "./save-routes.ts";
+import { createHistory, type History } from "./send.ts";
+import { mountSend } from "./send-routes.ts";
+import { createSending, type Draw } from "./sending.ts";
+import { createStories } from "./stories-routes.ts";
 import { storiesStyles } from "./stories-view.ts";
-import type { Child, Tone } from "dovre/ui/kit.ts";
-import { fileNameOf, fromOpenApi, MAX_SPEC } from "./openapi.ts";
-import { fromCollection, varLines } from "./collections.ts";
-import type { Refs } from "./chain.ts";
-import type { Resp } from "./send.ts";
 import { spanActions } from "./trace.ts";
-
-/** Pasted text as requests: a Postman or Bruno collection, else an OpenAPI spec. */
-const importText = (text: string) => fromCollection(text) ?? fromOpenApi(text);
-import { parseCheck, runChecks } from "./checks.ts";
-import { createRuns, failedSteps, MAX_RUN, passed, type Run } from "./run.ts";
-
-/** How a response's body is shown, or `diff` against the send before it. */
-const VIEWS = ["pretty", "tree", "raw", "diff"] as const;
+import { importPage } from "./view.ts";
 
 export type CreateHttpPackOpts = { fetchFn?: typeof fetch; now?: () => number; timeoutMs?: number; /** How a story's until: waits between tries (tests pass a quick one). */ wait?: (ms: number) => Promise<void> };
 
-const str = (v: unknown, max = 200) => (typeof v === "string" ? v.slice(0, max) : "");
-
-function whereOf(f: Record<string, unknown>): Where {
-  return { env: str(f.env, 64), repo: str(f.repo, 100), file: str(f.file, 85).trim(), opened: str(f.opened, 85), n: /^\d{1,4}$/.test(str(f.n)) ? str(f.n) : "", hash: /^[0-9a-f]{1,64}$/.test(str(f.hash)) ? str(f.hash) : "" };
-}
-
 export function createHttpPack(opts: CreateHttpPackOpts = {}): Pack & { history(): History; results(): Results } {
   const history = createHistory();
-  const runs = createRuns();
   const results = createResults();
-  const now = opts.now ?? Date.now;
+  const sending = createSending({ history, now: opts.now ?? Date.now, fetchFn: opts.fetchFn, timeoutMs: opts.timeoutMs });
+  const { secretsOf, varsFor } = sending;
 
-  const secretsOf = (ctx: PackContext) => parseSecrets(ctx.env.HTTP_SECRETS, ctx.env);
+  const quick = createQuick({ ...sending, results });
+  const stories = createStories({ ...sending, wait: opts.wait });
+  const agentTools = createAgentTools({ stories, secretsOf, varsFor });
 
-  /** The variables for a request: the repo's and this instance's environments, then the file's own. */
-  function varsFor(ctx: PackContext, w: Where): { vars: Record<string, string>; envs: string[] } {
-    const mine = parseEnvs(ctx.env.HTTP_ENVS);
-    const root = w.repo ? repoRoot(codeDirOf(ctx.env), w.repo) : null;
-    const theirs = repoEnvs(root);
-    let fileVars: Record<string, string> = {};
-    if (root && w.opened && fileOk(w.opened)) {
-      try {
-        fileVars = parseHttp(readFile(root, w.opened).text).vars;
-      } catch {
-        // A file that's gone has no variables.
-      }
-    }
-    return { vars: { ...varsOf(w.env, theirs, mine), ...fileVars }, envs: envNames(theirs, mine) };
-  }
-
-  /** Responses for `{{name.response…}}` in the editor: the newest send of that name, from the same file if there's one. */
-  function sentRefs(w: Where): Refs {
-    return (name) => {
-      const done = history.list().filter((s) => s.req.name === name && s.state === "done" && s.resp);
-      return (done.find((s) => s.from.repo === w.repo && s.from.file === w.opened) ?? done[0])?.resp;
-    };
-  }
-
-  /** Where it would go, worked out without sending: the URL masked, or why it won't go. */
-  function targetOf(ctx: PackContext, r: Req, w: Where, refs: Refs = sentRefs(w)): { ok: boolean; text: string } | undefined {
-    if (!r.url) return undefined;
-    const secrets = secretsOf(ctx);
-    const p = prepare(r, varsFor(ctx, w).vars, secrets, now(), refs);
-    // A value that comes back during a run is shown as written, not URL-encoded.
-    return p.ok ? { ok: true, text: masker(secrets)(p.url).replace(/%7B%7B(.*?)%7D%7D/gi, "{{$1}}") } : { ok: false, text: p.error };
-  }
-
-  /** A page for a request that came back (refused, imported, opened): the Quick view, or the import page for pasted text. */
-  function draw(ctx: PackContext, c: Context<AppEnv>, r: Req, w: Where, extra: { flash?: { tone: Tone; text: Child }; curl?: string; spec?: string; curlOut?: string; blanks?: Map<string, string>; ep?: string } = {}, status = 200) {
+  const draw: Draw = (ctx, c, r, w, extra = {}, status = 200) => {
     if (extra.curl !== undefined || extra.spec !== undefined) {
       const body = importPage({ flash: extra.flash, curl: extra.curl, spec: extra.spec });
       return ctx.page(c, { title: "Import requests", body, current: "/http" }).then((res) => (status === 200 ? res : new Response(res.body, { status, headers: res.headers })));
     }
     return quick.render(ctx, c, { where: w, ep: extra.ep, req: r.url ? r : undefined, blanks: extra.blanks, flash: extra.flash, curlOut: extra.curlOut, status });
-  }
-
-  /** Sends in the background; the page it redirects to fills in when the answer is here. */
-  function start(ctx: PackContext, r: Req, w: Where, p: Extract<ReturnType<typeof prepare>, { ok: true }>, by?: "agent"): { s: Sent; settled: Promise<void> } {
-    const secrets = secretsOf(ctx);
-    const mask = masker(secrets);
-    const id = crypto.randomUUID();
-    const s: Sent = {
-      id,
-      at: now(),
-      req: placeholdSecrets(r, secrets),
-      from: { env: w.env, repo: w.repo, file: w.opened, n: w.n, hash: w.hash },
-      out: { method: p.method, url: mask(p.url), headers: p.headers.map(([k, v]) => [k, CREDENTIAL_HEADERS.has(k.toLowerCase()) ? "••••" : mask(v)]) },
-      state: "sending",
-      ...(by ? { by } : {}),
-    };
-    history.add(s);
-    const u = new URL(p.url);
-    const target = mask(`${p.method} ${u.origin}${u.pathname}`).slice(0, 300);
-    const settled = sendOnce(p, { fetchFn: opts.fetchFn ?? fetch, mask, now, timeoutMs: opts.timeoutMs })
-      .then(
-        async (resp) => {
-          s.resp = resp;
-          s.state = "done";
-          await logAction(ctx.db, { kind: "http.send", target, detail: `${resp.status} · ${resp.ms} ms${by ? " · by an agent" : ""}`, ok: true });
-        },
-        async (e) => {
-          s.state = "failed";
-          s.error = failure(e, mask);
-          await logAction(ctx.db, { kind: "http.send", target, detail: by ? "by an agent" : undefined, ok: false, error: s.error });
-        },
-      )
-      .catch((e) => ctx.log(`http: couldn't log a send: ${String((e as Error)?.message ?? e).slice(0, 200)}`))
-      .finally(() => ctx.publish(["http", `http-sent:${id}`]));
-    return { s, settled };
-  }
-
-  const quick = createQuick({
-    history,
-    results,
-    now,
-    secretsOf,
-    varsFor,
-    sentRefs,
-    targetOf,
-    prepare: (ctx, r, w, refs) => prepare(r, varsFor(ctx, w).vars, secretsOf(ctx), now(), refs),
-    start,
-  });
-
-  const stories = createStories({
-    history,
-    now,
-    secretsOf,
-    varsFor,
-    prepare: (ctx, r, w, refs) => prepare(r, varsFor(ctx, w).vars, secretsOf(ctx), now(), refs),
-    start,
-    wait: opts.wait,
-  });
-  const agentTools = createAgentTools({ stories, secretsOf, varsFor });
-
-  /** A repo's .http file and its requests, for a run. */
-  function loadRun(ctx: PackContext, repo: string, file: string) {
-    const root = repoRoot(codeDirOf(ctx.env), repo);
-    if (!root) return { ok: false as const, error: "That repo isn't a checkout in your code folder." };
-    if (!fileOk(file)) return { ok: false as const, error: "A request file is a plain name ending in .http." };
-    try {
-      const f = readFile(root, file);
-      const reqs = parseHttp(f.text).reqs;
-      if (!reqs.length) return { ok: false as const, error: `${f.name} has no requests to run.` };
-      return { ok: true as const, f, reqs };
-    } catch (e) {
-      return { ok: false as const, error: (e as Error).message };
-    }
-  }
-
-  function planPage(ctx: PackContext, c: Context<AppEnv>, repo: string, env: string, got: Extract<ReturnType<typeof loadRun>, { ok: true }>, problem?: string) {
-    const w: Where = { ...noWhere(), env, repo, opened: got.f.name };
-    // A response from a request above it comes back during the run: it's shown as written.
-    const items = got.reqs.slice(0, MAX_RUN).map((r, i) => ({
-      method: r.method,
-      name: r.name,
-      target: targetOf(ctx, r, w, (name) => (got.reqs.slice(0, i).some((x) => x.name === name) ? "later" : undefined)) ?? { ok: false, text: "No URL." },
-      checks: (r.expect ?? []).map((t) => {
-        const p = parseCheck(t);
-        return { text: t, ...("error" in p ? { error: p.error } : {}) };
-      }),
-    }));
-    c.header("Cache-Control", "no-store");
-    return ctx
-      .page(c, { title: `Run ${got.f.name}`, current: "/http", body: runPlanPage({ repo, file: got.f.name, env, envs: varsFor(ctx, w).envs, hash: got.f.hash, items, more: Math.max(0, got.reqs.length - MAX_RUN), problem }) })
-      .then((res) => (problem ? new Response(res.body, { status: 409, headers: res.headers }) : res));
-  }
-
-  /** Sends a run's requests one after the other, holding each response to its checks. */
-  async function execute(ctx: PackContext, run: Run, reqs: Extract<ReturnType<typeof loadRun>, { ok: true }>["reqs"], hash: string) {
-    const w: Where = { ...noWhere(), env: run.env, repo: run.repo, file: run.file, opened: run.file, hash };
-    const secrets = secretsOf(ctx);
-    const mask = masker(secrets);
-    const vars = varsFor(ctx, w).vars;
-    const publish = () => ctx.publish(["http", `http-run:${run.id}`]);
-    // What came back so far in this run, by request name, for `{{name.response…}}`.
-    const back = new Map<string, Resp>();
-    for (const step of run.steps) {
-      const { span: _span, ...r } = reqs[step.n]!;
-      const p = prepare(r, vars, secrets, now(), (name) => back.get(name));
-      if (!p.ok) {
-        Object.assign(step, { state: "failed", error: `Not sent: ${p.error}` });
-        publish();
-        continue;
-      }
-      Object.assign(step, { state: "sending", url: mask(p.url) });
-      publish();
-      const { s, settled } = start(ctx, r, { ...w, n: String(step.n) }, p);
-      step.sentId = s.id;
-      await settled;
-      if (s.state !== "done" || !s.resp) {
-        Object.assign(step, { state: "failed", error: `Nothing came back: ${s.error ?? "it failed"}.` });
-      } else {
-        if (r.name) back.set(r.name, s.resp);
-        step.status = s.resp.status;
-        step.ms = s.resp.ms;
-        step.checks = runChecks(r.expect, s.resp);
-        step.state = step.checks.every((x) => x.ok) ? "passed" : "failed";
-      }
-      publish();
-    }
-    run.state = "done";
-    const bad = failedSteps(run);
-    await logAction(ctx.db, { kind: "http.run", target: `${run.repo}/.http/${run.file}`, detail: `${passed(run)} of ${run.steps.length} passed${run.env ? ` · ${run.env}` : ""}`.slice(0, 200), ok: bad === 0, error: bad ? `${bad} failed` : undefined });
-  }
-
-  /** The `send` tool: an agent's GET or HEAD, to this machine or a host I listed; what came back, masked. */
-  async function agentSend(ctx: PackContext, a: Record<string, unknown>, call: ToolCall, listed: string[]): Promise<ToolResult> {
-    const method = typeof a.method === "string" ? a.method.toUpperCase() : "GET";
-    if (!(AGENT_METHODS as readonly string[]).includes(method)) return { text: `Only ${AGENT_METHODS.join(" and ")} requests: an agent can read, not change things. Nothing was sent.`, error: true };
-    const url = str(a.url, MAX_URL).replace(/[\r\n]/g, "").trim();
-    if (!url) return { text: "A url is needed.", error: true };
-    const headers: [string, string][] = a.headers && typeof a.headers === "object" && !Array.isArray(a.headers) ? Object.entries(a.headers as Record<string, unknown>).slice(0, 50).flatMap(([k, v]) => (typeof v === "string" ? headerLines(`${k}: ${v.slice(0, 4000)}`) : [])) : [];
-    const r: Req = { ...blankReq(), method: method as Req["method"], url, headers };
-    const w: Where = { ...noWhere(), env: str(a.env, 64), repo: call.repo };
-    const secrets = secretsOf(ctx);
-    const p = prepare(r, varsFor(ctx, w).vars, secrets, now());
-    if (!p.ok) return { text: p.error, error: true };
-    if (!agentMayReach(p.url, listed)) {
-      const host = masker(secrets)(new URL(p.url).host);
-      return { text: `An agent may only send to this machine (localhost) or the hosts in HTTP_AGENT_HOSTS; ${host} isn't one. Nothing was sent.`, error: true };
-    }
-    const { s, settled } = start(ctx, r, w, p, "agent");
-    await settled;
-    return { text: forAgent(s), error: s.state !== "done" };
-  }
+  };
 
   return {
     history: () => history,
@@ -303,27 +102,7 @@ export function createHttpPack(opts: CreateHttpPackOpts = {}): Pack & { history(
 
     tools: (ctx) => {
       const listed = agentHosts(ctx.env.HTTP_AGENT_HOSTS);
-      if (!listed) return [];
-      const where = ["this machine (localhost)", ...listed].join(", ");
-      return [
-        {
-          name: "send",
-          description: `Send a GET or HEAD request through Dovre's HTTP client and get the response back (status, a few headers, the body cut at ${AGENT_BODY} characters). Only to ${where}; anything else is refused. {{name}} fills in from the environment (env) and the repo's .http/http-client.env.json; a secret {{NAME}} fills in only for the hosts it's bound to, and its value never comes back (shown as ••••). No redirects are followed; 30 s at most. Each send shows in the HTTP client's history.`,
-          input: {
-            type: "object",
-            properties: {
-              method: { type: "string", enum: [...AGENT_METHODS], description: "GET (default) or HEAD." },
-              url: { type: "string", description: "http:// or https:// URL; may use {{baseUrl}} and other variables." },
-              headers: { type: "object", additionalProperties: { type: "string" }, description: "Request headers, e.g. {\"Accept\": \"application/json\", \"Authorization\": \"Bearer {{API_TOKEN}}\"}." },
-              env: { type: "string", description: "An environment's name, for its variables." },
-            },
-            required: ["url"],
-            additionalProperties: false,
-          },
-          run: (a, c, call) => agentSend(c, a, call, listed),
-        },
-        ...agentTools.tools(listed),
-      ];
+      return listed ? [sendTool(sending, listed), ...agentTools.tools(listed)] : [];
     },
 
     nav: () => [{ href: "/http", title: "HTTP", icon: "arrow", group: "Code" }],
@@ -333,7 +112,7 @@ export function createHttpPack(opts: CreateHttpPackOpts = {}): Pack & { history(
     about: (_ctx, path) => (path.startsWith("/http") ? "The HTTP client (requests and responses aren't shared)." : undefined),
 
     slots: () => ({
-      "actions.what": ({ kind }) => (kind === "http.send" ? "Sent an HTTP request" : kind === "http.run" ? "Ran HTTP requests as a test (a file, cases or a story)" : kind === "http.agentRun" ? "An agent ran an HTTP story" : kind === "http.save" ? "Saved an HTTP request to a repo" : undefined),
+      "actions.what": ({ kind }) => (kind === "http.send" ? "Sent an HTTP request" : kind === "http.run" ? "Ran HTTP requests as a test (cases or a story)" : kind === "http.agentRun" ? "An agent ran an HTTP story" : kind === "http.save" ? "Saved an HTTP request to a repo" : undefined),
       "span.actions": spanActions,
     }),
 
@@ -350,207 +129,9 @@ export function createHttpPack(opts: CreateHttpPackOpts = {}): Pack & { history(
 
       quick.mount(app, ctx);
       stories.mount(app, ctx);
-
-      app.get("/http/import", (c) => draw(ctx, c, blankReq(), noWhere(), { curl: "", spec: "" }));
-
-      app.post("/http/send", async (c) => {
-        const f = await c.req.parseBody();
-        const typed = reqOfForm(f);
-        const w = whereOf(f);
-        // From the Quick view: its blanks go in as typed, and it comes back to the same view.
-        const fromQuick = f.back === "quick";
-        const blanks = blanksOfForm(f);
-        const ep = str(f.ep, 600);
-        const filled = fillBlanks(typed, blanks);
-        if (!filled.ok) return draw(ctx, c, typed, w, { flash: { tone: "warn", text: filled.error }, blanks, ep }, 400);
-        const r = filled.req;
-        const p = prepare(r, varsFor(ctx, w).vars, secretsOf(ctx), now(), sentRefs(w));
-        if (!p.ok) return draw(ctx, c, typed, w, { flash: { tone: "warn", text: p.error }, blanks, ep }, 400);
-        if (w.repo) quick.remember(w.repo, blanks);
-        const { s } = start(ctx, r, w, p);
-        return c.redirect(fromQuick ? quickHref({ repo: w.repo, env: w.env, ep, file: w.opened, n: w.n }) : sentHref(s.id), 303);
-      });
-
-      app.get("/http/r/:id", async (c) => {
-        const s = history.get(c.req.param("id"));
-        if (!s) return c.redirect("/http", 303);
-        const w: Where = { ...noWhere(), env: s.from.env, repo: s.from.repo, opened: s.from.file, file: s.from.file, n: s.from.n, hash: s.from.hash };
-        const codeDir = codeDirOf(ctx.env);
-        c.header("Cache-Control", "no-store");
-        return ctx.page(c, {
-          title: s.req.name || "HTTP response",
-          current: "/http",
-          head: html`<meta name="u-topics" content="http http-sent:${s.id}">`,
-          body: sentPage({ sent: s, view: VIEWS.find((v) => v === c.req.query("view")) ?? "pretty", prev: previous(history.list(), s), req: s.req, where: w, envs: varsFor(ctx, w).envs, repos: listRepos(codeDir), secrets: secretsOf(ctx) }),
-        });
-      });
-
-      // What a run of the file would send, and its checks: nothing is sent here.
-      app.get("/http/run", async (c) => {
-        const q = c.req.query();
-        const repo = str(q.repo, 100);
-        const env = str(q.env, 64);
-        const got = loadRun(ctx, repo, str(q.file, 85));
-        if (!got.ok) return draw(ctx, c, blankReq(), { ...noWhere(), repo, env }, { flash: { tone: "warn", text: got.error } }, 400);
-        return planPage(ctx, c, repo, env, got);
-      });
-
-      app.post("/http/run", async (c) => {
-        const f = await c.req.parseBody();
-        const repo = str(f.repo, 100);
-        const env = str(f.env, 64);
-        const got = loadRun(ctx, repo, str(f.file, 85));
-        if (!got.ok) return draw(ctx, c, blankReq(), { ...noWhere(), repo, env }, { flash: { tone: "warn", text: got.error } }, 400);
-        // Only what was shown runs: a file that changed since is shown again.
-        if (got.f.hash !== str(f.hash, 64)) return planPage(ctx, c, repo, env, got, `${got.f.name} changed since it was shown: nothing was sent. This is what's in it now.`);
-        const mask = masker(secretsOf(ctx));
-        const run: Run = {
-          id: crypto.randomUUID(),
-          at: now(),
-          repo,
-          file: got.f.name,
-          env,
-          state: "running",
-          steps: got.reqs.slice(0, MAX_RUN).map((r, n) => ({ n, name: r.name, method: r.method, url: mask(r.url), state: "waiting", checks: [] })),
-        };
-        runs.add(run);
-        void execute(ctx, run, got.reqs, got.f.hash)
-          .catch((e) => {
-            run.state = "done";
-            ctx.log(`http: a run stopped: ${String((e as Error)?.message ?? e).slice(0, 200)}`);
-          })
-          .finally(() => ctx.publish(["http", `http-run:${run.id}`]));
-        return c.redirect(runPageHref(run.id), 303);
-      });
-
-      app.get("/http/run/:id", async (c) => {
-        const run = runs.get(c.req.param("id"));
-        if (!run) return c.redirect("/http", 303);
-        c.header("Cache-Control", "no-store");
-        return ctx.page(c, { title: `Run ${run.file}`, current: "/http", head: html`<meta name="u-topics" content="http http-run:${run.id}">`, body: runPage(run, (id) => !!history.get(id)) });
-      });
-
-      app.post("/http/curl", async (c) => {
-        const f = await c.req.parseBody();
-        const typed = reqOfForm(f);
-        const w = whereOf(f);
-        const blanks = blanksOfForm(f);
-        const filled = fillBlanks(typed, blanks);
-        if (!filled.ok) return draw(ctx, c, typed, w, { flash: { tone: "warn", text: filled.error }, blanks, ep: str(f.ep, 600) }, 400);
-        const r = filled.req;
-        return draw(ctx, c, typed, w, { curlOut: r.url ? toCurl(r, varsFor(ctx, w).vars, secretsOf(ctx), now()) : "", blanks, ep: str(f.ep, 600) });
-      });
-
-      app.post("/http/import", async (c) => {
-        const f = await c.req.parseBody();
-        const text = str(f.curl, 256_000);
-        const got = fromCurl(text);
-        if (!got.ok) return draw(ctx, c, blankReq(), noWhere(), { flash: { tone: "warn", text: got.error }, curl: masker(secretsOf(ctx))(text) }, 400);
-        const r = placeholdSecrets(got.req, secretsOf(ctx));
-        return draw(ctx, c, r, noWhere(), { flash: { tone: "neutral", text: got.notes.length ? `Imported. ${got.notes.join(" ")}` : "Imported: nothing was sent." } });
-      });
-
-      // A request from an imported spec, into the editor: nothing is sent.
-      app.post("/http/open", async (c) => {
-        const f = await c.req.parseBody();
-        const r = placeholdSecrets(reqOfForm(f), secretsOf(ctx));
-        const text = f.from === "trace" ? `Opened from a trace: nothing was sent. A trace keeps no headers or body${r.url.includes("{{") ? ", and the {{…}} parts need values (an environment's baseUrl, the path's ids)" : ""}.` : "Opened: nothing was sent.";
-        return draw(ctx, c, r, noWhere(), { flash: { tone: "neutral", text } });
-      });
-
-      app.post("/http/openapi", async (c) => {
-        const f = await c.req.parseBody();
-        const spec = str(f.spec, MAX_SPEC);
-        const got = importText(spec);
-        if (!got.ok) return draw(ctx, c, blankReq(), noWhere(), { flash: { tone: "warn", text: got.error }, spec }, 400);
-        return ctx.page(c, { title: got.title, current: "/http", body: openapiPage({ got, spec, repos: listRepos(codeDirOf(ctx.env)), repo: str(f.repo, 100), file: fileNameOf(got.title) }) });
-      });
-
-      // Every operation added to a repo's .http file: a new file, or at the end of one (nothing there changes).
-      app.post("/http/openapi/save", async (c) => {
-        const f = await c.req.parseBody();
-        const spec = str(f.spec, MAX_SPEC);
-        const repo = str(f.repo, 100);
-        const file = str(f.file, 85).trim();
-        const got = importText(spec);
-        if (!got.ok) return draw(ctx, c, blankReq(), noWhere(), { flash: { tone: "warn", text: got.error }, spec }, 400);
-        const fail = async (problem: string) => {
-          const res = await ctx.page(c, { title: got.title, current: "/http", body: openapiPage({ got, spec, repos: listRepos(codeDirOf(ctx.env)), repo, file, problem }) });
-          return new Response(res.body, { status: 400, headers: res.headers });
-        };
-        const root = repoRoot(codeDirOf(ctx.env), repo);
-        if (!root) return fail("Pick a repo (a checkout directly in your code folder) to save in.");
-        if (!fileOk(file)) return fail("The file is a plain name ending in .http (api.http).");
-        let current: { text: string; hash: string } | undefined;
-        try {
-          current = readFile(root, file);
-        } catch (e) {
-          const m = (e as Error).message;
-          if (!m.endsWith("isn't there.")) return fail(m);
-        }
-        const blocks = got.reqs.map(serializeReq).join("\n");
-        const head =
-          got.from === "an OpenAPI spec"
-            ? `# ${got.title}: imported from an OpenAPI spec.${got.server ? ` Its server: ${got.server}` : ""}\n# Set {{baseUrl}} in an environment.\n\n`
-            : `# ${got.title}: imported from ${got.from}.\n${got.vars?.length ? `${varLines(got.vars)}\n` : ""}\n`;
-        const text = current ? `${current.text.replace(/\s+$/, "")}\n\n${blocks}` : head + blocks;
-        const leak = secretIn(text, secretsOf(ctx));
-        if (leak) return fail(`That has ${leak.name}'s value in it: nothing was saved.`);
-        const target = `${repo}/.http/${file}`;
-        const done = writeFile(root, file, text, current ? current.hash : "");
-        await logAction(ctx.db, { kind: "http.save", target, detail: `${current ? "added" : "created"} · ${got.reqs.length} from ${got.from.replace(/^an? /, "")} (${got.title})`.slice(0, 200), ok: done.ok, error: done.ok ? undefined : done.error });
-        if (!done.ok) return fail(`${done.error} Nothing was saved.`);
-        const n = current ? parseHttp(current.text).reqs.length : 0;
-        return c.redirect(homeHref({ repo, file, n: String(n), saved: "1" }), 303);
-      });
-
-      app.post("/http/save", async (c) => {
-        const f = await c.req.parseBody();
-        const typed = reqOfForm(f);
-        const w = whereOf(f);
-        // The Quick view's blanks are saved as typed: a case is the request with its values in.
-        const blanks = blanksOfForm(f);
-        const filled = fillBlanks(typed, blanks);
-        const r = filled.ok ? filled.req : typed;
-        const refuse = (text: string) => draw(ctx, c, r, w, { flash: { tone: "warn", text }, ep: str(f.ep, 600) }, 400);
-        if (!filled.ok) return refuse(filled.error.replace("nothing was sent", "nothing was saved"));
-        const root = repoRoot(codeDirOf(ctx.env), w.repo);
-        if (!root) return refuse("Pick a repo (a checkout directly in your code folder) to save in.");
-        if (!fileOk(w.file)) return refuse("The file is a plain name ending in .http (api.http).");
-        if (!r.url) return refuse("A request needs a URL to be saved.");
-        const leak = secretIn(serializeReq(r), secretsOf(ctx));
-        if (leak) return refuse(`That request has ${leak.name}'s value in it: write {{${leak.name}}} instead. Nothing was saved.`);
-        const target = `${w.repo}/.http/${w.file}`;
-        const detail = `${r.method} ${r.name || "(unnamed)"}`.slice(0, 200);
-        const log = (ok: boolean, what: string, error?: string) => logAction(ctx.db, { kind: "http.save", target, detail: `${what} · ${detail}`, ok, error });
-
-        // Re-check what's there now.
-        let current: { text: string; hash: string } | undefined;
-        try {
-          current = readFile(root, w.file);
-        } catch (e) {
-          const m = (e as Error).message;
-          if (!m.endsWith("isn't there.")) return refuse(m);
-        }
-        const replacing = current && w.opened === w.file && w.n !== "" && w.hash;
-        if (replacing && current!.hash !== w.hash) {
-          await log(false, "replace", "changed since it was opened");
-          return refuse(`${w.file} changed since it was opened: nothing was saved. Open it again to edit what's there now.`);
-        }
-        if (replacing && f.confirm !== "1") {
-          const was = parseHttp(current!.text).reqs[Number(w.n)];
-          if (!was) return refuse(`${w.file} has no request #${Number(w.n) + 1} any more: nothing was saved.`);
-          return ctx.page(c, { title: "Save the request", current: "/http", body: confirmSavePage({ req: r, where: w, replacing: `${was.method} ${was.name || was.url}` }) });
-        }
-        const text = current ? withReq(current.text, r, replacing ? Number(w.n) : undefined) : serializeReq(r);
-        if (text === null) return refuse(`${w.file} has no request #${Number(w.n) + 1} any more: nothing was saved.`);
-        const what = !current ? "created" : replacing ? `replaced #${Number(w.n) + 1}` : "added";
-        const done = writeFile(root, w.file, text, current ? current.hash : "");
-        await log(done.ok, what, done.ok ? undefined : done.error);
-        if (!done.ok) return refuse(`${done.error} Nothing was saved.`);
-        const n = replacing ? Number(w.n) : parseHttp(text).reqs.length - 1;
-        return c.redirect(homeHref({ repo: w.repo, file: w.file, n: String(Math.max(0, n)), env: w.env, saved: "1" }), 303);
-      });
+      mountSend(app, ctx, { sending, quick, draw });
+      mountSave(app, ctx, { sending, draw });
+      mountImport(app, ctx, { sending, draw });
     },
   };
 }

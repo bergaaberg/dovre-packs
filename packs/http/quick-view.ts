@@ -17,7 +17,7 @@ import { headersText, MAX_BODY_IN, MAX_HEADERS, MAX_NAME, MAX_URL, METHODS, MODE
 import type { SpecDoc } from "./openapi.ts";
 import { type Blank, MAX_BLANK } from "./quick.ts";
 import type { Sent } from "./send.ts";
-import { bodyText, runHref, sentHref, statusTone, type Where } from "./view.ts";
+import { bodyText, sentHref, statusTone, type Where } from "./view.ts";
 
 type Html = ReturnType<typeof html>;
 
@@ -113,7 +113,7 @@ ${
           })}</ul>`,
         )
 }
-${o.files?.length ? html`<h3 class="sub-h">Files</h3><ul class="http-eps">${o.files.map((f) => html`<li class="http-file"><span class="mono">${f.name}</span>${f.error ? html` <span class="t3">${f.error}</span>` : f.reqs.length ? html` <a class="btn sm ghost" href="${runHref({ repo, file: f.name, env: o.where.env })}" title="Send its requests one after the other and check each response">Run</a>` : ""}</li>`)}</ul>` : ""}
+${o.files?.length ? html`<h3 class="sub-h">Files</h3><ul class="http-eps">${o.files.map((f) => html`<li class="http-file"><span class="mono">${f.name}</span>${f.error ? html` <span class="t3">${f.error}</span>` : ""}</li>`)}</ul>` : ""}
 <p><a href="${safeUrl(`/http/stories?${new URLSearchParams({ repo, ...(o.where.env ? { env: o.where.env } : {}) })}`)}">Stories</a>: chains of requests, run step by step</p>
 <div class="buttons"><a class="btn sm ghost" href="${agentHref(repo, writePrompt())}" title="Start an agent session that writes this repo's endpoints as .http requests">Write requests with an agent</a></div>
 <p><a href="/http/import">Import a spec, collection or curl</a></p>
