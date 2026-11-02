@@ -7,14 +7,16 @@
  * boxes core draws stay as they are: only the code's text is redrawn (engine.js).
  *
  * The grammars and the runtime are files beside the pack (vendor/, built by build.sh), kept out of
- * the Worker bundle: core serves them (Pack.wasm as WasmFile). Without script, the diff is core's.
+ * the Worker bundle: core serves them (the .wasm as Pack.wasm WasmFiles, web-tree-sitter.js as a
+ * Pack.files script). Without script, the diff is core's.
  */
 import { readFileSync } from "node:fs";
 import { type Pack, PACK_API, type WasmFile } from "dovre/packs/types.ts";
-import { ENGINE_JS, QUERIES, RUNTIME_JS, SHA } from "./gen.ts";
+import { ENGINE_JS, QUERIES, RUNTIME_JS_SHA, SHA } from "./gen.ts";
 
-/** A grammar or the runtime, from vendor/ (under Node only: hosted, core serves the built copy). */
-const file = (name: string): WasmFile => ({ sha256: SHA[name]!, load: () => new Uint8Array(readFileSync(new URL(`./vendor/${name}.wasm`, import.meta.url))) });
+/** A file from vendor/ (under Node only: hosted, core serves the built copy). */
+const vendored = (sha256: string, name: string): WasmFile => ({ sha256, load: () => new Uint8Array(readFileSync(new URL(`./vendor/${name}`, import.meta.url))) });
+const file = (name: string) => vendored(SHA[name]!, `${name}.wasm`);
 
 /** FNV-1a: a served file's URL changes when it does. */
 const hashOf = (s: string) => {
@@ -24,7 +26,6 @@ const hashOf = (s: string) => {
 };
 
 export const ENGINE_PATH = `/code-review/js/engine.${hashOf(ENGINE_JS)}.js`;
-export const RUNTIME_PATH = `/code-review/js/web-tree-sitter.${hashOf(RUNTIME_JS)}.js`;
 const queryPath = (lang: string) => `/code-review/q/${lang}.${hashOf(QUERIES[lang]!)}.scm`;
 const MANIFEST = "/code-review/langs.json";
 
@@ -75,6 +76,7 @@ export function createCodeReviewPack(): Pack {
     styles,
     script,
     wasm: Object.fromEntries(["runtime", ...Object.keys(QUERIES)].map((n) => [n, file(n)])),
+    files: { "web-tree-sitter.js": vendored(RUNTIME_JS_SHA, "web-tree-sitter.js") },
     routes(app, ctx) {
       app.get("/code-review/langs.json", (c) => {
         const langs: Record<string, { wasm: string; query: string }> = {};
@@ -83,11 +85,11 @@ export function createCodeReviewPack(): Pack {
           if (wasm) langs[lang] = { wasm, query: queryPath(lang) };
         }
         c.header("Cache-Control", "private, max-age=300");
-        return c.json({ runtimeJs: RUNTIME_PATH, runtimeWasm: ctx.wasm("runtime") ?? "", langs });
+        return c.json({ runtimeJs: ctx.file("web-tree-sitter.js") ?? "", runtimeWasm: ctx.wasm("runtime") ?? "", langs });
       });
       app.get("/code-review/js/:file", (c) => {
         const at = `/code-review/js/${c.req.param("file")}`;
-        return at === ENGINE_PATH ? js(ENGINE_JS) : at === RUNTIME_PATH ? js(RUNTIME_JS) : c.notFound();
+        return at === ENGINE_PATH ? js(ENGINE_JS) : c.notFound();
       });
       app.get("/code-review/q/:file", (c) => {
         const lang = c.req.param("file").split(".")[0] ?? "";

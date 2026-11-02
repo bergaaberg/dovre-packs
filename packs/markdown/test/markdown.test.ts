@@ -10,7 +10,7 @@ import { HOSTILE, assertFragment, assertInert, assertScoped, packApp, testContex
 import { markdownPack } from "../index.ts";
 import { render, slug } from "../render.ts";
 import { cleanPath, listDocs } from "../docs.ts";
-import { MERMAID_SHA } from "../gen.ts";
+import { KATEX_SHA, MERMAID_SHA } from "../gen.ts";
 import { SCRIPT } from "../script.ts";
 import { body } from "../view.ts";
 
@@ -24,14 +24,17 @@ const inert = (name: string, out: string) => {
   assert.ok(!/<(iframe|object|embed|form|style|base|meta|link)\b/i.test(out), `${name}: page markup got through`);
 };
 
-test("markdown: manifest, styles scoped, mermaid's file matches its hash", () => {
+test("markdown: manifest, styles scoped, mermaid's and KaTeX's files match their hashes", () => {
   assert.equal(markdownPack.manifest.id, "markdown");
   assert.equal(markdownPack.manifest.execution, "any");
   assert.equal(markdownPack.manifest.private, true);
   assertScoped(markdownPack);
-  const bytes = readFileSync(new URL("../vendor/mermaid.js", import.meta.url));
-  assert.equal(createHash("sha256").update(bytes).digest("hex").slice(0, 16), MERMAID_SHA, "run build.sh: gen.ts is stale");
-  assert.ok(markdownPack.files?.["mermaid.js"]);
+  for (const [name, sha] of [["mermaid.js", MERMAID_SHA], ["katex.js", KATEX_SHA]] as const) {
+    const bytes = readFileSync(new URL(`../vendor/${name}`, import.meta.url));
+    assert.equal(createHash("sha256").update(bytes).digest("hex").slice(0, 16), sha, "run build.sh: gen.ts is stale");
+    assert.equal(markdownPack.files?.[name]?.sha256, sha);
+    assert.doesNotMatch(bytes.toString("utf8").slice(-300), /sourceMappingURL/, `${name}: no map is shipped`);
+  }
 });
 
 test("markdown: GitHub-flavoured features", () => {
@@ -61,11 +64,17 @@ test("markdown: GitHub-flavoured features", () => {
   assert.equal(slug("Hello, World! (v2)"), "hello-world-v2");
 });
 
-test("markdown: math as MathML, money left alone, mermaid left for the browser", () => {
+test("markdown: math and mermaid left as their source for the browser, money left alone", () => {
   const r = render("Costs $5 and $6. Then $x^2$ and $`\\sqrt{2}`$.\n\n$$\n\\frac{a}{b}\n$$\n\n```math\nE = mc^2\n```\n\n```mermaid\ngraph LR; A-->B\n```");
   assert.match(r.html, /Costs \$5 and \$6\./);
   assert.equal(r.math, 4);
-  assert.match(r.html, /<math xmlns="http:\/\/www.w3.org\/1998\/Math\/MathML" display="block">/);
+  assert.match(r.html, /<code class="md-tex">x\^2<\/code> and <code class="md-tex">\\sqrt\{2\}<\/code>/);
+  assert.match(r.html, /<div class="md-math"><pre class="md-tex" data-display>\\frac\{a\}\{b\}<\/pre><\/div>/);
+  assert.match(r.html, /<pre class="md-tex" data-display>E = mc\^2\n<\/pre>/);
+  assert.doesNotMatch(r.html, /<math/, "KaTeX isn't on the server");
+  const hostile = render("$<img src=x onerror=alert(1)>$ and\n\n$$\n</pre><script>alert(1)</script>\n$$");
+  assert.equal(hostile.math, 2);
+  assert.doesNotMatch(hostile.html, /<script|<img/i, "a formula's TeX is text");
   assert.equal(r.mermaid, 1);
   assert.match(r.html, /<pre class="md-mermaid">graph LR; A--&gt;B\n<\/pre>/);
 });
@@ -121,7 +130,7 @@ test("markdown: write, preview, export and print over the app; posts only from D
   const { get, post } = packApp([markdownPack]);
   const page = await (await get("/markdown")).text();
   assert.match(page, /data-md-live/);
-  assert.match(page, new RegExp(`data-mermaid="/assets/files/markdown\\.mermaid\\.${MERMAID_SHA}\\.js"`));
+  assert.match(page, new RegExp(`data-mermaid="/assets/files/markdown\\.mermaid\\.${MERMAID_SHA}\\.js" data-katex="/assets/files/markdown\\.katex\\.${KATEX_SHA}\\.js"`));
   const doc = `# ${HOSTILE}\n\n<script>alert(1)</script> [x](javascript:alert(1))\n\n\`\`\`mermaid\ngraph LR; A-->B\n\`\`\``;
 
   const shown = await post("/markdown", { src: doc });
@@ -147,7 +156,7 @@ test("markdown: write, preview, export and print over the app; posts only from D
   const pr = await (await post("/markdown/print", { src: doc })).text();
   const js = /<script src="(\/markdown\/print\.[a-z0-9]+\.js)" defer><\/script>/.exec(pr);
   assert.ok(js, "the print page brings its own script");
-  assert.match(pr, /data-mermaid="\/assets\/files\/markdown\.mermaid\./);
+  assert.match(pr, /data-mermaid="\/assets\/files\/markdown\.mermaid\.[^"]+" data-katex="\/assets\/files\/markdown\.katex\./);
   const printJs = await get(js[1]!);
   assert.equal(printJs.headers.get("Content-Type"), "text/javascript; charset=utf-8");
   assert.match(await printJs.text(), /securityLevel: "strict"/);
@@ -155,6 +164,9 @@ test("markdown: write, preview, export and print over the app; posts only from D
   const mermaid = await get(`/assets/files/markdown.mermaid.${MERMAID_SHA}.js`);
   assert.equal(mermaid.status, 200, "core serves mermaid from the pack's folder");
   assert.match((await mermaid.text()).slice(-200), /globalThis\["mermaid"\]/);
+  const katex = await get(`/assets/files/markdown.katex.${KATEX_SHA}.js`);
+  assert.equal(katex.status, 200, "core serves KaTeX from the pack's folder");
+  assert.match(katex.headers.get("Content-Type") ?? "", /javascript/);
 
   for (const path of ["/markdown", "/markdown/preview", "/markdown/export", "/markdown/print"]) {
     const cross = await post(path, { src: doc }, { origin: "https://evil.example" });

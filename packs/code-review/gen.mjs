@@ -14,15 +14,14 @@ export function genSource() {
     sha[g] = sha16(readFileSync(here(`vendor/${g}.wasm`)));
     queries[g] = readFileSync(here(`vendor/${g}.scm`), "utf8");
   }
-  const runtime = readFileSync(here("vendor/web-tree-sitter.js"), "utf8").replace(/\n\/\/# sourceMappingURL=.*\n?$/, "\n");
   const engine = readFileSync(here("engine.js"), "utf8");
   return `// Built by build.sh (gen.mjs) from vendor/ and engine.js. Don't edit.
 /** The first 16 hex digits of each module's SHA-256 (core's WasmFile). */
 export const SHA: Record<string, string> = ${JSON.stringify(sha, null, 2)};
+/** The first 16 hex digits of web-tree-sitter.js's SHA-256 (core's Pack.files). */
+export const RUNTIME_JS_SHA = ${JSON.stringify(sha16(readFileSync(here("vendor/web-tree-sitter.js"))))};
 /** Each grammar's highlight queries (tree-sitter's highlights.scm). */
 export const QUERIES: Record<string, string> = ${JSON.stringify(queries)};
-/** web-tree-sitter's ES module, served to the page. */
-export const RUNTIME_JS = ${JSON.stringify(runtime)};
 /** engine.js, served to the page. */
 export const ENGINE_JS = ${JSON.stringify(engine)};
 `;

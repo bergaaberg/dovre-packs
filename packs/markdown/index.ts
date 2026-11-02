@@ -1,9 +1,8 @@
 /**
  * Markdown (`markdown`): read and write Markdown the way GitHub renders it, plus the diagrams it
- * doesn't. GFM (tables, task lists, footnotes, alerts), front matter as a table, math as MathML
- * (KaTeX on the server), and `mermaid` blocks drawn in the browser (mermaid, kept out of the Worker
- * bundle as a Pack.files script, `securityLevel: "strict"`). A split editor with a live preview,
- * export to a self-contained HTML file, and a print page (PDF through the browser).
+ * doesn't. GFM (tables, task lists, footnotes, alerts), front matter as a table, math (KaTeX, as MathML)
+ * and `mermaid` blocks drawn in the browser (both kept out of the Worker bundle as Pack.files
+ * scripts; mermaid with `securityLevel: "strict"`). A split editor with a live preview, export to a self-contained HTML file, and a print page (PDF through the browser).
  *
  * Locally it also reads the docs in my checkouts (git repos directly under CODE_DIR): a repo's
  * README, docs/ and the rest of its Markdown, with links between files working and broken ones
@@ -16,14 +15,17 @@
 import { readFileSync } from "node:fs";
 import type { Context } from "hono";
 import type { AppEnv } from "dovre/env.ts";
-import { type Pack, PACK_API } from "dovre/packs/types.ts";
+import { type Pack, PACK_API, type WasmFile } from "dovre/packs/types.ts";
 import { strictOrigin } from "dovre/strict.ts";
 import { MAX_SOURCE, render } from "./render.ts";
 import { codeDirOf, listDocs, listRepos, readDoc, readImage, repoRoot, resolver } from "./docs.ts";
 import { docPage, docsPage, hostedDocsPage, notFound, previewFragment, reposPage, standalone, titleOf, writePage } from "./view.ts";
 import { PRINT_JS, SCRIPT } from "./script.ts";
 import { styles } from "./styles.ts";
-import { MERMAID_SHA } from "./gen.ts";
+import { KATEX_SHA, MERMAID_SHA } from "./gen.ts";
+
+/** A browser library from vendor/ (under Node only: hosted, core serves the built copy). */
+const vendored = (sha256: string, name: string): WasmFile => ({ sha256, load: () => new Uint8Array(readFileSync(new URL(`./vendor/${name}`, import.meta.url))) });
 
 /** A form bigger than this is refused before it's read (a document at MAX_SOURCE, form-encoded). */
 const MAX_BODY = 12 * MAX_SOURCE;
@@ -68,7 +70,7 @@ export function createMarkdownPack(): Pack {
     },
     styles,
     script: SCRIPT,
-    files: { "mermaid.js": { sha256: MERMAID_SHA, load: () => new Uint8Array(readFileSync(new URL("./vendor/mermaid.js", import.meta.url))) } },
+    files: { "mermaid.js": vendored(MERMAID_SHA, "mermaid.js"), "katex.js": vendored(KATEX_SHA, "katex.js") },
     nav: () => [{ href: "/markdown", title: "Markdown", icon: "pen", group: "Code" }],
     pages: (ctx) => [
       { title: "Markdown: write & preview", href: "/markdown", icon: "pen", about: "Write Markdown with a live preview, math and mermaid; export or print", also: ["markdown", "md", "mermaid", "diagram", "math", "katex", "preview", "readme"] },
@@ -76,7 +78,7 @@ export function createMarkdownPack(): Pack {
     ],
     about: (_ctx, path) => (path.startsWith("/markdown/docs/") ? "A Markdown doc in a local checkout" : path.startsWith("/markdown") ? "Markdown editor (what's pasted here isn't shared)" : undefined),
     routes(app, ctx) {
-      const mermaid = () => ctx.file("mermaid.js");
+      const files = () => ({ mermaid: ctx.file("mermaid.js"), katex: ctx.file("katex.js") });
       const codeDir = () => ctx.codeDir ?? codeDirOf(ctx.env);
       const page = (c: Context<AppEnv>, title: string, body: Parameters<typeof ctx.page>[1]["body"]) => ctx.page(c, { title, body, current: "/markdown" });
 
@@ -85,18 +87,18 @@ export function createMarkdownPack(): Pack {
         return new Response(res.body, { status: 404, headers: res.headers });
       };
 
-      app.get("/markdown", (c) => page(c, "Markdown", writePage({ src: "", hosted: ctx.hosted, mermaidSrc: mermaid() })));
+      app.get("/markdown", (c) => page(c, "Markdown", writePage({ src: "", hosted: ctx.hosted, files: files() })));
       app.post("/markdown", strictOrigin, async (c) => {
         const f = await form(c);
         if (!f) return tooBig(c);
         const src = f.src ?? "";
-        return page(c, "Markdown", writePage({ src, rendered: render(src), hosted: ctx.hosted, mermaidSrc: mermaid(), from: f.from?.slice(0, 300) || undefined }));
+        return page(c, "Markdown", writePage({ src, rendered: render(src), hosted: ctx.hosted, files: files(), from: f.from?.slice(0, 300) || undefined }));
       });
       app.post("/markdown/preview", strictOrigin, async (c) => {
         const f = await form(c);
         if (!f) return tooBig(c);
         c.header("Cache-Control", "no-store");
-        return c.html(String(previewFragment(render(f.src ?? ""), mermaid())));
+        return c.html(String(previewFragment(render(f.src ?? ""), files())));
       });
       app.post("/markdown/export", strictOrigin, async (c) => {
         const f = await form(c);
@@ -110,9 +112,8 @@ export function createMarkdownPack(): Pack {
         const f = await form(c);
         if (!f) return tooBig(c);
         const r = render(f.src ?? "");
-        const m = mermaid();
         c.header("Cache-Control", "no-store");
-        return c.html(standalone({ title: titleOf(r), rendered: r, mermaidSrc: m, scripts: [PRINT_PATH] }));
+        return c.html(standalone({ title: titleOf(r), rendered: r, files: files(), scripts: [PRINT_PATH] }));
       });
       app.get(PRINT_PATH, (c) => {
         c.header("Content-Type", "text/javascript; charset=utf-8");
@@ -138,7 +139,7 @@ export function createMarkdownPack(): Pack {
         const got = root && path ? readDoc(root, path) : { ok: false as const, why: "No such checkout." };
         if (!got.ok) return missing(c, got.why);
         const rendered = render(got.text, { resolve: resolver(root!, repo, path!) });
-        return page(c, `${path} · ${repo}`, docPage({ repo, path: path!, rendered, src: got.text, mermaidSrc: mermaid() }));
+        return page(c, `${path} · ${repo}`, docPage({ repo, path: path!, rendered, src: got.text, files: files() }));
       });
       // A picture a doc shows, from the same checkout.
       app.get("/markdown/raw/:repo/*", (c) => {

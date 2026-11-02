@@ -1,11 +1,14 @@
 /**
  * Markdown (`markdown`): the browser side. It only adds to pages that work without it.
- * - Draws `mermaid` blocks in a rendered document ([data-md-doc]), loading mermaid (Pack.files)
- *   the first time one needs it, with `securityLevel: "strict"` (its own DOMPurify pass, no clicks
- *   or scripts in a diagram). A block mermaid can't draw stays as its source, saying why.
+ * - Draws math in a rendered document ([data-md-doc]) as MathML, loading KaTeX (Pack.files) the
+ *   first time a formula needs it: `katex.render` builds the elements itself (no markup is parsed),
+ *   with `trust` off and its size and macro limits low. Without script, a formula is its TeX.
+ * - Draws `mermaid` blocks there, loading mermaid (Pack.files) the first time one needs it, with
+ *   `securityLevel: "strict"` (its own DOMPurify pass, no clicks or scripts in a diagram). A block
+ *   mermaid can't draw stays as its source, saying why.
  * - The editor: a preview rendered on the server as I type, a file opened from this computer
- *   (read here, never uploaded as a file), and Export with the diagrams drawn in.
- * - The print page: prints once its diagrams are drawn.
+ *   (read here, never uploaded as a file), and Export with the math and diagrams drawn in.
+ * - The print page: prints once its math and diagrams are drawn.
  */
 import { DOC_CSS } from "./view.ts";
 
@@ -15,9 +18,27 @@ const load = (src) => {
   if (!loads.has(src)) loads.set(src, new Promise((ok, no) => { const s = document.createElement("script"); s.src = src; s.onload = ok; s.onerror = no; document.head.append(s); }));
   return loads.get(src);
 };
+const KATEX = { output: "mathml", throwOnError: false, trust: false, strict: "ignore", maxSize: 50, maxExpand: 500 };
+const tex = async (doc) => {
+  const els = [...doc.querySelectorAll(".md-tex")];
+  const src = doc.dataset.katex;
+  if (!els.length || !src) return;
+  try { await load(src); } catch { return; }
+  const k = globalThis.katex;
+  if (!k) return;
+  for (const el of els) {
+    const display = el.hasAttribute("data-display");
+    const out = document.createElement(display ? "div" : "span");
+    try {
+      k.render(el.textContent || "", out, { ...KATEX, displayMode: display });
+      el.replaceWith(out);
+    } catch {}
+  }
+};
 let n = 0;
 const dark = () => /dark/.test(getComputedStyle(document.documentElement).colorScheme || "");
-const draw = async (doc) => {
+const draw = (doc) => Promise.all([tex(doc), diagrams(doc)]);
+const diagrams = async (doc) => {
   const blocks = [...doc.querySelectorAll("pre.md-mermaid:not([data-drawn])")];
   const src = doc.dataset.mermaid;
   if (!blocks.length || !src) return;
@@ -71,7 +92,7 @@ ${DRAW}
       if (!f || f.size > 1048576) return;
       f.text().then((x) => { ta.value = x; update(); });
     });
-    // Export with the diagrams as drawn; without this script the server's export has their source.
+    // Export with the math and diagrams as drawn; without this script the server's export has their source.
     form.querySelector("[data-md-export]")?.addEventListener("click", async (e) => {
       e.preventDefault();
       if (shown !== ta.value) await update();

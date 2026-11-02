@@ -3,8 +3,8 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { packApp } from "dovre/packs/testing.ts";
-import { codeReviewPack, ENGINE_PATH, RUNTIME_PATH } from "../index.ts";
-import { ENGINE_JS, QUERIES, SHA } from "../gen.ts";
+import { codeReviewPack, ENGINE_PATH } from "../index.ts";
+import { ENGINE_JS, QUERIES, RUNTIME_JS_SHA, SHA } from "../gen.ts";
 // @ts-expect-error: plain JS, no types
 import { GRAMMARS, genSource } from "../gen.mjs";
 
@@ -22,6 +22,11 @@ test("each module is a file kept out of the bundle, its declared hash its bytes'
     assert.equal(createHash("sha256").update(bytes).digest("hex").slice(0, 16), mod.sha256, name);
     assert.equal(mod.sha256, SHA[name]);
   }
+  const rt = codeReviewPack.files!["web-tree-sitter.js"]!;
+  const js = await rt.load();
+  assert.equal(createHash("sha256").update(js).digest("hex").slice(0, 16), rt.sha256);
+  assert.equal(rt.sha256, RUNTIME_JS_SHA);
+  assert.doesNotMatch(new TextDecoder().decode(js), /sourceMappingURL/, "no map is shipped");
 });
 
 test("the manifest names the runtime and every grammar where core serves them; the scripts and queries at hashed paths", async () => {
@@ -29,7 +34,7 @@ test("the manifest names the runtime and every grammar where core serves them; t
   const res = await get("/code-review/langs.json");
   assert.equal(res.status, 200);
   const m = (await res.json()) as { runtimeJs: string; runtimeWasm: string; langs: Record<string, { wasm: string; query: string }> };
-  assert.equal(m.runtimeJs, RUNTIME_PATH);
+  assert.match(m.runtimeJs, new RegExp(`^/assets/files/code-review\\.web-tree-sitter\\.${RUNTIME_JS_SHA}\\.js$`));
   assert.match(m.runtimeWasm, new RegExp(`^/assets/wasm/code-review\\.runtime\\.${SHA.runtime}\\.wasm$`));
   assert.deepEqual(Object.keys(m.langs).sort(), [...GRAMMARS].sort());
   const ts = m.langs.typescript!;
@@ -40,7 +45,7 @@ test("the manifest names the runtime and every grammar where core serves them; t
   const q = await get(ts.query);
   assert.equal(await q.text(), QUERIES.typescript);
   assert.match(q.headers.get("Cache-Control") ?? "", /immutable/);
-  for (const p of [ENGINE_PATH, RUNTIME_PATH]) {
+  for (const p of [ENGINE_PATH, m.runtimeJs]) {
     const r = await get(p);
     assert.equal(r.status, 200, p);
     assert.match(r.headers.get("Content-Type") ?? "", /javascript/);
@@ -49,7 +54,7 @@ test("the manifest names the runtime and every grammar where core serves them; t
 
 test("hostile paths: a wrong hash, another file, a traversal or an inherited key aren't served", async () => {
   const { get } = packApp([codeReviewPack]);
-  for (const p of ["/code-review/js/engine.0.js", "/code-review/js/..%2F..%2Fpackage.json", "/code-review/q/typescript.0.scm", "/code-review/q/constructor.x.scm", "/code-review/q/__proto__.scm", "/code-review/q/..%2Fgen.ts"]) {
+  for (const p of ["/code-review/js/engine.0.js", "/code-review/js/web-tree-sitter.0.js", "/code-review/js/..%2F..%2Fpackage.json", "/code-review/q/typescript.0.scm", "/code-review/q/constructor.x.scm", "/code-review/q/__proto__.scm", "/code-review/q/..%2Fgen.ts"]) {
     assert.equal((await get(p)).status, 404, p);
   }
 });
