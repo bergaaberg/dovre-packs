@@ -188,6 +188,8 @@ test("markdown: the script draws diagrams strictly and only where there's a docu
   assert.match(SCRIPT, /cleanSvg\(gv\.dot\(text, "svg"\)\)/, "Graphviz's SVG is cleaned before it's shown");
   assert.match(SCRIPT, /if \(!document\.querySelector\("\[data-md-doc\], form\[data-md-live\]"\)\) return;/);
   assert.doesNotMatch(SCRIPT, /dovre:change/);
+  assert.match(SCRIPT, /\.md pre\.code\[data-lang\]/, "core's Markdown fences, by the language core marks");
+  assert.match(SCRIPT, /typeof dovreFiles === "object"/, "an older core without dovreFiles draws nothing there");
   new Function(SCRIPT); // it parses
 });
 
