@@ -317,7 +317,7 @@ function askPanel(o: BoardOpts): Html {
     title: "Ask for a story, cases or a setup",
     children: html`<form method="get" action="/http/stories/ask" class="http-ask">${hidden({ repo: o.repo })}<label class="field"><span class="label">What should it do?</span><input name="ask" maxlength="${MAX_ASK}" required autocomplete="off" placeholder="A customer who orders twice in a day gets 10% off the second order"></label><div class="buttons"><button type="submit">Draft with an agent</button></div></form>
 ${ideas.length ? html`<p class="http-ideas"><span class="t3">Ideas from this repo:</span>${ideas.map((i) => html`<a href="${agentHref(o.repo, storyAskPrompt(i))}">${i}</a>`)}</p>` : ""}
-<p class="hint">It opens an agent session with the prompt filled in: you read it and press Start. The agent reads the handlers and the spec and writes <code>.story</code> files on a branch, which you review like code. It can run a story once it's committed (Dovre's <code>http_run</code> tool, to this machine and the hosts in HTTP_AGENT_HOSTS); a story that writes runs only when you click Run, unless its environment says <code>"$agent": "writes"</code>.</p>`,
+<p class="hint">It opens an agent session with the prompt filled in: you read it and press Start. The agent reads the handlers and the spec and writes <code>.story</code> files on a branch, which you review like code. It can run a story once it's committed (Dovre's <code>http_run</code> tool, to this machine and the hosts in HTTP_AGENT_HOSTS); a story that writes runs only when you click Run, unless its environment says <code>"$agent": "writes"</code> in the env file on the default branch (merged, so an agent can't grant it to itself).</p>`,
   });
 }
 

@@ -7,8 +7,9 @@
  * An agent runs a story without my click only when all of this holds:
  *  - every file the run reads (the story, its setups, the .http files of its cases, and
  *    .http/http-client.env.json) is committed: what's on disk is HEAD, so what it runs I can review;
- *  - a story that writes (any method but GET and HEAD) runs only in an environment the committed env
- *    file marks `"$agent": "writes"`; anywhere else an agent's run reads only;
+ *  - a story that writes (any method but GET and HEAD) runs only in an environment the env file on
+ *    origin's default branch marks `"$agent": "writes"` (repoAgentEnvs): an agent can't open that by
+ *    committing it in its own checkout; anywhere else an agent's run reads only;
  *  - each send, once its URL is filled in, goes only to this machine or a host in HTTP_AGENT_HOSTS,
  *    with only the methods allowed above (checked again at the send, not just from the plan);
  *  - `only:` pins hold (planStory), at most MAX_AGENT_RUNS runs a turn, each MAX_STEPS steps at most;
@@ -83,13 +84,13 @@ export function createAgentTools(d: AgentToolDeps) {
     const envs = d.varsFor(ctx, { ...noWhere(), repo: call.repo }).envs;
     const env = typeof a.env === "string" && a.env ? str(a.env, 64) : defaultEnv(envs);
     if (env && !envs.includes(env)) return fail(`There's no environment ${env}. There are: ${envs.join(", ") || "none"}.`);
-    const writes = repoAgentEnvs(root);
+    const { envs: writes, branch } = await repoAgentEnvs(root);
     const git = await uncommitted(root, ["."]);
     const changed = git.ok ? git.changed : undefined;
     const files = listFiles(root);
     const cat = buildCatalog(findSpec(root)?.text, files.filter((f) => !f.error));
     const out: string[] = [
-      `Repo ${call.repo}${cat.title ? ` (${cat.title})` : ""}. Environments: ${envs.join(", ") || "none"}; agents may write in: ${[...writes].filter((e) => envs.includes(e)).join(", ") || "none"} (the env file's "$agent": "writes"). Who may run a story is for ${env || "no environment"}.`,
+      `Repo ${call.repo}${cat.title ? ` (${cat.title})` : ""}. Environments: ${envs.join(", ") || "none"}; agents may write in: ${[...writes].filter((e) => envs.includes(e)).join(", ") || "none"} (the env file's "$agent": "writes" on ${branch ?? "origin's default branch, which this checkout doesn't have"}). Who may run a story is for ${env || "no environment"}.`,
       ...(git.ok ? [] : [`(${git.error}; agents can't run stories until it can.)`]),
       "",
       `Endpoints (${cat.endpoints.length}):`,
@@ -154,11 +155,12 @@ export function createAgentTools(d: AgentToolDeps) {
     if (!git.ok) return fail(`${git.error}. Nothing was sent.`);
     const open = notCommitted(git.changed, [...got.paths, ENV_FILE]);
     if (open.length) return fail(`An agent runs only what's committed, and these aren't: ${open.map((p) => `.http/${p}`).join(", ")}. Commit them (on your branch is fine) and run it again. Nothing was sent.`);
-    const writes = repoAgentEnvs(root).has(env);
+    const { envs: agentEnvs, branch } = await repoAgentEnvs(root);
+    const writes = agentEnvs.has(env);
     const { methods } = plannedSteps(got.plan, got.cases);
     if (whoRuns(methods, writes) !== "agent") {
       const w = [...new Set(methods.filter((m) => !READS.includes(m)))];
-      return fail(`It ${w.includes("?") ? "has a step whose method can't be told" : `sends ${w.join(", ")}`}, and ${env || "no environment"} isn't open to agents' writes ("$agent": "writes" in .http/${ENV_FILE}). Only I run it, from its page. Nothing was sent.`);
+      return fail(`It ${w.includes("?") ? "has a step whose method can't be told" : `sends ${w.join(", ")}`}, and ${env || "no environment"} isn't open to agents' writes ("$agent": "writes" in .http/${ENV_FILE} on ${branch ?? "origin's default branch"}; committing it here doesn't count). Only I run it, from its page. Nothing was sent.`);
     }
     turns.delete(call.run);
     turns.set(call.run, count + 1);
@@ -194,7 +196,7 @@ export function createAgentTools(d: AgentToolDeps) {
       },
       {
         name: "run",
-        description: `Run one of this repo's HTTP stories (.http/stories/<name>.story) with its setups, and get back how each step went: status, time, checks and what they got. You may run a story only when every file it reads is committed; a story that writes (POST, PUT, PATCH, DELETE) runs only in an environment marked "$agent": "writes" in .http/${ENV_FILE}, and each request goes only to ${where}. At most ${MAX_AGENT_RUNS} runs a turn, ${MAX_STEPS} steps each. Secrets never come back (shown as ••••). http_catalog says which stories you may run.`,
+        description: `Run one of this repo's HTTP stories (.http/stories/<name>.story) with its setups, and get back how each step went: status, time, checks and what they got. You may run a story only when every file it reads is committed; a story that writes (POST, PUT, PATCH, DELETE) runs only in an environment marked "$agent": "writes" in .http/${ENV_FILE} on origin's default branch (merged, not just committed), and each request goes only to ${where}. At most ${MAX_AGENT_RUNS} runs a turn, ${MAX_STEPS} steps each. Secrets never come back (shown as ••••). http_catalog says which stories you may run.`,
         input: {
           type: "object",
           properties: {

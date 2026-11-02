@@ -9,7 +9,7 @@
 import { type Catalog, type Endpoint, endpointKey } from "./catalog.ts";
 import type { StoryRun } from "./runner.ts";
 
-/** What an agent may send in any environment: reading only. Writes need the env's `"$agent": "writes"` (H-06 checks the rest). */
+/** What an agent may send in any environment: reading only. Writes need the env's `"$agent": "writes"` on origin's default branch (H-06 checks the rest). */
 export const READS = ["GET", "HEAD"];
 
 /** Who can run a story whose sends use these methods: an agent, or me (a click). A method we can't tell counts as a write. */

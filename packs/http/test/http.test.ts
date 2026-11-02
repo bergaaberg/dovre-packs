@@ -1091,6 +1091,8 @@ function commitAll(dir: string) {
   git("add", "-A");
   git("commit", "-qm", "x", "--allow-empty");
 }
+/** As if HEAD were merged and fetched: origin/main points at it. */
+const merged = (dir: string) => execFileSync("git", ["-C", dir, "update-ref", "refs/remotes/origin/main", "HEAD"], { stdio: "pipe" });
 const runHash = (page: string, story: string) => new RegExp(`name="story" value="${story.replace(".", "\\.")}"><input type="hidden" name="env" value="dev"><input type="hidden" name="hash" value="([0-9a-f]+)"`).exec(page)![1]!;
 
 test("stories overview: who can run each, Run from the table, pips and the failing filter, gaps and setups; nothing sent on a GET", async () => {
@@ -1148,9 +1150,12 @@ test("stories overview: who can run each, Run from the table, pips and the faili
   // An environment that lets an agent write: then it can run the writing story too.
   writeFileSync(join(m.code, "shop", ".http", "http-client.env.json"), '{"dev": {"$agent": "writes"}}');
   const marked = await (await m.get("/http/stories?repo=shop")).text();
-  assert.doesNotMatch(marked, /needs your click/);
-  assert.equal(marked.match(/agent can run once committed/g)?.length, 2, "the env file isn't committed yet");
+  assert.match(marked, /needs your click/, "the flag counts from origin's default branch, not the working tree");
+  assert.equal(marked.match(/agent can run once committed/g)?.length, 1, "the env file isn't committed yet");
   commitAll(join(m.code, "shop"));
+  // Committed in the checkout isn't enough: the flag counts from origin's default branch.
+  assert.equal((await (await m.get("/http/stories?repo=shop")).text()).match(/agent can run<\/span>/g)?.length, 1);
+  merged(join(m.code, "shop"));
   assert.equal((await (await m.get("/http/stories?repo=shop")).text()).match(/agent can run<\/span>/g)?.length, 2);
   // No environment: Run still posts env="" for the stories that can.
   const none = await (await m.get("/http/stories?repo=shop&env=")).text();
@@ -1224,12 +1229,17 @@ test("agent tools: catalog says who may run each story; run needs committed file
   for (let i = 0; i < 50 && !(await m.actions()).some((a) => a.kind === "http.agentRun" && a.ok); i++) await tick();
   assert.deepEqual({ ...(await m.actions()).find((a) => a.kind === "http.agentRun" && a.ok)! }, { kind: "http.agentRun", target: "shop/.http/stories/look.story", detail: "all 1 passed · dev", ok: 1, error: null });
 
-  // An env marked for agents' writes, once committed, runs the writing story too.
+  // An env marked for agents' writes, once on origin's default branch, runs the writing story too.
   writeFileSync(join(shop, ".http", "http-client.env.json"), '{"dev": {"$agent": "writes"}}');
   out = await listedRun({ story: "cancel", env: "dev" });
   assert.match(out.text, /these aren't: \.http\/http-client\.env\.json/);
   commitAll(shop);
-  assert.match((await catalog()).text, /agents may write in: dev/);
+  // Committing the flag in its own checkout doesn't open writes to an agent.
+  assert.match((await catalog()).text, /agents may write in: none \(the env file's "\$agent": "writes" on origin's default branch, which this checkout doesn't have\)/);
+  out = await listedRun({ story: "cancel", env: "dev" });
+  assert.match(out.text, /dev isn't open to agents' writes \("\$agent": "writes" in \.http\/http-client\.env\.json on origin's default branch; committing it here doesn't count\)/);
+  merged(shop);
+  assert.match((await catalog()).text, /agents may write in: dev \(the env file's "\$agent": "writes" on origin\/main\)/);
   out = await listedRun({ story: "cancel", env: "dev" });
   assert.equal(out.error, false, out.text);
   assert.match(out.text, /passed, all 4 steps/);
