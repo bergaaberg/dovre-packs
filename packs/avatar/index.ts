@@ -8,7 +8,7 @@
  */
 import { needsOf } from "dovre/home/needs.ts";
 import { listTodos } from "dovre/todo/store.ts";
-import { type Pack, PACK_API, type PackContext } from "dovre/packs/types.ts";
+import { type Pack, type PackContext } from "dovre/packs/types.ts";
 import { type Avatar, createAvatar } from "./avatar.ts";
 import { signalsFrom } from "./feed.ts";
 import { AVATAR_JS } from "./script.ts";
@@ -44,7 +44,8 @@ export function createAvatarPack(o: AvatarDeps = {}): Pack {
   });
   return {
     manifest: {
-      api: PACK_API,
+      api: "1.6",
+      version: "1.0.0",
       id: "avatar",
       name: "Avatar",
       description: "Me in Dovre: a creature shaped by what I do on the forge, in a scene set by how things are",

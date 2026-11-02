@@ -15,7 +15,9 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "node --test \"packs/*/test/*.test.ts\" \"test/*.test.ts\"",
-    "check": "pnpm typecheck && pnpm test"
+    "check": "pnpm typecheck && pnpm test",
+    "release": "node scripts/release.ts",
+    "tags": "node scripts/tags.ts"
   },
   "dependencies": {
     "@bergaaberg/peak": "github:bergaaberg/peak#v0.2.0",

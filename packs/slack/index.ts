@@ -3,7 +3,7 @@
  * Bino's, saved-message proposals for My list, and a Bino act that sends a message.
  */
 import { html } from "hono/html";
-import { type Pack, PACK_API, type PackNeed } from "dovre/packs/types.ts";
+import { type Pack, type PackNeed } from "dovre/packs/types.ts";
 import { writeAct } from "dovre/packs/acts.ts";
 import { addTodo } from "dovre/todo/store.ts";
 import { checkChannel, type SlackKept, readSlack, sendSlack } from "./data.ts";
@@ -16,7 +16,8 @@ export function createSlackPack(opts: { fetchFn?: typeof fetch } = {}): Pack & {
   return {
     kept: () => kept,
     manifest: {
-      api: PACK_API,
+      api: "1.6",
+      version: "1.0.0",
       id: "slack",
       name: "Slack",
       description: "Direct mentions in watched channels and saved items from Slack, with a dock beside Bino's and proposals for My list.",

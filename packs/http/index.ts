@@ -37,7 +37,7 @@
  * (stories-routes.ts). What they all send through is sending.ts.
  */
 import { html } from "hono/html";
-import { type Pack, PACK_API } from "dovre/packs/types.ts";
+import { type Pack } from "dovre/packs/types.ts";
 import { strictOrigin } from "dovre/strict.ts";
 import { styles as jsonStyles } from "../json/view.ts";
 import { agentHosts } from "./agent.ts";
@@ -82,7 +82,8 @@ export function createHttpPack(opts: CreateHttpPackOpts = {}): Pack & { history(
     // The JSON tools' tree and diff classes, for a response body shown as a tree or compared.
     styles: jsonStyles + quickStyles + storiesStyles,
     manifest: {
-      api: PACK_API,
+      api: "1.6",
+      version: "1.0.0",
       id: "http",
       name: "HTTP client",
       description: "Send HTTP requests from this machine; saved per repo as .http files, with environments and secrets bound to hosts.",

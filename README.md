@@ -45,9 +45,13 @@ node ../dovre/src/packs/new.ts add custom-app --into .
 
 Or import directly from a sibling `dovre-packs` checkout in your instance's `crates.ts` / `packs.ts`.
 
+## Versions
+
+Each pack is released on its own: its manifest has a semver `version`, `packs/<id>/CHANGELOG.md` says what each release changed, and main carries a tag `<id>@x.y.z` per release (`git tag --list 'markdown@*'`). A copied pack's `.pack.json` records the version and commit it came from; `packs outdated` / `packs update` in Dovre compare it with these tags. Releasing is `pnpm release <id> patch|minor|major`, then `pnpm tags --push` on main after the merge; see [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## Pack Architecture & Security Contract
 
-Every pack in this repository adheres to `PACK_API = 1` (`dovre/packs/types.ts`):
+Every pack in this repository names the oldest Pack contract it works with (`api: "1.6"`; core's `PACK_API` in `dovre/packs/types.ts` is `"major.minor"`). A core with that major and at least that minor runs it; an older one shows it as off on the Packs page, saying which API it needs. Every pack:
 - **Synchronous reads:** `nav`, `today`, `brief`, `glance`, `bino`, and `routes` read strictly from in-memory state populated by `refresh()`.
 - **Isolated & time-boxed:** A slow or failing upstream never blocks Dovre's Today view or crashes another pack.
 - **Escaped markup & URLs:** All HTML is rendered with Hono's `html` tagged template and every external URL passes through `safeUrl()`. Every pack includes a hostile-input test (`<script>alert(1)</script>` and `javascript:alert(1)`).

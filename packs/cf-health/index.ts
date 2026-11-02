@@ -2,7 +2,7 @@
  * Cloudflare Health Pack (`cf-health`): 24h Cloudflare Workers GraphQL telemetry.
  * Works both locally and hosted on Cloudflare Workers.
  */
-import { type Pack, PACK_API } from "dovre/packs/types.ts";
+import { type Pack } from "dovre/packs/types.ts";
 import { type CfHealthKept, readCfHealth } from "./data.ts";
 import { cfHealthCard, cfHealthPage } from "./view.ts";
 
@@ -11,7 +11,8 @@ export function createCfHealthPack(opts: { fetchFn?: typeof fetch } = {}): Pack 
   return {
     kept: () => kept,
     manifest: {
-      api: PACK_API,
+      api: "1.6",
+      version: "1.0.0",
       id: "cf-health",
       name: "Cloudflare Health",
       description: "24h Cloudflare Workers request and error telemetry via GraphQL.",

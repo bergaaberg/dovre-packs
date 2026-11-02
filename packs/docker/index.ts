@@ -1,7 +1,7 @@
 /**
  * Docker Containers Pack (`docker`): local container list and status.
  */
-import { type Pack, PACK_API } from "dovre/packs/types.ts";
+import { type Pack } from "dovre/packs/types.ts";
 import { type DockerKept, type DockerRunner, readDocker } from "./data.ts";
 import { dockerCard, dockerPage } from "./view.ts";
 
@@ -10,7 +10,8 @@ export function createDockerPack(opts: { run?: DockerRunner } = {}): Pack & { ke
   return {
     kept: () => kept,
     manifest: {
-      api: PACK_API,
+      api: "1.6",
+      version: "1.0.0",
       id: "docker",
       name: "Docker",
       description: "Local Docker containers, images, and port mappings.",
