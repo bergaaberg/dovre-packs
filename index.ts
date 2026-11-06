@@ -23,3 +23,4 @@ export { codeReviewPack, createCodeReviewPack } from "./packs/code-review/index.
 export { markdownPack, createMarkdownPack } from "./packs/markdown/index.ts";
 export { movementPack, createMovementPack } from "./packs/movement/index.ts";
 export { summariesPack, createSummariesPack } from "./packs/summaries/index.ts";
+export { tasksPack, createTasksPack } from "./packs/tasks/index.ts";
