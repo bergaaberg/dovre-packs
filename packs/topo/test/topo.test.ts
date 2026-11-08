@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { createTopoPack, TopoScanner, type TopoEntry } from "../index.ts";
 import { topoPage, foldNames, binoLines, draftPrompt, fixPrompt } from "../view.ts";
 import { prBody, prCard, type PrSlots } from "dovre/pages/inline.ts";
-import { entryPage, type Ctx } from "dovre/pages/work.ts";
+import { entryPage, type Ctx } from "dovre/packs/core/issues/compose/work.ts";
 import { contextOf } from "dovre/packs/core/assistant/bino/context.ts";
 import type { Slots } from "dovre/packs/types.ts";
 import type { Pr } from "dovre/sources/ghe.ts";
@@ -207,8 +207,8 @@ test("PR slots: a cataloged repo's PR shows its tier, site and docs; others show
 
 test("work.new slot: New work lists the cataloged projects", () => {
   const sl = slotsOf(codeDir({ quill: QUILL, harbor: "name: Harbor\ndescription: Laid-back Roman city builder\ntier: active\ndocs:\n  design: docs/DESIGN.md\n" }));
-  const ctx: Ctx = { sortingRepos: [], formRepos: [], frame: { operator: "andreasberg", nav: [] }, org: "bergaaberg", ghe: "github.com", extra: [sl["work.new"]!({})] };
-  const out = String(entryPage(ctx));
+  const ctx: Ctx = { sortingRepos: [], formRepos: [], operator: "andreasberg", org: "bergaaberg", ghe: "github.com", extra: [sl["work.new"]!({})] };
+  const out = String(entryPage(ctx).body);
   assert.match(out, /Projects/);
   assert.match(out, /Quill/);
   assert.match(out, /Harbor/);
