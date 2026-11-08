@@ -101,14 +101,14 @@ test("runFix: checks the form against what Topo knows now, then proposes the edi
   };
   assert.deepEqual(await runFix({ what: "claim", repo: "ACME/skribb", kind: "workers", name: "skribb-api" }, state, forge), { ok: true, text: "Opened #7.", url: "https://github.com/ACME/skribb/pull/7", key: "acme/skribb" });
   assert.deepEqual([asked[0]!.kind, asked[0]!.path, asked[0]!.expect, asked[0]!.title], ["peak-pr", "peak.yaml", SKRIBB, "peak.yaml: claim the worker skribb-api"]);
-  assert.match(asked[0]!.text, /skribb-cms-\*, skribb-api\]/);
+  assert.match(asked[0]!.text!, /skribb-cms-\*, skribb-api\]/);
 
   await runFix({ what: "drop", repo: "ACME/skribb", kind: "databases", name: "skribb-db" }, state, forge);
-  assert.doesNotMatch(asked[1]!.text, /skribb-db/);
+  assert.doesNotMatch(asked[1]!.text!, /skribb-db/);
 
   await runFix({ what: "start", repo: "ACME/memlet", name: "Memlet", description: "", tier: "scratch", owner: "@me" }, state, forge);
   assert.deepEqual([asked[2]!.path, asked[2]!.expect], ["peak.yaml", null]);
-  assert.match(asked[2]!.text, /name: Memlet\ndescription: Notes that stick\.\ntier: scratch\nowner: "@me"\nruns:\n  workers: \[memlet\]/);
+  assert.match(asked[2]!.text!, /name: Memlet\ndescription: Notes that stick\.\ntier: scratch\nowner: "@me"\nruns:\n  workers: \[memlet\]/);
 
   // Not so now: nothing is proposed.
   for (const [form, why] of [
@@ -164,7 +164,7 @@ test("/topo: a Confirm of kind topo.peak-pr on the cards (one click by default, 
   const r = await post("/topo/pr", { what: "claim", repo: "ACME/quill", kind: "workers", name: "quill-cron" });
   assert.equal(r.status, 303);
   assert.equal(r.headers.get("location"), "/topo?at=acme%2Fquill");
-  assert.match(asked[0]!.text, /\[quill-web, quill-api, quill-cron\]/);
+  assert.match(asked[0]!.files[0]!.text, /\[quill-web, quill-api, quill-cron\]/);
   const after = await (await get("/topo?at=acme%2Fquill")).text();
   assert.match(after, /Opened #7\. <a [^>]*href="https:\/\/github\.com\/ACME\/quill\/pull\/7"/);
   assert.doesNotMatch(await (await get("/topo?at=acme%2Fquill")).text(), /Opened #7/, "said once");

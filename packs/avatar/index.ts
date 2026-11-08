@@ -3,11 +3,10 @@
  * what I do on the forge (PackContext.forge) and set in a scene by how things are. It shows in two
  * core places through slots (Today's header, the Bino button and Bino's header), brings its own
  * script and styles, and has its own page (/avatar). How things are comes from the snapshot,
- * My list and the packs' pulse (PackContext.pulse: what works and waits, what's wrong, whether
+ * My list (the todo pack's share, while it's on) and the packs' pulse (PackContext.pulse: what works and waits, what's wrong, whether
  * I'm on duty, whether Bino is answering), all counts.
  */
 import { needsOf } from "dovre/home/needs.ts";
-import { listTodos } from "dovre/todo/store.ts";
 import { type Pack, type PackContext } from "dovre/packs/types.ts";
 import { type Avatar, createAvatar } from "./avatar.ts";
 import { signalsFrom } from "./feed.ts";
@@ -44,14 +43,16 @@ export function createAvatarPack(o: AvatarDeps = {}): Pack {
   });
   return {
     manifest: {
-      api: "1.6",
-      version: "1.0.0",
+      api: "1.11",
+      version: "1.1.0",
       id: "avatar",
       name: "Avatar",
       description: "Me in Dovre: a creature shaped by what I do on the forge, in a scene set by how things are",
       domain: "fun",
       execution: "any",
       everyMs: 60_000,
+      // My list's "doing" count, while the todo pack is on.
+      uses: ["todo"],
     },
     styles: AVATAR_PAGE_CSS + AVATAR_CSS,
     script: AVATAR_JS,
@@ -62,7 +63,8 @@ export function createAvatarPack(o: AvatarDeps = {}): Pack {
     async refresh(c) {
       ctx = c;
       try {
-        doing = (await listTodos(c.db)).filter((t) => t.state === "doing" && !t.parent).length;
+        const list = c.required("todo", "list");
+        doing = list ? (await list.items()).filter((t) => t.state === "doing" && !t.parent).length : 0;
       } catch {}
       await data.refresh(c.db);
       // Open pages ask /avatar/now on every change; this covers what changes on its own (the hour, My list).

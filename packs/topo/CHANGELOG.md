@@ -1,5 +1,9 @@
 # topo
 
+## 1.1.1 — 2026-11-08
+
+- Tests follow core: New work's page moved into the issues pack (dovre#402), and a proposal's `text` is optional now that one can carry `files` (API 1.17). The pack itself is unchanged.
+
 ## 1.1.0 — 2026-11-02
 
 - Checkouts come from core (`ctx.checkouts()`, API 1.7): in a pack session only its one checkout is scanned. The scan now reads git checkouts only, as the checkout list already did (dovre#368).
