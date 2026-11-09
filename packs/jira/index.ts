@@ -148,8 +148,8 @@ export function createJiraPack(
   return {
     kept: () => kept,
     manifest: {
-      api: "1.24",
-      version: "1.1.2",
+      api: "1.25",
+      version: "1.1.3",
       id: "jira",
       name: "Jira",
       description: "Jira issues assigned to me, what moved in my projects, ticket keys as links, and filing tickets.",
@@ -313,7 +313,7 @@ export function createJiraPack(
         const i = ticketOf(ctx.env, pr);
         return i ? prFacts(i, browseHref(siteOf(ctx.env), i.key)) : [];
       },
-      "actions.what": ({ kind }) => (kind === "ticket.create" ? "Created a Jira ticket" : undefined),
+      "actions.what": ({ kind }) => (kind === "jira.ticket-create" || kind === "ticket.create" ? "Created a Jira ticket" : undefined),
     }),
   };
 }

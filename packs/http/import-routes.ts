@@ -5,7 +5,6 @@
  * new file or the end of one (`http.save`, one click: nothing that was there changes).
  */
 import type { Hono } from "hono";
-import { logAction } from "dovre/actions/deploys.ts";
 import type { AppEnv } from "dovre/env.ts";
 import type { PackContext } from "dovre/pack.ts";
 import { fromCollection, varLines } from "./collections.ts";
@@ -80,7 +79,7 @@ export function mountImport(app: Hono<AppEnv>, ctx: PackContext, d: { sending: S
     if (leak) return fail(`That has ${leak.name}'s value in it: nothing was saved.`);
     const target = `${repo}/.http/${file}`;
     const done = writeFile(root, file, text, current ? current.hash : "");
-    await logAction(ctx.db, { kind: "http.save", target, detail: `${current ? "added" : "created"} · ${got.reqs.length} from ${got.from.replace(/^an? /, "")} (${got.title})`.slice(0, 200), ok: done.ok, error: done.ok ? undefined : done.error });
+    await ctx.logged({ kind: "save", target, detail: `${current ? "added" : "created"} · ${got.reqs.length} from ${got.from.replace(/^an? /, "")} (${got.title})`.slice(0, 200), ok: done.ok, error: done.ok ? undefined : done.error });
     if (!done.ok) return fail(`${done.error} Nothing was saved.`);
     const n = current ? parseHttp(current.text).reqs.length : 0;
     return c.redirect(homeHref({ repo, file, n: String(n), saved: "1" }), 303);

@@ -105,7 +105,7 @@ const paragraphs = (text: string) =>
     .split(/\n\s*\n/)
     .map((p) => html`<p>${p.split("\n").map((line, i) => html`${i ? html`<br>` : ""}${line}`)}</p>`);
 
-/** The write kind Settings → Writes lists (`<pack>.<kind>`); the actions log keeps its older `ticket.create`. */
+/** The write kind Settings → Writes lists (`<pack>.<kind>`), and the kind in the actions log (older rows say `ticket.create`). */
 export const TICKET_KIND = "jira.ticket-create";
 
 export function previewBody(o: { ticket: Ticket; fields: TicketField[]; nonce: string; problem?: string; myList?: boolean }): Html {

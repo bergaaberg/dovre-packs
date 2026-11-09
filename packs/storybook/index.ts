@@ -15,7 +15,6 @@
  */
 import { dirname, join, resolve } from "node:path";
 import { html } from "hono/html";
-import { logAction } from "dovre/actions/deploys.ts";
 import { owns } from "dovre/owners.ts";
 import { Empty, type Html, Notice, type Pack, type PackContext, type PackForge, PageHeader, Panel, safeUrl } from "dovre/pack.ts";
 import { strictOrigin } from "dovre/strict.ts";
@@ -215,8 +214,8 @@ export function createStorybookPack(d: StorybookDeps = {}): Pack {
   const toBuild = (book: Book, f: FoundAt) => [!book.head ? f.sha : undefined, !book.base ? f.baseSha : undefined].filter((s): s is string => !!s);
   return {
     manifest: {
-      api: "1.24",
-      version: "1.0.2",
+      api: "1.25",
+      version: "1.0.3",
       id: "storybook",
       name: "Storybook",
       description: "A PR's stories before and after, published by CI or built here",
@@ -275,7 +274,7 @@ export function createStorybookPack(d: StorybookDeps = {}): Pack {
         const f = await found(forge, book, n, { wait: true });
         if (f === "reading" || !f.ok) return c.redirect(page, 303);
         const shas = toBuild(book, f);
-        if (b.builds.start(book.repo, shas)) await logAction(ctx.db, { kind: "storybook.build", target: `${book.repo}#${n}`, detail: shas.map((s) => s.slice(0, 7)).join(" "), ok: true });
+        if (b.builds.start(book.repo, shas)) await ctx.logged({ kind: "build", target: `${book.repo}#${n}`, detail: shas.map((s) => s.slice(0, 7)).join(" "), ok: true });
         return c.redirect(page, 303);
       });
     },

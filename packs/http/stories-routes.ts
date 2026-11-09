@@ -7,7 +7,6 @@
  */
 import type { Context, Hono } from "hono";
 import { html } from "hono/html";
-import { logAction } from "dovre/actions/deploys.ts";
 import type { AppEnv } from "dovre/env.ts";
 import type { PackContext } from "dovre/pack.ts";
 import { agentHref, MAX_ASK, storyAskPrompt } from "./agent.ts";
@@ -194,7 +193,7 @@ export function createStories(d: StoriesDeps) {
       .then(async () => {
         await keepRun(ctx.db, run);
         const bad = run.state !== "passed";
-        await logAction(ctx.db, { kind: agent ? "http.agentRun" : "http.run", target: `${repo}/.http/stories/${got.name}`.slice(0, 300), detail: `${runSummary(run)}${env ? ` · ${env}` : ""}`.slice(0, 200), ok: !bad, error: bad ? runSummary(run).slice(0, 200) : undefined });
+        await ctx.logged({ kind: agent ? "agentRun" : "run", target: `${repo}/.http/stories/${got.name}`.slice(0, 300), detail: `${runSummary(run)}${env ? ` · ${env}` : ""}`.slice(0, 200), ok: !bad, error: bad ? runSummary(run).slice(0, 200) : undefined });
       })
       .catch((e) => ctx.log(`http: couldn't keep a story run: ${String((e as Error)?.message ?? e).slice(0, 200)}`))
       .finally(publish);

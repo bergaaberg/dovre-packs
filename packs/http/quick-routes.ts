@@ -8,7 +8,6 @@
  */
 import type { Context, Hono } from "hono";
 import { html } from "hono/html";
-import { logAction } from "dovre/actions/deploys.ts";
 import type { AppEnv } from "dovre/env.ts";
 import type { PackContext, Tone } from "dovre/pack.ts";
 import { agentHref } from "./agent.ts";
@@ -265,7 +264,7 @@ export function createQuick(d: QuickDeps) {
       const text = current ? withReq(current.text, req) : serializeReq(req);
       if (text === null) return refuse("That file can't take it: nothing was saved.");
       const done = writeFile(root, file, text, current ? current.hash : "");
-      await logAction(ctx.db, { kind: "http.save", target: `${w.repo}/.http/${file}`, detail: `kept as a case · ${req.method} ${name || "(unnamed)"}`.slice(0, 200), ok: done.ok, error: done.ok ? undefined : done.error });
+      await ctx.logged({ kind: "save", target: `${w.repo}/.http/${file}`, detail: `kept as a case · ${req.method} ${name || "(unnamed)"}`.slice(0, 200), ok: done.ok, error: done.ok ? undefined : done.error });
       if (!done.ok) return refuse(`${done.error} Nothing was saved.`);
       const n = parseHttp(text).reqs.length - 1;
       return c.redirect(quickHref({ ...b, file, n: String(Math.max(0, n)), saved: "1" }), 303);
@@ -312,7 +311,7 @@ export function createQuick(d: QuickDeps) {
       void (async () => {
         let ok = 0;
         for (const x of todo) if (await runCase(ctx, w.repo, w.env, x)) ok++;
-        await logAction(ctx.db, { kind: "http.run", target: `${w.repo} ${endpointKey(ep)}`.slice(0, 300), detail: `${ok} of ${todo.length} cases passed${w.env ? ` · ${w.env}` : ""}`, ok: ok === todo.length, error: ok === todo.length ? undefined : `${todo.length - ok} failed` });
+        await ctx.logged({ kind: "run", target: `${w.repo} ${endpointKey(ep)}`.slice(0, 300), detail: `${ok} of ${todo.length} cases passed${w.env ? ` · ${w.env}` : ""}`, ok: ok === todo.length, error: ok === todo.length ? undefined : `${todo.length - ok} failed` });
       })()
         .catch((e) => ctx.log(`http: a case run stopped: ${String((e as Error)?.message ?? e).slice(0, 200)}`))
         .finally(() => ctx.publish(["http"]));

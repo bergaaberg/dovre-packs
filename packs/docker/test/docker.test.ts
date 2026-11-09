@@ -143,7 +143,7 @@ test("the service lists, acts after re-reading, logs by name, and switches the e
   assert.equal(docker.view().busy[ID2], "start", "busy at once; the page redirects without waiting");
   await settle();
   assert.ok(e.calls.includes(`POST /containers/${ID2}/start`));
-  assert.deepEqual(logged, ["docker.stop web false", "docker.start web true"]);
+  assert.deepEqual(logged, ["stop web false", "start web true"]);
   assert.equal(docker.view().busy[ID2], undefined);
 
   assert.equal(docker.act("../../x", "start").ok, false);
@@ -152,7 +152,7 @@ test("the service lists, acts after re-reading, logs by name, and switches the e
   assert.equal(docker.view().state, "off", "off at once, before berth has finished");
   await settle();
   assert.deepEqual(b.asked, ["stop"]);
-  assert.ok(logged.includes("docker.engine.off berth true"));
+  assert.ok(logged.includes("engine-off berth true"));
 });
 
 test("berth stopped: no pipe answers, berth says it's off, and Start asks berth to start", async () => {
@@ -307,7 +307,7 @@ test("an engine Dovre can't switch (Docker Desktop's, a Mac's): no engine contro
   docker.act(ID2, "start");
   await settle();
   assert.ok(e.calls.includes(`POST /containers/${ID2}/start`));
-  assert.deepEqual(logged, ["docker.start web true"]);
+  assert.deepEqual(logged, ["start web true"]);
 });
 
 test("no engine found: a Mac is pointed at Colima (#101); Windows at berth", () => {
