@@ -1,5 +1,9 @@
 # docker
 
+## 2.0.4 — 2026-11-09
+
+- Takes `strictOrigin` and core's types from the SDK (`dovre/pack.ts`), not core's internals. Nothing changes in what it does. Needs core API 1.27.
+
 ## 2.0.3 — 2026-11-09
 
 - Logs its writes with `ctx.logged`, not core's `logAction`. Three names in the actions log change, since a kind is now one word: `docker.engine.on` / `.off` are `docker.engine-on` / `-off`, and `docker.project.<verb>` is `docker.project-<verb>`. Needs core API 1.25.

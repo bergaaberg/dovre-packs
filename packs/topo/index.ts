@@ -17,10 +17,8 @@
  * topo.peak-pr.
  */
 import { listRepos } from "dovre/sources/claude.ts";
-import { strictOrigin } from "dovre/strict.ts";
 import { WORK } from "dovre/agents/workdir.ts";
-import type { Pack, PackContext } from "dovre/pack.ts";
-import type { Snapshot } from "dovre/gather.ts";
+import { type Pack, type PackContext, type Snapshot, strictOrigin } from "dovre/pack.ts";
 import { TopoCatalog } from "./catalog.ts";
 import { CloudInventory } from "./cloud.ts";
 import { declaresCloudflare, drift } from "./drift.ts";
@@ -119,8 +117,8 @@ export function createTopoPack(o: TopoDeps = {}): Pack {
   };
   return {
     manifest: {
-      api: "1.24",
-      version: "1.1.2",
+      api: "1.27",
+      version: "1.1.3",
       id: "topo",
       name: "Topo",
       description: "What each repo is, from its peak.yaml: tier, components, rules and docs, and which repos have none",

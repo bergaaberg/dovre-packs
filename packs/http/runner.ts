@@ -11,7 +11,7 @@
  * response (the pack keeps responses in memory only). Tables are made on first use,
  * prefixed `http_`, so the pack needs no core migration.
  */
-import type { D1 } from "dovre/db.ts";
+import type { D1 } from "dovre/pack.ts";
 import type { Refs } from "./chain.ts";
 import { type Outcome, runCheck, runChecks } from "./checks.ts";
 import type { Req } from "./model.ts";

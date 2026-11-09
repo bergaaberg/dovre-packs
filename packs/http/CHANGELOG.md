@@ -1,5 +1,9 @@
 # http
 
+## 1.1.4 — 2026-11-09
+
+- Takes `strictOrigin` and core's types from the SDK (`dovre/pack.ts`), not core's internals. Nothing changes in what it does. Needs core API 1.27.
+
 ## 1.1.3 — 2026-11-09
 
 - Logs its writes with `ctx.logged`, not core's `logAction`. Same names in the actions log. Needs core API 1.25.

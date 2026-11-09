@@ -4,7 +4,7 @@
  * migration. Short retention and hard row caps keep Dovre a cockpit, not a backend: spans and
  * logs 24 h, metric rollups 7 days, pruned on refresh and whenever enough has come in since.
  */
-import type { D1, D1Statement } from "dovre/db.ts";
+import type { D1, D1Statement } from "dovre/pack.ts";
 import type { LogRow, PointRow, ServiceSeen, SpanRow } from "./otlp.ts";
 
 export const SPAN_RETENTION_MS = 24 * 3600_000;

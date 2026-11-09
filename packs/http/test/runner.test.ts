@@ -2,9 +2,9 @@
  * HTTP client: the story runner (runner.ts) with a fake send. Takes feed later steps, until: tries
  * again, the first failure stops the rest and always: steps still run; kept runs hold no values.
  */
+import { openDb } from "dovre/pack-testing.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { openDb } from "dovre/db.ts";
 import type { Req } from "../model.ts";
 import { keepRun, keptOf, keptRun, keptRuns, MAX_KEPT, MAX_TRIES, newRun, type RunIo, runStory, runSummary, type StoryRun } from "../runner.ts";
 import type { Resp } from "../send.ts";

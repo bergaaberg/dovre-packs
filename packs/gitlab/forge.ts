@@ -3,7 +3,7 @@
  * onto Dovre's PRs, todos onto notifications, project events onto movement, and blocked deployments
  * onto waiting deploys, issues onto the Issues pack's sets. Read-only: nothing here writes to GitLab.
  */
-import type { Deploy, Forge, Issue, IssueSets, Move, Note, Pr, PrRef } from "dovre/forge/types.ts";
+import type { Deploy, Forge, Issue, IssueSets, Move, Note, Pr, PrRef } from "dovre/pack.ts";
 import { ownersOf } from "dovre/owners.ts";
 
 export type Fetch = typeof fetch;

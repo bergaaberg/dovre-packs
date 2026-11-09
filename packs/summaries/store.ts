@@ -3,9 +3,7 @@
  * Pages ask `get(key)`: the text when it's made, "pending" while it's being made, nothing if
  * never asked. `want(key, prompt)` queues one; a few run at a time.
  */
-import type { D1 } from "dovre/db.ts";
-import type { AiSummary, PackContext } from "dovre/pack.ts";
-import { inFiles } from "dovre/sources/ghe.ts";
+import { type AiSummary, type D1, inFiles, type PackContext } from "dovre/pack.ts";
 
 export type Summary = AiSummary;
 /** The model, as the pack is lent it (`ctx.complete`). */

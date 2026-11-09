@@ -12,8 +12,8 @@ const VIEWS = ["people", "timeline", "me", "bots"];
 export function createMovementPack(): Pack {
   return {
     manifest: {
-      api: "1.24",
-      version: "1.0.1",
+      api: "1.27",
+      version: "1.0.2",
       id: "movement",
       name: "Moved",
       description: "What people and bots did in the org in the last 24 hours, by person or as a timeline",

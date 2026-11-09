@@ -15,7 +15,7 @@ export function createSlackPack(opts: { fetchFn?: typeof fetch } = {}): Pack & {
     kept: () => kept,
     manifest: {
       api: "1.24",
-      version: "1.1.2",
+      version: "1.1.3",
       id: "slack",
       name: "Slack",
       description: "Direct mentions in watched channels and saved items from Slack, with a dock beside Bino's and proposals for My list.",

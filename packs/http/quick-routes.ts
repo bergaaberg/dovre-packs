@@ -8,8 +8,7 @@
  */
 import type { Context, Hono } from "hono";
 import { html } from "hono/html";
-import type { AppEnv } from "dovre/env.ts";
-import type { PackContext, Tone } from "dovre/pack.ts";
+import type { AppEnv, PackContext, Tone } from "dovre/pack.ts";
 import { agentHref } from "./agent.ts";
 import { type Case, type CaseResult, caseKey, MAX_RUN_ALL, type Results } from "./cases.ts";
 import { buildCatalog, type Endpoint, endpointFor, endpointKey } from "./catalog.ts";

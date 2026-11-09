@@ -1,11 +1,8 @@
 /** AI summaries: what it queues from a snapshot, what it keeps, and that it asks nothing until I allow it. */
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { openDb } from "dovre/db.ts";
-import { deploySummaryKey, prSummaryKey } from "dovre/gather.ts";
-import { testContext, testPr, testSnapshot } from "dovre/pack-testing.ts";
-import type { PackAi, PackContext } from "dovre/pack.ts";
-import type { Changelog } from "dovre/sources/changelog.ts";
+import { openDb, testContext, testPr, testSnapshot } from "dovre/pack-testing.ts";
+import { type Changelog, deploySummaryKey, type PackAi, type PackContext, prSummaryKey } from "dovre/pack.ts";
 import { createSummaries } from "../store.ts";
 import { createSummariesPack, wantAll } from "../index.ts";
 

@@ -11,18 +11,11 @@ import { test } from "node:test";
 import { assertDoors } from "dovre/pack-testing.ts";
 
 const REACH_INS: Record<string, number> = {
-  "dovre/actions/propose.ts": 2,
   "dovre/agents/workdir.ts": 1,
   "dovre/app.ts": 1,
-  "dovre/db.ts": 14,
-  "dovre/env.ts": 13,
   "dovre/forge/pick.ts": 1,
-  "dovre/forge/types.ts": 1,
-  "dovre/gather.ts": 5,
-  "dovre/home/needs.ts": 3,
   "dovre/html.ts": 1,
   "dovre/kept.ts": 2,
-  "dovre/live.ts": 1,
   "dovre/owners.ts": 2,
   "dovre/packs/api.ts": 2,
   "dovre/packs/core/assistant/bino/context.ts": 1,
@@ -33,16 +26,11 @@ const REACH_INS: Record<string, number> = {
   "dovre/packs/ingest.ts": 1,
   "dovre/packs/registry.ts": 1,
   "dovre/pages/inline.ts": 1,
-  "dovre/pages/later.ts": 1,
-  "dovre/sources/changelog.ts": 1,
   "dovre/sources/claude.ts": 1,
-  "dovre/sources/files.ts": 1,
-  "dovre/sources/ghe.ts": 4,
   "dovre/spawn.ts": 1,
-  "dovre/strict.ts": 7,
   "dovre/ui/on.js.ts": 1,
-  "dovre/ui/style.ts": 3,
-  "dovre/when.ts": 3,
+  "dovre/ui/style.ts": 2,
+  "dovre/when.ts": 1,
   "dovre/worker.ts": 1,
 };
 

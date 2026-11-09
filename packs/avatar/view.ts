@@ -9,8 +9,7 @@ import { MOODS, SAY, todayModeOf } from "./avatar.ts";
 import { isoSvg } from "./iso.ts";
 import { BODIES, buildAvatar, CREATURES, type Creature, effects, EXTRAS, type Extra, FINISHES, type Look, lookOf } from "./model.ts";
 import { SCENES, situationOf, TRY_PROPS, trySituation } from "./mood.ts";
-import type { App } from "dovre/env.ts";
-import { Ago, html, type PackContext, PageHeader, Panel } from "dovre/pack.ts";
+import { Ago, type App, html, type PackContext, PageHeader, Panel } from "dovre/pack.ts";
 import { AVATAR_CSS } from "./style.ts";
 
 export type AvatarPlace = "dock" | "hero" | "mini" | "stage";

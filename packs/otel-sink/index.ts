@@ -49,7 +49,7 @@ export function createOtelSinkPack(opts: { now?: () => number } = {}): Pack & { 
     kept: () => kept,
     manifest: {
       api: "1.24",
-      version: "1.1.2",
+      version: "1.1.3",
       id: ID,
       name: "OTel sink",
       description: "Receives OTLP/HTTP (traces, metrics, logs) straight from your apps: RED per service, errors with their trace, a waterfall, a log tail.",
