@@ -13,14 +13,12 @@
  * frames are allowed on its own pages only (`frames`), for the origins STORYBOOK names and the build
  * server's.
  */
-import { dirname, join, resolve } from "node:path";
 import { html } from "hono/html";
 import { owns } from "dovre/owners.ts";
 import { Empty, type Html, Notice, type Pack, type PackContext, type PackForge, PageHeader, Panel, safeUrl } from "dovre/pack.ts";
 import { strictOrigin } from "dovre/strict.ts";
-import { findTool } from "dovre/tools.ts";
 import { later, Reading } from "dovre/pages/later.ts";
-import { type Builds, type BuildState, createBuilds } from "./build.ts";
+import { type Builds, type BuildState, createBuilds, runWith } from "./build.ts";
 import { type Book, bookOf, booksOf, frameUrl, openUrl, originOf, parseStories, STORIES, storyId, touched, urlOf, type Changed } from "./model.ts";
 import { buildOrigins, buildServer, frameFrom } from "./serve.ts";
 
@@ -44,13 +42,15 @@ const STYLES = `.sb-list { list-style: none; margin: 0; padding: 0; display: gri
 /** The port the builds are served on: STORYBOOK_PORT, else the one after Dovre's. */
 export const portOf = (env: Record<string, string | undefined>) => Number(env.STORYBOOK_PORT) || (Number(env.PORT) || 4848) + 1;
 
-/** Builds here: in Dovre's data folder, in the repo's checkout under CODE_DIR (the one named like the repo). */
+/** Builds here: in the pack's own folder, in the repo's checkout under CODE_DIR (the one named like the repo). */
 export function buildHere(ctx: PackContext): BuildHere | undefined {
-  if (ctx.hosted || !ctx.checkouts || !ctx.checkout) return undefined;
+  if (ctx.hosted || !ctx.checkouts || !ctx.checkout || !ctx.run || !ctx.onPath || !ctx.dir) return undefined;
+  const here = (name: string) => (ctx.onPath!(name) ? name : undefined);
   const port = portOf(ctx.env);
   const builds = createBuilds({
-    dir: join(dirname(resolve(ctx.env.U_DB || "data/dovre.sqlite")), "storybook"),
-    tools: { git: findTool("git"), pnpm: findTool("pnpm"), npm: findTool("npm") },
+    dir: ctx.dir(),
+    tools: { git: here("git"), pnpm: here("pnpm"), npm: here("npm") },
+    run: runWith(ctx.run),
     checkout: (repo) => {
       const name = repo.split("/")[1]!.toLowerCase();
       const found = ctx.checkouts!().find((c) => c.toLowerCase() === name);
@@ -214,12 +214,13 @@ export function createStorybookPack(d: StorybookDeps = {}): Pack {
   const toBuild = (book: Book, f: FoundAt) => [!book.head ? f.sha : undefined, !book.base ? f.baseSha : undefined].filter((s): s is string => !!s);
   return {
     manifest: {
-      api: "1.25",
-      version: "1.0.3",
+      api: "1.26",
+      version: "1.0.4",
       id: "storybook",
       name: "Storybook",
       description: "A PR's stories before and after, published by CI or built here",
       domain: "general",
+      binaries: ["git", "pnpm", "npm"],
       markers: [".storybook/"],
       execution: "local-only",
       settings: [
