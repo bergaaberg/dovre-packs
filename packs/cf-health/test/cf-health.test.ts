@@ -42,7 +42,7 @@ test("cf-health: parses GraphQL telemetry, classifies status, and notifies hub",
   assert.equal(kept.workers.length, 2);
   assert.equal(kept.workers[0]!.status, "ok");
   assert.equal(kept.workers[1]!.status, "bad");
-  assert.equal(pack.avatar!(testContext())?.trouble?.level, "fire");
+  assert.equal(pack.pulse!(testContext())?.trouble?.level, "fire");
   assert.match(pack.bino!(testContext()), /edge-api \[ok\]: 1200 req/);
 });
 

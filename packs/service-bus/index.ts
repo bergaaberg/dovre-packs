@@ -1,12 +1,12 @@
 /**
  * Azure Service Bus Pack (`service-bus`): active backlog and dead-letter queue depth per queue
- * and topic subscription, with a DLQ radar (needs, a ring, the avatar's storm or fire).
+ * and topic subscription, with a DLQ radar (needs, a ring, the pulse's storm or fire).
  * Counts and entity names only, never a message. Works locally and hosted on Cloudflare Workers.
  */
 import { type Pack } from "dovre/packs/types.ts";
 import { parseEndpoint, readServiceBus } from "./data.ts";
 import { serviceBusCard, serviceBusPage } from "./view.ts";
-import { avatarOf, binoOf, needsOf, RING, type ServiceBusKept, watch } from "./watch.ts";
+import { pulseOf, binoOf, needsOf, RING, type ServiceBusKept, watch } from "./watch.ts";
 
 export function createServiceBusPack(opts: { fetchFn?: typeof fetch; now?: () => number } = {}): Pack & { kept(): ServiceBusKept | undefined } {
   let kept: ServiceBusKept | undefined;
@@ -15,7 +15,7 @@ export function createServiceBusPack(opts: { fetchFn?: typeof fetch; now?: () =>
     kept: () => kept,
     manifest: {
       api: "1.6",
-      version: "1.0.0",
+      version: "1.0.1",
       id: "service-bus",
       name: "Azure Service Bus",
       description: "Queue and subscription backlog and dead-letter queue depth, with a DLQ radar.",
@@ -51,7 +51,7 @@ export function createServiceBusPack(opts: { fetchFn?: typeof fetch; now?: () =>
     },
     today: () => (kept ? [{ id: "now", render: serviceBusCard(kept, now()) }] : []),
     needs: () => needsOf(kept),
-    avatar: () => avatarOf(kept),
+    pulse: () => pulseOf(kept),
     bino: () => binoOf(kept),
   };
 }

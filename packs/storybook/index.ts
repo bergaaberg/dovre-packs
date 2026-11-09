@@ -218,7 +218,7 @@ export function createStorybookPack(d: StorybookDeps = {}): Pack {
   return {
     manifest: {
       api: "1.21",
-      version: "1.0.0",
+      version: "1.0.1",
       id: "storybook",
       name: "Storybook",
       description: "A PR's stories before and after, published by CI or built here",
@@ -285,4 +285,3 @@ export function createStorybookPack(d: StorybookDeps = {}): Pack {
 }
 
 export const storybookPack: Pack = createStorybookPack();
-export const storybookCrate = storybookPack;

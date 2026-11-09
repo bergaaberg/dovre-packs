@@ -69,8 +69,8 @@ test("otel: reads RED metrics, alerts and version; status math and lanes follow 
   const lane = pack.lane!(testContext({ env: ENV }))!;
   assert.ok(lane.marks.some((m) => m.title.includes("6.4% 5xx")));
   assert.ok(lane.marks.some((m) => m.title.includes("critical")));
-  // the avatar runs fire on the critical alert, with the on-duty beacon lit
-  assert.deepEqual(pack.avatar!(testContext({ env: ENV })), { trouble: { level: "fire", why: "api: 5xx or latency breach", href: "/otel" }, onDuty: true });
+  // the pulse runs fire on the critical alert, with the on-duty beacon lit
+  assert.deepEqual(pack.pulse!(testContext({ env: ENV })), { trouble: { level: "fire", why: "api: 5xx or latency breach", href: "/otel" }, onDuty: true });
   // bino says states and numbers only
   const bino = pack.bino!(testContext({ env: ENV }));
   assert.match(bino, /api \[bad\]: 12\.5 req\/s, 0\.8% 5xx, p95 420ms/);
@@ -92,7 +92,7 @@ test("otel: status falls to warn on latency, ok when quiet", async () => {
   const kept = pack.kept()!;
   assert.ok(kept.ok);
   assert.equal(kept.services[0]!.status, "warn"); // p95 900ms ≥ 500ms
-  assert.deepEqual(pack.avatar!(testContext({ env: ENV })), { trouble: { level: "storm", why: "api: elevated latency or errors", href: "/otel" }, onDuty: false });
+  assert.deepEqual(pack.pulse!(testContext({ env: ENV })), { trouble: { level: "storm", why: "api: elevated latency or errors", href: "/otel" }, onDuty: false });
   void base;
 });
 

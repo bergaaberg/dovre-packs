@@ -56,7 +56,7 @@ export function createLinearPack(
     kept: () => kept,
     manifest: {
       api: "1.6",
-      version: "1.0.0",
+      version: "1.0.1",
       id: "linear",
       name: "Linear",
       description: "Assigned Linear issues, cycle progress, un-triaged team issues and TEAM-123 linking.",
@@ -170,4 +170,3 @@ export function createLinearPack(
 }
 
 export const linearPack: Pack = createLinearPack();
-export const linearCrate = linearPack;

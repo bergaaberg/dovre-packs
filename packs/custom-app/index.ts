@@ -11,7 +11,7 @@ let kept: Kept | undefined;
 export const customAppPack: Pack = {
   manifest: {
     api: "1.6",
-    version: "1.0.0",
+    version: "1.0.1",
     id: "custom-app",
     name: "Custom App",
     description: "Starter 3-file pack for your own app, D1 database, or API.",
@@ -33,4 +33,3 @@ export const customAppPack: Pack = {
   bino: () => (kept ? `${kept.summary} (${kept.items.length} items)` : ""),
 };
 
-export const customAppCrate = customAppPack;

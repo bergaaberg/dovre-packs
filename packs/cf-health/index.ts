@@ -12,7 +12,7 @@ export function createCfHealthPack(opts: { fetchFn?: typeof fetch } = {}): Pack 
     kept: () => kept,
     manifest: {
       api: "1.6",
-      version: "1.0.0",
+      version: "1.0.1",
       id: "cf-health",
       name: "Cloudflare Health",
       description: "24h Cloudflare Workers request and error telemetry via GraphQL.",
@@ -35,7 +35,7 @@ export function createCfHealthPack(opts: { fetchFn?: typeof fetch } = {}): Pack 
       app.get("/cf-health", (c) => ctx.page(c, { title: "Cloudflare Health", body: cfHealthPage(kept) }));
     },
     today: () => (kept ? [{ id: "now", render: cfHealthCard(kept) }] : []),
-    avatar: () => {
+    pulse: () => {
       if (!kept?.ok) return undefined;
       const bad = kept.workers.filter((w) => w.status === "bad");
       const warn = kept.workers.filter((w) => w.status === "warn");
@@ -52,4 +52,3 @@ export function createCfHealthPack(opts: { fetchFn?: typeof fetch } = {}): Pack 
 }
 
 export const cfHealthPack: Pack = createCfHealthPack();
-export const cfHealthCrate = cfHealthPack;

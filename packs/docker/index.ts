@@ -57,7 +57,7 @@ export function createDockerPack(make: (ctx: PackContext) => Docker = (ctx) => m
   return {
     manifest: {
       api: "1.11",
-      version: "2.0.0",
+      version: "2.0.1",
       id: "docker",
       name: "Docker",
       description: "Containers on Docker Engine: start, stop, logs",
@@ -90,4 +90,3 @@ export function createDockerPack(make: (ctx: PackContext) => Docker = (ctx) => m
 }
 
 export const dockerPack: Pack = createDockerPack();
-export const dockerCrate = dockerPack;

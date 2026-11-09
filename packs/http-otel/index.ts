@@ -11,7 +11,7 @@ export function createHttpOtelPack(opts: { fetchFn?: typeof fetch } = {}): Pack 
     kept: () => kept,
     manifest: {
       api: "1.6",
-      version: "1.0.0",
+      version: "1.0.1",
       id: "http-otel",
       name: "HTTP & OpenTelemetry",
       description: "Polls HTTP /healthz endpoints and OpenTelemetry collector health.",
@@ -32,7 +32,7 @@ export function createHttpOtelPack(opts: { fetchFn?: typeof fetch } = {}): Pack 
       app.get("/http-otel", (c) => ctx.page(c, { title: "HTTP & OpenTelemetry", body: httpOtelPage(kept) }));
     },
     today: () => (kept ? [{ id: "now", render: httpOtelCard(kept) }] : []),
-    avatar: () => {
+    pulse: () => {
       if (!kept) return undefined;
       const down = kept.endpoints.filter((e) => !e.ok);
       if (down.length) return { trouble: { level: "fire", why: `${down.length} endpoint${down.length > 1 ? "s" : ""} down`, href: "/http-otel" } };
@@ -44,4 +44,3 @@ export function createHttpOtelPack(opts: { fetchFn?: typeof fetch } = {}): Pack 
 }
 
 export const httpOtelPack: Pack = createHttpOtelPack();
-export const httpOtelCrate = httpOtelPack;

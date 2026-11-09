@@ -107,7 +107,7 @@ test("otel-sink: JSON traces come in, RED per service is read back, and only all
   assert.equal(s.hourly.reduce((a, h) => a + h.n, 0), 3);
 });
 
-test("otel-sink: a service that starts erroring is a need (rung once by key), a lane mark, avatar trouble and a Today card", async () => {
+test("otel-sink: a service that starts erroring is a need (rung once by key), a lane mark, pulse trouble and a Today card", async () => {
   const { ctx, pack, send } = setup({ OTEL_SINK_SERVICES: "api=bergaaberg/api, bad=<x>" });
   await send("v1/traces", traces("api", [1, 2, 3, 4, 5, 6].map((id) => span({ id, err: id <= 3, trace: TRACE.slice(0, 31) + id })))); // 3 of 6 failed
   await pack.refresh!(ctx);
@@ -117,7 +117,7 @@ test("otel-sink: a service that starts erroring is a need (rung once by key), a 
   assert.equal(needs[0]!.ring, "erroring");
   assert.equal(needs[0]!.tone, "bad");
   assert.equal(needs[0]!.href, "/otel-sink/service/api");
-  assert.deepEqual(pack.avatar!(ctx), { trouble: { level: "fire", why: "1 service failing", href: "/otel-sink" } });
+  assert.deepEqual(pack.pulse!(ctx), { trouble: { level: "fire", why: "1 service failing", href: "/otel-sink" } });
   const lane = pack.lane!(ctx)!;
   assert.equal(lane.marks.length, 1);
   assert.match(lane.marks[0]!.title, /api: 3 errors \(50%\)/);

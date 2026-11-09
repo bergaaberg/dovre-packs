@@ -95,11 +95,11 @@ test("slack: reads mentions and saved items, rings needs once per message", asyn
     kept.mentions.map((m) => m.key),
   );
   assert.ok(needs.every((n) => n.ring === "slack" && n.href === "/slack"));
-  // The dock counts mentions and runs hot; the avatar asks once each.
+  // The dock counts mentions and runs hot; the pulse asks once each.
   const dock = pack.dock!(testContext({ env: ENV }))!;
   assert.equal(dock.count, 2);
   assert.equal(dock.hot, true);
-  assert.deepEqual(pack.avatar!(testContext({ env: ENV })), { asking: 2 });
+  assert.deepEqual(pack.pulse!(testContext({ env: ENV })), { asking: 2 });
 });
 
 test("slack: bino sees counts and channel names, never a message body", async () => {

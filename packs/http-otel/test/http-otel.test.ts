@@ -7,7 +7,7 @@ import { httpOtelPage } from "../view.ts";
 
 const H = `<script>alert(1)</script><img src=x onerror=alert(1)>`;
 
-test("http-otel: polls endpoints, reports down endpoints to avatar, and escapes hostile text", async () => {
+test("http-otel: polls endpoints, reports down endpoints to pulse, and escapes hostile text", async () => {
   const fakeFetch: typeof fetch = async (url) =>
     String(url).includes("bad") ? new Response("err", { status: 503 }) : new Response('{"ok":true}', { status: 200 });
   const pack = createHttpOtelPack({ fetchFn: fakeFetch });
@@ -15,7 +15,7 @@ test("http-otel: polls endpoints, reports down endpoints to avatar, and escapes 
   assert.equal(pack.kept()!.endpoints.length, 2);
   assert.equal(pack.kept()!.endpoints[0]!.ok, true);
   assert.equal(pack.kept()!.endpoints[1]!.ok, false);
-  assert.equal(pack.avatar!(testContext())?.trouble?.level, "fire");
+  assert.equal(pack.pulse!(testContext())?.trouble?.level, "fire");
 
   const out = String(
     await httpOtelPage({
