@@ -9,8 +9,7 @@ import { createBuilds, installer, KEEP, type Run, slugOf, tailOf } from "../buil
 import { buildHandler, buildOrigins, fileFor, frameFrom } from "../serve.ts";
 
 const A = "a".repeat(40), B = "b".repeat(40);
-const tool = (name: string) => ({ bin: name, pre: [], path: name });
-const tools = { git: tool("git"), pnpm: tool("pnpm"), npm: tool("npm") };
+const tools = { git: "git", pnpm: "pnpm", npm: "npm" };
 const until = async (ok: () => boolean) => {
   for (let i = 0; i < 200 && !ok(); i++) await new Promise((r) => setTimeout(r, 5));
   assert.ok(ok(), "timed out");
@@ -21,9 +20,9 @@ function fakeRun(fail?: string) {
   const seen: string[] = [];
   const run: Run = async (t, all, cwd) => {
     // git always runs with long paths on (Windows); the rest is the command.
-    if (t.bin === "git") assert.deepEqual(all.slice(0, 2), ["-c", "core.longpaths=true"]);
-    const args = t.bin === "git" ? all.slice(2) : all;
-    seen.push(`${t.bin} ${args.join(" ")}`);
+    if (t === "git") assert.deepEqual(all.slice(0, 2), ["-c", "core.longpaths=true"]);
+    const args = t === "git" ? all.slice(2) : all;
+    seen.push(`${t} ${args.join(" ")}`);
     if (fail && args.includes(fail)) return { code: 1, out: `step 1\n\x1b[31mERR\x1b[0m <script>x</script>\n` };
     if (args[0] === "worktree" && args[1] === "add") {
       mkdirSync(join(args[4]!, ".git"), { recursive: true });

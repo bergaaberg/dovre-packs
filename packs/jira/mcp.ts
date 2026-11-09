@@ -11,10 +11,11 @@
  * Results over ~45k characters don't come back whole (Claude Code saves them to a file and shows
  * a preview), so searches ask for few fields: the moving list goes without type and assignee.
  */
-import type { Ran } from "dovre/spawn.ts";
 import { type JiraIssue, safeProjects, typesOf } from "./data.ts";
 import { type RawCreateField, type Screen, TICKET_KEY } from "./tickets.ts";
 
+/** How a program ended, as core's `runOff` says it. */
+export type Ran = { code: number | null; stdout: string; stderr: string };
 export type RunOff = (bin: string, args: string[], opts: { cwd?: string; timeoutMs?: number; input?: string; maxBuffer?: number }) => Promise<Ran>;
 
 export const ATLASSIAN_MCP = { mcpServers: { atlassian: { type: "http", url: "https://mcp.atlassian.com/v1/mcp" } } };

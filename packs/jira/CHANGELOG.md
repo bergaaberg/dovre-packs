@@ -1,5 +1,9 @@
 # jira
 
+## 1.1.4 — 2026-11-09
+
+- Its own `Ran` type, not core's `dovre/spawn.ts`. Nothing changes in what it does.
+
 ## 1.1.3 — 2026-11-09
 
 - Logs a created ticket with `ctx.logged`, as `jira.ticket-create` (was `ticket.create`); older rows still read "Created a Jira ticket". Needs core API 1.25.

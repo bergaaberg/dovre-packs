@@ -1,5 +1,9 @@
 # storybook
 
+## 1.0.4 — 2026-11-09
+
+- Runs git, pnpm and npm through `ctx.run`, not core's `runOff` and `findTool`, and names them in its manifest (`binaries`). Builds move to the pack's own folder, `packs/storybook` next to the database: the ones in `data/storybook` are built again when asked for, and that folder can be deleted. Needs core API 1.26.
+
 ## 1.0.3 — 2026-11-09
 
 - Logs a build with `ctx.logged`, not core's `logAction`. Same name in the actions log. Needs core API 1.25.

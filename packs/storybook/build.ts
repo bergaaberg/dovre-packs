@@ -11,8 +11,7 @@
  */
 import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { runOff } from "dovre/spawn.ts";
-import type { Tool } from "dovre/tools.ts";
+import type { PackContext } from "dovre/pack.ts";
 
 export type BuildState =
   | { status: "none" }
@@ -21,6 +20,8 @@ export type BuildState =
   | { status: "ready" }
   | { status: "failed"; why: string; tail: string; at: number };
 
+/** A program by name, as `ctx.run` takes it. */
+export type Tool = string;
 /** Runs a program to the end (never a shell): its exit code and output. */
 export type Run = (tool: Tool, args: string[], cwd: string, timeoutMs: number) => Promise<{ code: number; out: string }>;
 
@@ -43,8 +44,9 @@ export const SHA = /^[0-9a-f]{40}$/;
 /** A repo as a folder name: `acme__web`. */
 export const slugOf = (repo: string) => repo.toLowerCase().replace(/[^a-z0-9.-]+/g, "__");
 
-export const runTool: Run = async (tool, args, cwd, timeoutMs) => {
-  const r = await runOff(tool.bin, [...tool.pre, ...args], { cwd, timeoutMs, maxBuffer: 16 << 20, env: { CI: "1", GIT_TERMINAL_PROMPT: "0", STORYBOOK_DISABLE_TELEMETRY: "1" } }).catch((e: Error) => ({ code: 1, stdout: "", stderr: String(e.message) }));
+/** Core's `ctx.run`, as a build runs its steps: CI's environment, a failure to start as a failed step. */
+export const runWith = (run: NonNullable<PackContext["run"]>): Run => async (tool, args, cwd, timeoutMs) => {
+  const r = await run(tool, args, { cwd, timeoutMs, maxBuffer: 16 << 20, env: { CI: "1", GIT_TERMINAL_PROMPT: "0", STORYBOOK_DISABLE_TELEMETRY: "1" } }).catch((e: Error) => ({ code: 1, stdout: "", stderr: String(e.message) }));
   return { code: r.code ?? 1, out: `${r.stdout}${r.stderr}` };
 };
 
@@ -64,10 +66,10 @@ export function createBuilds(o: {
   /** The repo's checkout right under CODE_DIR (a full path), or undefined. */
   checkout(repo: string): string | undefined;
   onChange(): void;
-  run?: Run;
+  run: Run;
   log?(line: string): void;
 }): Builds {
-  const run = o.run ?? runTool;
+  const run = o.run;
   // Windows: deep component folders pass 260 characters inside the build worktree.
   const git = (args: string[], cwd: string, ms: number) => run(o.tools.git!, ["-c", "core.longpaths=true", ...args], cwd, ms);
   const outDir = resolve(o.dir, "out");
