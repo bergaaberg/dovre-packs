@@ -205,7 +205,7 @@ export function createDocker(opts: {
         } catch (e) {
           error = (e as Error).message;
         }
-        await opts.log?.(`docker.${verb}`, name, ok, error).catch(() => {});
+        await opts.log?.(verb, name, ok, error).catch(() => {});
         const { [id]: _, ...busy } = view.busy;
         set({ busy, flash: ok ? { ok, message: `${PAST[verb]} ${name}.` } : { ok, message: `Couldn't ${verb} ${name}: ${error}` } });
         await refresh();
@@ -223,7 +223,7 @@ export function createDocker(opts: {
           const error = await run(c, verb).catch((e: Error) => e.message);
           if (error) failed.push(`${c.name}: ${error}`);
         }
-        await opts.log?.(`docker.project.${verb}`, name, !failed.length, failed.slice(0, 3).join("; ") || undefined).catch(() => {});
+        await opts.log?.(`project-${verb}`, name, !failed.length, failed.slice(0, 3).join("; ") || undefined).catch(() => {});
         const busy = { ...view.busy };
         for (const c of cs) delete busy[c.id];
         set({ busy, flash: failed.length ? { ok: false, message: `${name}: ${failed.join("; ")}` } : { ok: true, message: `${PAST[verb]} ${name} (${cs.length}).` } });
@@ -239,7 +239,7 @@ export function createDocker(opts: {
         set({ state: "starting", error: undefined });
         void (async () => {
           const r = await control.start();
-          void opts.log?.("docker.engine.on", control.name, r.ok, r.error).catch(() => {});
+          void opts.log?.("engine-on", control.name, r.ok, r.error).catch(() => {});
           if (!r.ok) {
             starting = 0;
             set({ flash: { ok: false, message: `Couldn't start Docker: ${r.error}` } });
@@ -253,7 +253,7 @@ export function createDocker(opts: {
         set({ state: "off", containers: [], busy: {} });
         void (async () => {
           const r = await control.stop();
-          void opts.log?.("docker.engine.off", control.name, r.ok, r.error).catch(() => {});
+          void opts.log?.("engine-off", control.name, r.ok, r.error).catch(() => {});
           stopping = false;
           if (!r.ok) set({ flash: { ok: false, message: `Couldn't stop Docker: ${r.error}` } });
           await refresh();

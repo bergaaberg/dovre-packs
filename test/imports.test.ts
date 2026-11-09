@@ -11,7 +11,6 @@ import { test } from "node:test";
 import { assertDoors } from "dovre/pack-testing.ts";
 
 const REACH_INS: Record<string, number> = {
-  "dovre/actions/deploys.ts": 9,
   "dovre/actions/propose.ts": 2,
   "dovre/agents/workdir.ts": 1,
   "dovre/app.ts": 1,

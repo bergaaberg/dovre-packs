@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Hono } from "hono";
 import { html } from "hono/html";
-import { recentActions } from "dovre/actions/deploys.ts";
 import { openDb } from "dovre/db.ts";
 import { packApp, testContext } from "dovre/pack-testing.ts";
 import type { PackContext } from "dovre/pack.ts";
@@ -72,11 +71,13 @@ const devRest = (extra: Record<string, unknown> = {}) => ({
 function mounted(o: { env?: Record<string, string>; fetchFn?: typeof fetch; agent?: Agent; hosted?: boolean; /** The todo pack is on (default). */ todo?: boolean } = {}) {
   const db = openDb();
   const published: string[][] = [];
+  const logged: Parameters<PackContext["logged"]>[0][] = [];
   const todo = todoPack({ links: () => ({ ghe: "acme.ghe.com", org: "ACME" }) });
   const ctx: PackContext = testContext({
     required: ((id: string, key: string) => (o.todo !== false && id === "todo" && key === "list" ? todo.shares!(ctx).list : undefined)) as PackContext["required"],
     env: { JIRA_SITE: SITE, TICKET_PROJECTS: "DEV", ...o.env },
     db: db.DB,
+    logged: async (a) => void logged.push(a),
     hosted: o.hosted ?? false,
     publish: (t) => void published.push(t),
     page: async (c, p) => c.html(html`${p.head ?? ""}${p.body}`),
@@ -87,7 +88,7 @@ function mounted(o: { env?: Record<string, string>; fetchFn?: typeof fetch; agen
   pack.routes!(app as never, ctx);
   const get = (p: string) => app.request(`http://localhost${p}`);
   const post = (p: string, body: [string, string][] | Record<string, string>) => app.request(`http://localhost${p}`, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(body).toString() });
-  return { pack, ctx, db, get, post, published };
+  return { pack, ctx, db, get, post, published, logged };
 }
 
 const restOn = { JIRA_EMAIL: "me@example.com", JIRA_TOKEN: "t0k" };
@@ -163,7 +164,7 @@ test("tickets: createInput puts the payload's fields onto createJiraIssue's argu
 
 test("tickets (rest): the screen reads in the background; then the type's live fields, a preview, and Create files once, re-checked, logged, on My list", async () => {
   const rest = fakeRest(devRest({ "POST /rest/api/3/issue": { id: "1", key: "DEV-13" } }));
-  const { get, post, db, published } = mounted({ env: restOn, fetchFn: rest.fetchFn });
+  const { get, post, db, published, logged } = mounted({ env: restOn, fetchFn: rest.fetchFn });
   const first = await (await get("/jira/new")).text();
   assert.match(first, /data-pending/, "nothing kept yet: the page says it's reading, and fills in");
   assert.match(first, /<meta name="u-topics" content="jira">/);
@@ -197,7 +198,7 @@ test("tickets (rest): the screen reads in the background; then the type's live f
   assert.equal(writes.length, 1);
   assert.deepEqual(writes[0]!.body, { fields: { project: { key: "DEV" }, issuetype: { id: "10255" }, summary: "Se bilene mine", description: adf("Kunden vil se bilene."), priority: { id: "10006" }, customfield_10476: { id: "10597" } } });
   assert.equal(rest.calls.filter((c) => c.path.startsWith("/rest/api/3/issue/createmeta/DEV/issuetypes?")).length, 2, "the type is checked against Jira again right before the write");
-  assert.deepEqual((await recentActions(db.DB)).map((a) => [a.kind, a.target, a.ok, a.detail]), [["ticket.create", "DEV-13", 1, "Story · Se bilene mine"]], "logged with type and summary, never the description");
+  assert.deepEqual(logged.map((a) => [a.kind, a.target, a.ok, a.detail]), [["ticket-create", "DEV-13", true, "Story · Se bilene mine"]], "logged with type and summary, never the description");
   assert.deepEqual((await listTodos(db.DB)).map((t) => [t.title, t.notes]), [["Se bilene mine", "DEV-13 in Jira: https://example.atlassian.net/browse/DEV-13"]]);
 
   const twice = await post("/jira/new/create", hiddenOf(preview, "/jira/new/create"));
@@ -214,7 +215,7 @@ test("tickets (rest): a type with a required field the form can't fill says so; 
 
   let types: unknown = DEV_TYPES;
   const rest = fakeRest(devRest({ "GET /rest/api/3/issue/createmeta/DEV/issuetypes?maxResults=50": () => types, "POST /rest/api/3/issue": () => { throw new Error("field Område is required"); } }));
-  const { get, post, db } = mounted({ env: restOn, fetchFn: rest.fetchFn });
+  const { get, post, logged } = mounted({ env: restOn, fetchFn: rest.fetchFn });
   await landed(get, "/jira/new");
   const sent = { project: "DEV", type: "10255", j_summary: "x", j_customfield_10476: "10597" };
   const preview = await (await post("/jira/new/preview", sent)).text();
@@ -224,7 +225,7 @@ test("tickets (rest): a type with a required field the form can't fill says so; 
   assert.match(refused, /action="\/jira\/new\/create"/, "back on the preview, to try again");
   assert.ok(!rest.calls.some((c) => c.method === "POST"));
   assert.equal((await post("/jira/new/preview", sent)).status, 400, "what Jira said at the check is what the form knows now");
-  assert.deepEqual(await recentActions(db.DB), [], "a refused check wrote nothing, so there's nothing to log");
+  assert.deepEqual(logged, [], "a refused check wrote nothing, so there's nothing to log");
 
   const failing = fakeRest(devRest({ "POST /rest/api/3/issue": () => { throw new Error("field Område is required"); } }));
   const f = mounted({ env: restOn, fetchFn: failing.fetchFn });
@@ -234,7 +235,7 @@ test("tickets (rest): a type with a required field the form can't fill says so; 
   const failed = await landed(f.get, first);
   assert.equal((await f.get(first)).status, 502);
   assert.match(failed, /Couldn(&#39;|')t create the ticket in DEV: .*field Område is required/);
-  assert.deepEqual((await recentActions(f.db.DB)).map((a) => [a.kind, a.target, a.ok]), [["ticket.create", "DEV", 0]]);
+  assert.deepEqual(f.logged.map((a) => [a.kind, a.target, a.ok]), [["ticket-create", "DEV", false]]);
   // Create again on the same preview: one that failed may be tried again.
   await landed(f.get, (await f.post("/jira/new/create", hiddenOf(again, "/jira/new/create"))).headers.get("location")!);
   assert.equal(failing.calls.filter((c) => c.method === "POST").length, 2);
@@ -308,7 +309,7 @@ function mcpJira(answerCreate: (input: Record<string, unknown>) => string) {
 
 test("tickets (mcp): the create screen from one job, a preview, a fresh check, then one job allowed createJiraIssue only, with exactly the preview's fields", async () => {
   const { agent, jobs } = mcpJira(() => JSON.stringify({ key: "DEV-14", id: "1" }));
-  const { get, post, db } = mounted({ env: { JIRA_VIA: "mcp" }, agent });
+  const { get, post, logged } = mounted({ env: { JIRA_VIA: "mcp" }, agent });
   const form = await landed(get, "/jira/new?project=DEV&type=10255");
   assert.match(form, />Story</);
   assert.match(form, /<option value="10602" selected>Ikke valgt<\/option>/);
@@ -326,17 +327,17 @@ test("tickets (mcp): the create screen from one job, a preview, a fresh check, t
     additional_fields: { priority: { id: "10008" }, customfield_10476: { id: "10597" } },
   }, "a select the form didn't post goes as Jira's default");
   assert.equal(jobs.filter((j) => argOf(j.args, "--allowedTools") === `${TYPES},${FIELDS}`).length, 2, "the create screen, then a fresh check right before the write");
-  assert.deepEqual((await recentActions(db.DB)).map((a) => [a.kind, a.target, a.ok]), [["ticket.create", "DEV-14", 1]]);
+  assert.deepEqual(logged.map((a) => [a.kind, a.target, a.ok]), [["ticket-create", "DEV-14", true]]);
 });
 
 test("tickets (mcp): a create whose answer has no ticket key is a failure, logged, not a made-up key", async () => {
   const { agent } = mcpJira(() => JSON.stringify({ errorMessages: ["Område is required"] }));
-  const { get, post, db } = mounted({ env: { JIRA_VIA: "mcp" }, agent });
+  const { get, post, logged } = mounted({ env: { JIRA_VIA: "mcp" }, agent });
   await landed(get, "/jira/new");
   const preview = await (await post("/jira/new/preview", { project: "DEV", type: "10255", j_summary: "x", j_customfield_10476: "10597" })).text();
   const out = await landed(get, (await post("/jira/new/create", hiddenOf(preview, "/jira/new/create"))).headers.get("location")!);
   assert.match(out, /no ticket key/);
-  assert.deepEqual((await recentActions(db.DB)).map((a) => [a.kind, a.ok]), [["ticket.create", 0]]);
+  assert.deepEqual(logged.map((a) => [a.kind, a.ok]), [["ticket-create", false]]);
 });
 
 // ── Elsewhere in Dovre: New work, search, the actions log, Bino ──
@@ -348,7 +349,8 @@ test("tickets: New work lists where a ticket can go, search offers New ticket, t
   assert.match(panel, /href="\/jira\/new\?project=DEV"/);
   assert.match(panel, /href="\/jira\/new\?project=OPS"/);
   assert.deepEqual(pack.finds!(ctx).filter((f) => f.kind === "actions").map((f) => [f.title, f.href]), [["New ticket in DEV", "/jira/new?project=DEV"], ["New ticket in OPS", "/jira/new?project=OPS"]]);
-  assert.equal(slots["actions.what"]!({ kind: "ticket.create" }), "Created a Jira ticket");
+  assert.equal(slots["actions.what"]!({ kind: "jira.ticket-create" }), "Created a Jira ticket");
+  assert.equal(slots["actions.what"]!({ kind: "ticket.create" }), "Created a Jira ticket", "rows from before the kind moved");
   assert.equal(slots["actions.what"]!({ kind: "teams.send" }), undefined);
   assert.match(pack.bino!(ctx), /Jira tickets can be filed in DEV, OPS\./);
   assert.match("DEV-3 and OPS-4".match(pack.refs!(ctx)[0]!.pattern)!.join(" "), /DEV-3 OPS-4/, "ticket projects' keys are links");
@@ -361,7 +363,7 @@ test("tickets: New work lists where a ticket can go, search offers New ticket, t
 
 test("tickets: Bino's card asks before it creates, files through the same checks with Jira's defaults, and says when the form is needed", async () => {
   const rest = fakeRest(devRest({ "POST /rest/api/3/issue": { key: "DEV-20" } }));
-  const { pack, ctx, db } = mounted({ env: restOn, fetchFn: rest.fetchFn });
+  const { pack, ctx, logged } = mounted({ env: restOn, fetchFn: rest.fetchFn });
   const [act] = pack.acts!(ctx);
   assert.equal(act!.kind, "ticket");
   assert.ok(!act!.oneClick, "a write to Jira asks again first");
@@ -375,7 +377,7 @@ test("tickets: Bino's card asks before it creates, files through the same checks
   assert.deepEqual(rest.calls.find((c) => c.method === "POST")!.body, {
     fields: { project: { key: "DEV" }, issuetype: { id: "10255" }, summary: "Fra Bino", description: adf("Kort."), priority: { id: "10008" }, customfield_10476: { id: "10602" } },
   }, "the type found by name; the rest on Jira's defaults");
-  assert.deepEqual((await recentActions(db.DB)).map((a) => [a.kind, a.target, a.ok]), [["ticket.create", "DEV-20", 1]]);
+  assert.deepEqual(logged.map((a) => [a.kind, a.target, a.ok]), [["ticket-create", "DEV-20", true]]);
 
   assert.deepEqual(await act!.run({ project: "EVIL", summary: "x" }, {}, ctx), { ok: false, error: "Tickets go to DEV." });
   const epic = await act!.run({ project: "DEV", type: "Epic", summary: "x" }, {}, ctx);

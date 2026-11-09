@@ -1,5 +1,9 @@
 # storybook
 
+## 1.0.3 — 2026-11-09
+
+- Logs a build with `ctx.logged`, not core's `logAction`. Same name in the actions log. Needs core API 1.25.
+
 ## 1.0.2 — 2026-11-09
 
 - Imports core through its SDK, `dovre/pack.ts`, in place of core's own files. Needs core API 1.24.

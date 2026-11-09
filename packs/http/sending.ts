@@ -6,7 +6,6 @@
  * body), the page told over the hub when the answer is here.
  */
 import type { Context } from "hono";
-import { logAction } from "dovre/actions/deploys.ts";
 import type { AppEnv } from "dovre/env.ts";
 import type { Child, PackContext, Tone } from "dovre/pack.ts";
 import type { Refs } from "./chain.ts";
@@ -85,12 +84,12 @@ export function createSending(o: { history: History; now: () => number; fetchFn?
         async (resp) => {
           s.resp = resp;
           s.state = "done";
-          await logAction(ctx.db, { kind: "http.send", target, detail: `${resp.status} · ${resp.ms} ms${by ? " · by an agent" : ""}`, ok: true });
+          await ctx.logged({ kind: "send", target, detail: `${resp.status} · ${resp.ms} ms${by ? " · by an agent" : ""}`, ok: true });
         },
         async (e) => {
           s.state = "failed";
           s.error = failure(e, mask);
-          await logAction(ctx.db, { kind: "http.send", target, detail: by ? "by an agent" : undefined, ok: false, error: s.error });
+          await ctx.logged({ kind: "send", target, detail: by ? "by an agent" : undefined, ok: false, error: s.error });
         },
       )
       .catch((e) => ctx.log(`http: couldn't log a send: ${String((e as Error)?.message ?? e).slice(0, 200)}`))

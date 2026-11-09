@@ -7,10 +7,9 @@
  * an agent job (~15 s, a little money).
  *
  * Every create re-checks first: the project's work types are read again, fresh, and the type must
- * still be one it creates. Then one write, logged to the actions table (`ticket.create`) with the
+ * still be one it creates. Then one write, logged to the actions table (`jira.ticket-create`) with the
  * type and summary, never the description.
  */
-import { logAction } from "dovre/actions/deploys.ts";
 import type { PackContext } from "dovre/pack.ts";
 import { authOf, createRest, loadScreenRest, siteOf, viaOf } from "./data.ts";
 import { type Agent, createInput, createViaMcp, loadScreenViaMcp } from "./mcp.ts";
@@ -112,14 +111,14 @@ export function createFiling(o: { agent: () => Promise<Agent>; fetchFn?: typeof 
     try {
       const payload = ticketPayload(got.ticket, got.fields);
       const r = viaOf(ctx.env) === "mcp" ? await createViaMcp(await o.agent(), site, createInput(site, payload, got.type.name)) : await createRest({ site, auth: authOf(ctx.env), fetchFn: o.fetchFn ?? fetch }, payload);
-      await logAction(ctx.db, { kind: "ticket.create", target: r.key, detail, ok: true });
+      await ctx.logged({ kind: "ticket-create", target: r.key, detail, ok: true });
       if ("cost" in r) ctx.log(`via mcp: created ${r.key}, $${(r.cost as number).toFixed(4)}`);
       const list = opts.myList && summary ? ctx.required("todo", "list") : undefined;
       // It's made already, so a miss here is only logged.
       if (list) await list.add({ title: summary, notes: `${r.key} in Jira: ${r.url}` }).catch((e: unknown) => ctx.log(`my list: ${msg(e)}`));
       return { ok: true, key: r.key, url: r.url, warning: "warning" in r ? (r.warning as string | undefined) : undefined };
     } catch (e) {
-      await logAction(ctx.db, { kind: "ticket.create", target: got.project, detail, ok: false, error: msg(e) });
+      await ctx.logged({ kind: "ticket-create", target: got.project, detail, ok: false, error: msg(e) });
       return { ok: false, problem: `Couldn't create the ticket in ${got.project}: ${msg(e)}` };
     }
   }

@@ -5,7 +5,6 @@
  * both re-check the file first: one that changed since it was opened isn't written.
  */
 import type { Hono } from "hono";
-import { logAction } from "dovre/actions/deploys.ts";
 import type { AppEnv } from "dovre/env.ts";
 import type { PackContext } from "dovre/pack.ts";
 import { readFile, rootOf, writeFile } from "./files.ts";
@@ -35,7 +34,7 @@ export function mountSave(app: Hono<AppEnv>, ctx: PackContext, d: { sending: Sen
     if (leak) return refuse(`That request has ${leak.name}'s value in it: write {{${leak.name}}} instead. Nothing was saved.`);
     const target = `${w.repo}/.http/${w.file}`;
     const detail = `${r.method} ${r.name || "(unnamed)"}`.slice(0, 200);
-    const log = (ok: boolean, what: string, error?: string) => logAction(ctx.db, { kind: "http.save", target, detail: `${what} · ${detail}`, ok, error });
+    const log = (ok: boolean, what: string, error?: string) => ctx.logged({ kind: "save", target, detail: `${what} · ${detail}`, ok, error });
 
     // Re-check what's there now.
     let current: { text: string; hash: string } | undefined;

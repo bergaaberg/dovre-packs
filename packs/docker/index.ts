@@ -6,7 +6,6 @@
  * kept, is docker.ts's header. Its routes take the stricter guard (exact Origin on every write).
  */
 import { homedir } from "node:os";
-import { logAction } from "dovre/actions/deploys.ts";
 import type { Pack, PackContext } from "dovre/pack.ts";
 import { BERTH_PIPE, DEFAULT_PIPE, berthControl, findBerth } from "./berth.ts";
 import { createDocker, type Docker, findEngineSocket } from "./docker.ts";
@@ -40,7 +39,7 @@ export function machineDocker(ctx: PackContext, o: { windows?: boolean; env?: Re
     control: berthExe ? berthControl(berthExe) : undefined,
     windows,
     onChange: throttle(() => ctx.publish(["docker"]), 500),
-    log: (kind, target, ok, error) => logAction(ctx.db, { kind, target, ok, error }),
+    log: (kind, target, ok, error) => ctx.logged({ kind, target, ok, error }),
   });
 }
 
@@ -56,8 +55,8 @@ export function createDockerPack(make: (ctx: PackContext) => Docker = (ctx) => m
   };
   return {
     manifest: {
-      api: "1.24",
-      version: "2.0.2",
+      api: "1.25",
+      version: "2.0.3",
       id: "docker",
       name: "Docker",
       description: "Containers on Docker Engine: start, stop, logs",

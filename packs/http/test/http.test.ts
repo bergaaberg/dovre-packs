@@ -52,8 +52,11 @@ function codeDir() {
 function mounted(o: { fetchFn?: typeof fetch; env?: Record<string, string>; timeoutMs?: number; hosted?: boolean } = {}) {
   const code = o.env?.CODE_DIR ?? codeDir();
   const db = openDb();
+  // What the pack logged, as core keeps it: the pack's id on the kind, 1 or 0 for ok.
+  const logged: { kind: string; target: string; detail: string | null; ok: number; error: string | null }[] = [];
   const published: string[][] = [];
   const ctx: PackContext = testContext({
+    logged: async (a) => void logged.push({ kind: `http.${a.kind}`, target: a.target, detail: a.detail ?? null, ok: a.ok ? 1 : 0, error: a.error ?? null }),
     env: { CODE_DIR: code, HTTP_SECRETS: "API_TOKEN@api.example.com", API_TOKEN: SECRET, HTTP_ENVS: '{"dev": {"baseUrl": "https://api.example.com"}}', ...o.env },
     db: db.DB,
     hosted: o.hosted ?? false,
@@ -67,7 +70,7 @@ function mounted(o: { fetchFn?: typeof fetch; env?: Record<string, string>; time
   const get = (p: string, headers: Record<string, string> = {}) => app.request(`${ORIGIN}${p}`, { headers });
   const post = (p: string, body: Record<string, string>, headers: Record<string, string> = { origin: ORIGIN, "sec-fetch-site": "same-origin" }) =>
     app.request(`${ORIGIN}${p}`, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", ...headers }, body: new URLSearchParams(body).toString() });
-  const actions = async () => (await db.DB.prepare("SELECT kind, target, detail, ok, error FROM actions ORDER BY id").all<{ kind: string; target: string; detail: string | null; ok: number; error: string | null }>()).results;
+  const actions = async () => logged;
   return { pack, ctx, db, app, get, post, code, calls: fake.calls, published, actions };
 }
 
@@ -618,7 +621,7 @@ test("the send tool (agents, over Dovre's MCP): GET/HEAD to this machine or list
   assert.match(await (await m.get("/http")).text(), /by an agent/);
 
   const listed = createHttpPack({ fetchFn: fake.fetchFn });
-  const ctx2 = testContext({ env: { ...m.ctx.env, HTTP_AGENT_HOSTS: "api.example.com" }, db: m.db.DB, hosted: false });
+  const ctx2 = testContext({ env: { ...m.ctx.env, HTTP_AGENT_HOSTS: "api.example.com" }, db: m.db.DB, logged: m.ctx.logged, hosted: false });
   const out = await (listed.tools!(ctx2)[0]!.run({ method: "HEAD", url: "{{baseUrl}}/health", env: "dev" }, ctx2, call) as Promise<{ text: string; error?: boolean }>);
   assert.equal(out.error, false);
   assert.match(listed.tools!(ctx2)[0]!.description, /this machine \(localhost\), api\.example\.com/);
