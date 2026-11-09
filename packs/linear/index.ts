@@ -9,8 +9,9 @@
  */
 import { type Pack, type RefRule } from "dovre/packs/types.ts";
 import { commentAct, createAct } from "dovre/packs/acts.ts";
-import { checkIssue, commentIssue, createIssue, type LinearIssue, type LinearKept, lookIssue, PRIORITY, readLinear, searchIssues } from "./data.ts";
-import { linearCard, linearFact, linearLead, linearPage } from "./view.ts";
+import { LANDS, linearAgent, reposFor } from "./agent.ts";
+import { checkIssue, commentIssue, createIssue, ISSUE_KEY, type LinearIssue, type LinearKept, lookIssue, PRIORITY, readLinear, searchIssues } from "./data.ts";
+import { issuePage, linearCard, linearFact, linearLead, linearPage } from "./view.ts";
 
 /** The keys this Dovre links: the configured team, else every team key seen in the data. */
 function refPattern(envTeam: string | undefined, kept: LinearKept | undefined): RegExp | null {
@@ -51,12 +52,14 @@ export function createLinearPack(
 ): Pack & { kept(): LinearKept | undefined } {
   const fetchFn = opts.fetchFn ?? fetch;
   let kept: LinearKept | undefined;
+  const agent = linearAgent();
+  const find = (key: string): LinearIssue | undefined => (kept?.ok ? [...kept.mine, ...kept.teams.flatMap((t) => t.untriaged)].find((i) => i.key === key) : undefined);
   const read = async (ctx: Parameters<typeof readLinear>[0]) => relink(await readLinear(ctx, fetchFn), opts.issueHref);
   return {
     kept: () => kept,
     manifest: {
-      api: "1.6",
-      version: "1.0.1",
+      api: "1.23",
+      version: "1.1.0",
       id: "linear",
       name: "Linear",
       description: "Assigned Linear issues, cycle progress, un-triaged team issues and TEAM-123 linking.",
@@ -67,7 +70,11 @@ export function createLinearPack(
         { key: "LINEAR_API_KEY", label: "Linear API key", secret: true, required: true, help: "A personal API key (or OAuth token) for api.linear.app" },
         { key: "LINEAR_TEAM", label: "Team key", help: "Only this team (e.g. ENG); empty means every team you're in" },
       ],
+      ai: { agent: { why: "Plans one of your Linear issues in a repo you pick (reads, changes nothing), or tries it in a sandbox, whose commits become a draft PR when you say so.", where: ["read", "sandbox"], lands: LANDS } },
+      rings: [{ kind: "agent", label: "An agent's plan or try for a Linear issue ended" }],
     },
+    writes: [{ kind: LANDS, label: "Open a draft PR from an agent's try at a Linear issue" }],
+    dispose: () => agent.dispose(),
     async refresh(ctx) {
       kept = await read(ctx);
       ctx.publish(["linear", "snapshot"]);
@@ -85,7 +92,37 @@ export function createLinearPack(
     nav: () => [{ href: "/linear", title: "Linear", icon: "ticket", group: "Code" }],
     pages: () => [{ title: "Linear", href: "/linear", icon: "🎫", about: "Assigned Linear issues", also: ["issues", "cycle"] }],
     routes(app, ctx) {
-      app.get("/linear", (c) => ctx.page(c, { title: "Linear", body: linearPage(kept) }));
+      app.get("/linear", (c) => ctx.page(c, { title: "Linear", body: linearPage(kept, { agent: ctx.agent.can().ok }) }));
+      app.get("/linear/issue/:key", async (c) => {
+        const key = c.req.param("key");
+        const issue = ISSUE_KEY.test(key) ? find(key) : undefined;
+        if (!issue) return c.notFound();
+        const turn = await agent.fresh(ctx, key);
+        const repos = await reposFor(ctx);
+        const picked = turn?.repo ?? agent.lastRepo(issue.team);
+        return ctx.page(c, { title: `${issue.key} · Linear`, current: "/linear", body: issuePage(issue, { can: ctx.agent.can(), repos, picked, turn, note: agent.note(key) }) });
+      });
+      app.post("/linear/issue/:key/start", async (c) => {
+        const key = c.req.param("key");
+        const issue = ISSUE_KEY.test(key) ? find(key) : undefined;
+        if (!issue) return c.notFound();
+        const form = await c.req.parseBody();
+        const where = form.where === "sandbox" ? "sandbox" : "read";
+        const repo = String(form.repo ?? "");
+        // Only a repo the page offered; core checks the grant again.
+        if ((await reposFor(ctx)).includes(repo)) {
+          const apiKey = (ctx.env.LINEAR_API_KEY ?? "").trim();
+          const text = apiKey ? await lookIssue(apiKey, key, fetchFn).catch(() => "") : "";
+          await agent.start(ctx, issue, text || `${issue.key}: ${issue.title}`, repo, where);
+        }
+        return c.redirect(`/linear/issue/${key}`, 303);
+      });
+      app.post("/linear/issue/:key/land", async (c) => {
+        const key = c.req.param("key");
+        if (!ISSUE_KEY.test(key)) return c.notFound();
+        await agent.land(ctx, key);
+        return c.redirect(`/linear/issue/${key}`, 303);
+      });
     },
     today: () => (kept ? [{ id: "now", render: linearCard(kept) }] : []),
     glance: () => (kept?.ok ? [{ label: "Linear", value: kept.mine.length }] : []),
