@@ -21,3 +21,4 @@ export { topoPack, createTopoPack } from "./packs/topo/index.ts";
 export { wasmCanaryPack, createWasmCanaryPack } from "./packs/wasm-canary/index.ts";
 export { codeReviewPack, createCodeReviewPack } from "./packs/code-review/index.ts";
 export { markdownPack, createMarkdownPack } from "./packs/markdown/index.ts";
+export { movementPack, createMovementPack } from "./packs/movement/index.ts";
