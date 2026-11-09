@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Hono } from "hono";
-import { testContext } from "dovre/packs/testing.ts";
+import { testContext } from "dovre/pack-testing.ts";
 import { createJsonPack, decode, jsonPack } from "../index.ts";
 import { b64Encode, diff, epoch, jwtDecode, keyStep, parse, query, sortKeys } from "../tools.ts";
 

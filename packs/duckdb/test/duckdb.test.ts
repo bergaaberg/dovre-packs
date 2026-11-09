@@ -15,7 +15,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Hono } from "hono";
 import { apiGap } from "dovre/packs/api.ts";
-import { testContext } from "dovre/packs/testing.ts";
+import { testContext } from "dovre/pack-testing.ts";
 import { createDuckDbPack, duckdbPack } from "../index.ts";
 import {
   type DuckDbRunner,

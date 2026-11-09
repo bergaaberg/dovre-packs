@@ -7,8 +7,7 @@
  * the needs (a service that starts erroring rings once) and the running version on /deploys.
  */
 import { html } from "hono/html";
-import { type Pack, type PackContext, type PackNeed } from "dovre/packs/types.ts";
-import { Notice } from "dovre/ui/kit.ts";
+import { Notice, type Pack, type PackContext, type PackNeed } from "dovre/pack.ts";
 import { LEVELS, SPAN_KEEP, decode, extraKeys, hexId, parseLogs, parseMetrics, parseTraces, type Signal } from "./otlp.ts";
 import { encodeReply } from "./proto.ts";
 import { LOG_RETENTION_MS, MAX_LOGS, MAX_METRIC_ROWS, MAX_SPANS, METRIC_RETENTION_MS, SPAN_RETENTION_MS, type SinkKept, ensureSchema, insertLogs, insertPoints, insertSpans, prune, readLogs, readMetricTrends, readSummary, readTrace } from "./store.ts";
@@ -49,8 +48,8 @@ export function createOtelSinkPack(opts: { now?: () => number } = {}): Pack & { 
   return {
     kept: () => kept,
     manifest: {
-      api: "1.6",
-      version: "1.1.1",
+      api: "1.24",
+      version: "1.1.2",
       id: ID,
       name: "OTel sink",
       description: "Receives OTLP/HTTP (traces, metrics, logs) straight from your apps: RED per service, errors with their trace, a waterfall, a log tail.",

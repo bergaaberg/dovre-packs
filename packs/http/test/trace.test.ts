@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { SpanSlotArg } from "dovre/packs/types.ts";
+import type { SpanSlotArg } from "dovre/pack.ts";
 import { reqOfSpan, routeVars, spanActions } from "../trace.ts";
 
 const H = `<script>alert(1)</script><img src=x onerror=alert(1)>`;

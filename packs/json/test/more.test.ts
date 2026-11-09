@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { HOSTILE, assertFragment, assertInert, packApp } from "dovre/packs/testing.ts";
+import { HOSTILE, assertFragment, assertInert, packApp } from "dovre/pack-testing.ts";
 import { convert, dockRun, jsonPack, WORKER_PATH } from "../index.ts";
 import { fromToml, toToml } from "../convert.ts";
 import { JQ_JS_SHA, JQ_WASM_SHA } from "../gen.ts";

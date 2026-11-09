@@ -4,8 +4,7 @@
  * its type (an HTML page shows as its source), and links are built from paths through safeUrl.
  */
 import { html } from "hono/html";
-import { safeUrl } from "dovre/pages/parts.ts";
-import { type Child, Confirm, KeyValues, Notice, PageHeader, Panel, Pill, type Tone } from "dovre/ui/kit.ts";
+import { type Child, Confirm, KeyValues, Notice, PageHeader, Panel, Pill, safeUrl, type Tone } from "dovre/pack.ts";
 import { FILE_RE } from "./files.ts";
 import { headersText, MAX_BODY_IN, type Req } from "./model.ts";
 import type { Sent } from "./send.ts";

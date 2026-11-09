@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { openDb } from "dovre/db.ts";
-import { testContext } from "dovre/packs/testing.ts";
+import { testContext } from "dovre/pack-testing.ts";
 import { createOtelSinkPack } from "../index.ts";
 import { decodeLogs, decodeMetrics, decodeTraces, double, encodeReply, field, fields, fixed64 } from "../proto.ts";
 import { readLogs, readTrace } from "../store.ts";

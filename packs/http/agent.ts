@@ -6,7 +6,7 @@
  * Only what's already on the page goes in: the masked URL, header names (never values), the status
  * and a short, masked excerpt of the body. The prompt travels in the link, so it's kept short.
  */
-import { safeUrl } from "dovre/pages/parts.ts";
+import { safeUrl } from "dovre/pack.ts";
 import type { Noticed } from "./board.ts";
 import type { StoryRun } from "./runner.ts";
 import type { Sent } from "./send.ts";

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Hono } from "hono";
 import type { D1 } from "dovre/db.ts";
-import { testContext } from "dovre/packs/testing.ts";
+import { testContext } from "dovre/pack-testing.ts";
 import { snippet, wantedChannels } from "../data.ts";
 import { createSlackPack } from "../index.ts";
 import { slackCard, slackDock, slackPage } from "../view.ts";

@@ -12,9 +12,9 @@ import { topoPage, foldNames, binoLines, draftPrompt, fixPrompt } from "../view.
 import { prBody, prCard, type PrSlots } from "dovre/pages/inline.ts";
 import { entryPage, type Ctx } from "dovre/packs/core/issues/compose/work.ts";
 import { contextOf } from "dovre/packs/core/assistant/bino/context.ts";
-import type { Slots } from "dovre/packs/types.ts";
+import type { Slots } from "dovre/pack.ts";
 import type { Pr } from "dovre/sources/ghe.ts";
-import { HOSTILE as H, assertInert, packApp, testContext } from "dovre/packs/testing.ts";
+import { HOSTILE as H, assertInert, packApp, testContext } from "dovre/pack-testing.ts";
 
 /** A code folder with these peak.yaml files (folder → text). */
 function codeDir(manifests: Record<string, string>): string {

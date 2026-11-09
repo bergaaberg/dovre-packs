@@ -4,9 +4,7 @@
  * value from a sender is escaped by `html`, and every link is a path of ours through safeUrl.
  */
 import { html } from "hono/html";
-import { safeUrl } from "dovre/pages/parts.ts";
-import type { SpanSlotArg } from "dovre/packs/types.ts";
-import { Card, Empty, Investigate, Item, KeyValues, List, Notice, PageHeader, Panel, Pill, Pulse, Spark, Stat, Stats, type Html } from "dovre/ui/kit.ts";
+import { Card, Empty, type Html, Investigate, Item, KeyValues, List, Notice, PageHeader, Panel, Pill, Pulse, safeUrl, type SpanSlotArg, Spark, Stat, Stats } from "dovre/pack.ts";
 import { LEVELS, levelName } from "./otlp.ts";
 import { BAD_ERR, WARN_ERR, type ErrorSpan, type LogEntry, type MetricTrend, type ServiceSum, type SinkKept, type TraceSpan } from "./store.ts";
 

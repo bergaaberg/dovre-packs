@@ -2,11 +2,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Kept } from "dovre/kept.ts";
-import { testContext } from "dovre/packs/testing.ts";
+import { testContext } from "dovre/pack-testing.ts";
 import { viaOf } from "../data.ts";
 import { createJiraPack } from "../index.ts";
 import { agentArgs, type Agent, readStream, type RunOff, SEARCH, searches, WRITES } from "../mcp.ts";
-import { Pill } from "dovre/ui/kit.ts";
+import { Pill } from "dovre/pack.ts";
 import { jiraPage, tone } from "../view.ts";
 
 const H = `<script>alert(1)</script><img src=x onerror=alert(1)>`;

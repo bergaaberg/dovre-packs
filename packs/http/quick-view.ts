@@ -6,8 +6,7 @@
  * into html`…` (escaped), and links are built through safeUrl.
  */
 import { html } from "hono/html";
-import { safeUrl } from "dovre/pages/parts.ts";
-import { type Child, Dot, Empty, Notice, PageHeader, Panel, Pill, type Tone } from "dovre/ui/kit.ts";
+import { type Child, Dot, Empty, Notice, PageHeader, Panel, Pill, safeUrl, type Tone } from "dovre/pack.ts";
 import { agentHref, casesPrompt, debugPrompt, failing, writePrompt } from "./agent.ts";
 import { type Case, type CaseResult, expectsText } from "./cases.ts";
 import { type Catalog, type Endpoint, endpointKey } from "./catalog.ts";

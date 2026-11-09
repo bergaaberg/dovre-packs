@@ -1,7 +1,7 @@
 /** Custom App Pack (`custom-app`): manifest validation, refresh hook, and hostile-input XSS/URL escaping. */
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { testContext } from "dovre/packs/testing.ts";
+import { testContext } from "dovre/pack-testing.ts";
 import { customAppPack } from "../index.ts";
 import { customAppPage } from "../view.ts";
 

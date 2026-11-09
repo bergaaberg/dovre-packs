@@ -3,7 +3,7 @@
  * (never raw()), and no tool renders a link from it.
  */
 import { html } from "hono/html";
-import { Empty, KeyValues, Notice, PageHeader, Panel, Pill, Tabs, type Html } from "dovre/ui/kit.ts";
+import { Empty, type Html, KeyValues, Notice, PageHeader, Panel, Pill, Tabs } from "dovre/pack.ts";
 import {
   type Change,
   type Json,

@@ -1,7 +1,6 @@
 /** Jira Pack (`jira`) views. */
 import { html } from "hono/html";
-import { Ago, Link, safeUrl } from "dovre/pages/parts.ts";
-import { Card, Empty, type Html, Item, List, Notice, PageHeader, Panel, Pill, Post } from "dovre/ui/kit.ts";
+import { Ago, Card, Empty, type Html, Item, Link, List, Notice, PageHeader, Panel, Pill, Post, safeUrl } from "dovre/pack.ts";
 import type { JiraIssue, JiraKept, JiraSetup } from "./data.ts";
 
 export const tone = (i: JiraIssue) => (i.category === "done" ? "ok" : i.category === "indeterminate" ? "warn" : undefined);

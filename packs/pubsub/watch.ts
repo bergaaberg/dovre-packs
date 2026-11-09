@@ -3,7 +3,7 @@
  * topic depth. A subscription whose oldest unacked message exceeds the threshold or a DLQ
  * with unacked messages creates a need, rings the pubsub-stuck bell, and sets the pulse.
  */
-import type { PulseFeed, PackNeed } from "dovre/packs/types.ts";
+import type { PackNeed, PulseFeed } from "dovre/pack.ts";
 import type { PubsubRead, PubsubSubscription } from "./data.ts";
 
 /** Oldest unacked message age threshold for warning (10 minutes). */

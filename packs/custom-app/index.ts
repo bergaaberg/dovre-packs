@@ -2,7 +2,7 @@
  * Custom App Starter Pack (`custom-app`): a clean 3-file template for plugging your own
  * product, database, or internal tool into Dovre's Today view, sidebar, and Assistant context.
  */
-import { type Pack } from "dovre/packs/types.ts";
+import type { Pack } from "dovre/pack.ts";
 import { type Kept, read } from "./data.ts";
 import { customAppCard, customAppPage } from "./view.ts";
 
@@ -10,8 +10,8 @@ let kept: Kept | undefined;
 
 export const customAppPack: Pack = {
   manifest: {
-    api: "1.6",
-    version: "1.0.1",
+    api: "1.24",
+    version: "1.0.2",
     id: "custom-app",
     name: "Custom App",
     description: "Starter 3-file pack for your own app, D1 database, or API.",

@@ -2,7 +2,7 @@
  * Custom App Pack (`custom-app`): reads your app's metrics or events into memory on `refresh()`.
  * Pages and Today cards read strictly from `Kept` in memory — never awaiting network I/O during render.
  */
-import type { PackContext } from "dovre/packs/types.ts";
+import type { PackContext } from "dovre/pack.ts";
 
 export type CustomAppItem = {
   title: string;

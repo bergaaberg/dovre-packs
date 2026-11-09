@@ -4,7 +4,7 @@
  * tests). Everything else goes through `html` escaping.
  */
 import { html, raw } from "hono/html";
-import { Empty, KeyValues, Notice, PageHeader, Panel, Tabs, type Html } from "dovre/ui/kit.ts";
+import { Empty, type Html, KeyValues, Notice, PageHeader, Panel, Tabs } from "dovre/pack.ts";
 import { type Rendered, MAX_SOURCE } from "./render.ts";
 import { docHref } from "./docs.ts";
 

@@ -3,7 +3,7 @@
  * topic depth radar (needs, a ring, the pulse's storm or fire).
  * Counts and subscription names only, never a message payload. Works locally and hosted on Cloudflare Workers.
  */
-import { type Pack } from "dovre/packs/types.ts";
+import type { Pack } from "dovre/pack.ts";
 import { readPubsub, validateProject } from "./data.ts";
 import { pubsubCard, pubsubPage } from "./view.ts";
 import { pulseOf, binoOf, needsOf, type PubsubKept, RING, watch } from "./watch.ts";
@@ -17,8 +17,8 @@ export function createPubsubPack(
   return {
     kept: () => kept,
     manifest: {
-      api: "1.6",
-      version: "1.0.1",
+      api: "1.24",
+      version: "1.0.2",
       id: "pubsub",
       name: "Google Cloud Pub/Sub",
       description: "Subscription backlog, oldest unacked message age, and dead-letter radar.",

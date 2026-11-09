@@ -9,7 +9,7 @@ import yaml from "yaml";
 import { checkRules, createTopoPack, rulesOff } from "../index.ts";
 import { ruleLines, topoPage } from "../view.ts";
 import type { TopoEntry } from "../scan.ts";
-import { HOSTILE as H, assertInert, packApp, testContext } from "dovre/packs/testing.ts";
+import { HOSTILE as H, assertInert, packApp, testContext } from "dovre/pack-testing.ts";
 
 const entry = (repo: string, text: string): TopoEntry => {
   const r = parsePeak(yaml.parse(text));

@@ -13,7 +13,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { PackContext } from "dovre/packs/types.ts";
+import type { PackContext } from "dovre/pack.ts";
 import { agentEnvsOf, parseEnvs, parseHttp, type Envs, type Parsed } from "./model.ts";
 
 export const DIR = ".http";

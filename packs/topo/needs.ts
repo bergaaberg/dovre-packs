@@ -4,7 +4,7 @@
  * place on the map. It rings as `topo-drift`, off until I switch it on. Today's opening line says
  * how many repos are out of line (drift, rules, files that don't parse) when any are.
  */
-import type { Bit, PackNeed } from "dovre/packs/types.ts";
+import type { Bit, PackNeed } from "dovre/pack.ts";
 import { CF_NAMES, type Drift, type Missing, type Orphan } from "./drift.ts";
 import { keyOf, orphanKey } from "./map.ts";
 import type { Finding } from "./rules.ts";

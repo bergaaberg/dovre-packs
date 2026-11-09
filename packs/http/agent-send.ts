@@ -3,7 +3,7 @@
  * only to this machine or HTTP_AGENT_HOSTS, secrets bound as for any send, the answer masked and
  * cut short, in history, logged as `http.send` by an agent.
  */
-import type { PackContext, PackTool, ToolCall, ToolResult } from "dovre/packs/types.ts";
+import type { PackContext, PackTool, ToolCall, ToolResult } from "dovre/pack.ts";
 import { AGENT_BODY, AGENT_METHODS, agentMayReach, forAgent } from "./agent.ts";
 import { blankReq, headerLines, masker, MAX_URL, type Req } from "./model.ts";
 import { type Sending, str } from "./sending.ts";

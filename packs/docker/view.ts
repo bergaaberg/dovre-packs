@@ -4,8 +4,7 @@
  * Names, images and Docker's status words are the engine's data, escaped like any other.
  */
 import { html } from "hono/html";
-import type { PageOpts } from "dovre/packs/types.ts";
-import { Confirm, Empty, type Html, Item, KeyValues, List, Notice, PageHeader, Panel, Pill } from "dovre/ui/kit.ts";
+import { Confirm, Empty, type Html, Item, KeyValues, List, Notice, PageHeader, type PageOpts, Panel, Pill } from "dovre/pack.ts";
 import type { DockerView } from "./docker.ts";
 import type { Container, Group } from "./model.ts";
 import { groupsOf } from "./model.ts";

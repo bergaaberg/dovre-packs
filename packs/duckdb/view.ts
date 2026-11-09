@@ -3,8 +3,7 @@
  * AI query builder cards, opt-in review, and across-source panels.
  */
 import { html } from "hono/html";
-import { safeUrl } from "dovre/pages/parts.ts";
-import { Card, Empty, Notice, PageHeader, Panel, Pill, type Child } from "dovre/ui/kit.ts";
+import { Card, type Child, Empty, Notice, PageHeader, Panel, Pill, safeUrl } from "dovre/pack.ts";
 import { MAX_ROWS, MAX_SQL, type Column, type DuckDbTarget, type Found, type Rows, type TableInfo } from "./data.ts";
 import { type Across, type AcrossPick, type Job, MAX_PICKS, MAX_QUESTION, type Proposal } from "./agent.ts";
 

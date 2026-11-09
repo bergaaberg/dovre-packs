@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { packApp } from "dovre/packs/testing.ts";
+import { packApp } from "dovre/pack-testing.ts";
 import { codeReviewPack, ENGINE_PATH } from "../index.ts";
 import { ENGINE_JS, QUERIES, RUNTIME_JS_SHA, SHA } from "../gen.ts";
 // @ts-expect-error: plain JS, no types

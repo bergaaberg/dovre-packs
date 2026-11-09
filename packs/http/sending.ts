@@ -8,8 +8,7 @@
 import type { Context } from "hono";
 import { logAction } from "dovre/actions/deploys.ts";
 import type { AppEnv } from "dovre/env.ts";
-import type { PackContext } from "dovre/packs/types.ts";
-import type { Child, Tone } from "dovre/ui/kit.ts";
+import type { Child, PackContext, Tone } from "dovre/pack.ts";
 import type { Refs } from "./chain.ts";
 import { readFile, repoEnvs, rootOf } from "./files.ts";
 import { CREDENTIAL_HEADERS, envNames, masker, parseEnvs, parseHttp, parseSecrets, placeholdSecrets, prepare, type Req, varsOf } from "./model.ts";

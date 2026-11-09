@@ -1,5 +1,5 @@
 /** Slack Pack (`slack`) views. */
-import { Card, Empty, type Html, Item, List, Notice, PageHeader, Panel, Pill } from "dovre/ui/kit.ts";
+import { Card, Empty, type Html, Item, List, Notice, PageHeader, Panel, Pill } from "dovre/pack.ts";
 import { html } from "hono/html";
 import { SNIPPET_MAX, type SlackKept, type SlackMsg } from "./data.ts";
 

@@ -1,6 +1,6 @@
 /** Kafka Pack (`kafka`) views. */
 import { html } from "hono/html";
-import { Card, Empty, Item, List, Notice, PageHeader, Panel, Pill } from "dovre/ui/kit.ts";
+import { Card, Empty, Item, List, Notice, PageHeader, Panel, Pill } from "dovre/pack.ts";
 import type { GroupLag, KafkaKept } from "./data.ts";
 
 const fmt = (n: number) => (n >= 10_000 ? `${Math.round(n / 1000)}k` : String(n));

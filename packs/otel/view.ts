@@ -1,6 +1,6 @@
 /** OpenTelemetry pack views: the /otel page, the Today card and the /deploys prod pill. Built from core's kit. */
 import { html } from "hono/html";
-import { Card, Empty, Item, List, Notice, PageHeader, Panel, Pill, type Html } from "dovre/ui/kit.ts";
+import { Card, Empty, type Html, Item, List, Notice, PageHeader, Panel, Pill } from "dovre/pack.ts";
 import { BAD_ERR, BAD_P95, WARN_ERR, WARN_P95, type OtelAlert, type OtelKept, type OtelService } from "./data.ts";
 
 type Tone = "ok" | "warn" | "bad" | "neutral";

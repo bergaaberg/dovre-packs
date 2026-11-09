@@ -11,7 +11,7 @@
  * type and summary, never the description.
  */
 import { logAction } from "dovre/actions/deploys.ts";
-import type { PackContext } from "dovre/packs/types.ts";
+import type { PackContext } from "dovre/pack.ts";
 import { authOf, createRest, loadScreenRest, siteOf, viaOf } from "./data.ts";
 import { type Agent, createInput, createViaMcp, loadScreenViaMcp } from "./mcp.ts";
 import { type CreateType, first, readTicket, type Screen, summaryOf, type Ticket, type TicketField, ticketFields, ticketPayload, ticketProjectsOf, ticketValid, validateTicket } from "./tickets.ts";

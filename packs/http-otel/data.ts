@@ -2,7 +2,7 @@
  * HTTP & OpenTelemetry Pack (`http-otel`): polls comma-separated `HTTP_HEALTH_URLS`
  * (`/healthz` endpoints) and optional `OTEL_METRICS_URL` for latency and status.
  */
-import type { PackContext } from "dovre/packs/types.ts";
+import type { PackContext } from "dovre/pack.ts";
 
 export type EndpointCheck = {
   name: string;

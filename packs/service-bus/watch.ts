@@ -3,7 +3,7 @@
  * makes of it (the DLQ radar): a dead-letter queue with anything in it is a need and trouble for
  * the pulse, a full one (DLQ_BAD or more) a bad need and a fire.
  */
-import type { PulseFeed, PackNeed } from "dovre/packs/types.ts";
+import type { PackNeed, PulseFeed } from "dovre/pack.ts";
 import type { Entity, ServiceBusRead } from "./data.ts";
 
 /** Dead-lettered messages (both dead-letter queues) from which a need is bad, not a warning. */

@@ -2,7 +2,7 @@
  * Linear Pack (`linear`): reads assigned open issues, active cycles and un-triaged team issues
  * from Linear's GraphQL API (`https://api.linear.app/graphql`).
  */
-import type { PackContext } from "dovre/packs/types.ts";
+import type { PackContext } from "dovre/pack.ts";
 
 export const LINEAR_API = "https://api.linear.app/graphql";
 

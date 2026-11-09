@@ -1,5 +1,9 @@
 # avatar
 
+## 1.1.1 — 2026-11-09
+
+- Imports core through its SDK, `dovre/pack.ts`, in place of core's own files. Needs core API 1.24.
+
 ## 1.1.0 — 2026-11-08
 
 - My list's "doing" count comes from the todo pack's `list` share (API 1.11, `uses: ["todo"]`), not core's old store, which moved into that pack (dovre#393). With todo off it counts none.

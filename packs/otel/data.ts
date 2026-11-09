@@ -3,7 +3,7 @@
  * series from a Prometheus-compatible API (Prometheus, Mimir, VictoriaMetrics, Grafana Cloud).
  * Reads happen only in `refresh()`; everything else is a synchronous memory read.
  */
-import type { PackContext } from "dovre/packs/types.ts";
+import type { PackContext } from "dovre/pack.ts";
 
 /** When a service counts as degraded: error ratio in % and p95 latency in ms. */
 export const WARN_ERR = 1;

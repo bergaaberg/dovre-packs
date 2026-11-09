@@ -7,7 +7,7 @@
  */
 import { homedir } from "node:os";
 import { logAction } from "dovre/actions/deploys.ts";
-import type { Pack, PackContext } from "dovre/packs/types.ts";
+import type { Pack, PackContext } from "dovre/pack.ts";
 import { BERTH_PIPE, DEFAULT_PIPE, berthControl, findBerth } from "./berth.ts";
 import { createDocker, type Docker, findEngineSocket } from "./docker.ts";
 import { createEngine } from "./engine.ts";
@@ -56,8 +56,8 @@ export function createDockerPack(make: (ctx: PackContext) => Docker = (ctx) => m
   };
   return {
     manifest: {
-      api: "1.11",
-      version: "2.0.1",
+      api: "1.24",
+      version: "2.0.2",
       id: "docker",
       name: "Docker",
       description: "Containers on Docker Engine: start, stop, logs",

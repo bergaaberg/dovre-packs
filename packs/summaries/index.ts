@@ -7,7 +7,7 @@
  */
 import { deploySummaryKey, prSummaryKey, type Snapshot } from "dovre/gather.ts";
 import { throttle } from "dovre/live.ts";
-import type { Pack, PackContext } from "dovre/packs/types.ts";
+import type { Pack, PackContext } from "dovre/pack.ts";
 import { createSummaries, deployPrompt, prPrompt, type Summaries } from "./store.ts";
 
 /** Queues a summary for every open PR at its head commit and every deploy that ships something. */
@@ -41,8 +41,8 @@ export function createSummariesPack(deps: { now?: () => number } = {}): Pack {
 
   return {
     manifest: {
-      api: "1.22",
-      version: "1.0.0",
+      api: "1.24",
+      version: "1.0.1",
       id: "summaries",
       name: "AI summaries",
       description: "A short summary on each PR and deploy, from the PR's own text",

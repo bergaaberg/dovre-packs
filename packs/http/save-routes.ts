@@ -7,7 +7,7 @@
 import type { Hono } from "hono";
 import { logAction } from "dovre/actions/deploys.ts";
 import type { AppEnv } from "dovre/env.ts";
-import type { PackContext } from "dovre/packs/types.ts";
+import type { PackContext } from "dovre/pack.ts";
 import { readFile, rootOf, writeFile } from "./files.ts";
 import { parseHttp, reqOfForm, secretIn, serializeReq, withReq } from "./model.ts";
 import { blanksOfForm, fillBlanks } from "./quick.ts";

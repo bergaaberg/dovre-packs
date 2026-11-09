@@ -3,8 +3,7 @@
  * timeline. It reads the gathered snapshot (`moves`); the gather itself is core's. In the menu only
  * locally; hosted, Today's feed says the same. It left core in dovre#465.
  */
-import { Empty } from "dovre/ui/kit.ts";
-import type { Pack } from "dovre/packs/types.ts";
+import { Empty, type Pack } from "dovre/pack.ts";
 import { movementBody } from "./view.ts";
 
 const HREF = "/movement";
@@ -13,8 +12,8 @@ const VIEWS = ["people", "timeline", "me", "bots"];
 export function createMovementPack(): Pack {
   return {
     manifest: {
-      api: "1.21",
-      version: "1.0.0",
+      api: "1.24",
+      version: "1.0.1",
       id: "movement",
       name: "Moved",
       description: "What people and bots did in the org in the last 24 hours, by person or as a timeline",

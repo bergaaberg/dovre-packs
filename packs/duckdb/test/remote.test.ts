@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { Hono } from "hono";
-import { testContext } from "dovre/packs/testing.ts";
+import { testContext } from "dovre/pack-testing.ts";
 import { createDuckDbPack } from "../index.ts";
 import { cleanUrl, createDuckDbData, type DuckDbRunner, parseSources, remoteSource, urlKind } from "../data.ts";
 import { lit, look, open } from "../files.ts";

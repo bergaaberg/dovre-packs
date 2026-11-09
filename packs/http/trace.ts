@@ -6,8 +6,7 @@
  * button posts to /http/open, which only fills the editor.
  */
 import { html } from "hono/html";
-import type { Html } from "dovre/ui/kit.ts";
-import type { SpanSlotArg } from "dovre/packs/types.ts";
+import type { Html, SpanSlotArg } from "dovre/pack.ts";
 import { blankReq, MAX_URL, METHODS, type Req } from "./model.ts";
 import { varName } from "./openapi.ts";
 import { formFields, noWhere } from "./view.ts";

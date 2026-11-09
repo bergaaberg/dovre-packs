@@ -12,9 +12,9 @@ import { createTopoPack, ForgeCatalog, lastPush, TopoCatalog, TopoScanner } from
 import { forgeUrls } from "../forge.ts";
 import { topoPage } from "../view.ts";
 import type { Coverage, TopoEntry } from "../index.ts";
-import type { PackForge } from "dovre/packs/types.ts";
+import type { PackForge } from "dovre/pack.ts";
 import type { EveryRepo } from "dovre/sources/files.ts";
-import { HOSTILE as H, assertInert, packApp, testContext } from "dovre/packs/testing.ts";
+import { HOSTILE as H, assertInert, packApp, testContext } from "dovre/pack-testing.ts";
 
 /** A forge whose repos have these files (`owner/name` → path → text). */
 function fakeForge(files: Record<string, Record<string, string>>, o: { id?: string; fail?: string[]; calls?: string[] } = {}): PackForge {

@@ -3,7 +3,7 @@
  * endpoint (Redpanda Admin API, Confluent REST Proxy v3, or a lag exporter). Metadata only: group
  * and topic names, lags and offsets; a message payload never enters what this pack keeps.
  */
-import type { PackContext } from "dovre/packs/types.ts";
+import type { PackContext } from "dovre/pack.ts";
 
 const cut = (v: unknown, max: number, fallback = "") => (typeof v === "string" ? v.replace(/[\u0000-\u001f\u007f<>]+/g, " ").trim().slice(0, max) : fallback);
 

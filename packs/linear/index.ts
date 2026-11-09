@@ -7,8 +7,7 @@
  * to you, or un-triaged in a team) gets that issue's pill and a Linear row. Keys match in any case,
  * for Linear's own lower-case branch names (`someone/eng-123-fix-it`). An issue not kept draws nothing.
  */
-import { type Pack, type RefRule } from "dovre/packs/types.ts";
-import { commentAct, createAct } from "dovre/packs/acts.ts";
+import { commentAct, createAct, type Pack, type RefRule } from "dovre/pack.ts";
 import { LANDS, linearAgent, reposFor } from "./agent.ts";
 import { checkIssue, commentIssue, createIssue, ISSUE_KEY, type LinearIssue, type LinearKept, lookIssue, PRIORITY, readLinear, searchIssues } from "./data.ts";
 import { issuePage, linearCard, linearFact, linearLead, linearPage } from "./view.ts";
@@ -58,8 +57,8 @@ export function createLinearPack(
   return {
     kept: () => kept,
     manifest: {
-      api: "1.23",
-      version: "1.1.0",
+      api: "1.24",
+      version: "1.1.1",
       id: "linear",
       name: "Linear",
       description: "Assigned Linear issues, cycle progress, un-triaged team issues and TEAM-123 linking.",

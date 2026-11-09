@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { packApp } from "dovre/packs/testing.ts";
+import { packApp } from "dovre/pack-testing.ts";
 import { httpPack } from "../index.ts";
 
 test("in a pack session the repo picker holds only its checkout (core's ctx.checkouts, API 1.7)", async (t) => {

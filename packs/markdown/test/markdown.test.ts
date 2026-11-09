@@ -6,7 +6,7 @@ import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Hono } from "hono";
-import { HOSTILE, assertFragment, assertInert, assertScoped, packApp, testContext } from "dovre/packs/testing.ts";
+import { HOSTILE, assertFragment, assertInert, assertScoped, packApp, testContext } from "dovre/pack-testing.ts";
 import { markdownPack } from "../index.ts";
 import { render, slug } from "../render.ts";
 import { cleanPath, listDocs } from "../docs.ts";

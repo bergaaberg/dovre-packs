@@ -10,10 +10,8 @@ import { isoSvg } from "./iso.ts";
 import { BODIES, buildAvatar, CREATURES, type Creature, effects, EXTRAS, type Extra, FINISHES, type Look, lookOf } from "./model.ts";
 import { SCENES, situationOf, TRY_PROPS, trySituation } from "./mood.ts";
 import type { App } from "dovre/env.ts";
-import type { PackContext } from "dovre/packs/types.ts";
+import { Ago, html, type PackContext, PageHeader, Panel } from "dovre/pack.ts";
 import { AVATAR_CSS } from "./style.ts";
-import { html, PageHeader, Panel } from "dovre/ui/kit.ts";
-import { Ago } from "dovre/pages/parts.ts";
 
 export type AvatarPlace = "dock" | "hero" | "mini" | "stage";
 

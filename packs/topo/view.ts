@@ -5,8 +5,7 @@
  * New work's Projects) and Bino's lines.
  */
 import { html } from "hono/html";
-import { type Child, Confirm, ConfirmSubmit, Empty, type Html, Item, List, newTab, Notice, PageHeader, Panel, Pill, type Tone } from "dovre/ui/kit.ts";
-import { Link, safeUrl } from "dovre/pages/parts.ts";
+import { type Child, Confirm, ConfirmSubmit, Empty, type Html, Item, Link, List, newTab, Notice, PageHeader, Panel, Pill, safeUrl, type Tone } from "dovre/pack.ts";
 import { type Kind, KINDS, runsIn, SPEC_URL, type Peak } from "@bergaaberg/peak";
 import type { Coverage } from "./catalog.ts";
 import type { CloudRead } from "./cloud.ts";

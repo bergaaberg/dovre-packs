@@ -3,7 +3,7 @@
  * (JIRA_PROJECTS). Two ways to Jira (JIRA_VIA): `rest`, Jira's REST API v3 with an API token, or
  * `mcp`, Claude Code's Atlassian MCP (mcp.ts) where tokens are locked down.
  */
-import type { PackContext } from "dovre/packs/types.ts";
+import type { PackContext } from "dovre/pack.ts";
 import { type CreateType, type RawCreateField, type Screen, TICKET_KEY } from "./tickets.ts";
 
 export type JiraIssue = {

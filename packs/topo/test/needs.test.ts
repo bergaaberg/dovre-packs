@@ -5,7 +5,7 @@ import { parsePeak } from "@bergaaberg/peak";
 import yaml from "yaml";
 import { checkRules, drift, driftNeeds, topoBrief } from "../index.ts";
 import type { TopoEntry } from "../scan.ts";
-import { HOSTILE as H } from "dovre/packs/testing.ts";
+import { HOSTILE as H } from "dovre/pack-testing.ts";
 
 const entry = (repo: string, text: string): TopoEntry => {
   const r = parsePeak(yaml.parse(text));

@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Hono } from "hono";
-import { testContext } from "dovre/packs/testing.ts";
+import { testContext } from "dovre/pack-testing.ts";
 import { convert, createJsonPack } from "../index.ts";
 import { fromYaml, shapeOf, singular, toJsonSchema, toTypeScript, toYaml } from "../convert.ts";
 

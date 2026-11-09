@@ -7,7 +7,7 @@
  * I'm on duty, whether Bino is answering), all counts.
  */
 import { needsOf } from "dovre/home/needs.ts";
-import { type Pack, type PackContext } from "dovre/packs/types.ts";
+import type { Pack, PackContext } from "dovre/pack.ts";
 import { type Avatar, createAvatar } from "./avatar.ts";
 import { signalsFrom } from "./feed.ts";
 import { AVATAR_JS } from "./script.ts";
@@ -43,8 +43,8 @@ export function createAvatarPack(o: AvatarDeps = {}): Pack {
   });
   return {
     manifest: {
-      api: "1.11",
-      version: "1.1.0",
+      api: "1.24",
+      version: "1.1.1",
       id: "avatar",
       name: "Avatar",
       description: "Me in Dovre: a creature shaped by what I do on the forge, in a scene set by how things are",
