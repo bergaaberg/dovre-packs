@@ -11,7 +11,7 @@
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { keptFile, type Kept } from "dovre/issues/templates.ts";
+import { keptFile, type Kept } from "dovre/kept.ts";
 import type { Context } from "hono";
 import { html } from "hono/html";
 import type { AppEnv } from "dovre/env.ts";
@@ -149,14 +149,16 @@ export function createJiraPack(
   return {
     kept: () => kept,
     manifest: {
-      api: "1.6",
-      version: "1.0.0",
+      api: "1.11",
+      version: "1.1.0",
       id: "jira",
       name: "Jira",
       description: "Jira issues assigned to me, what moved in my projects, ticket keys as links, and filing tickets.",
       domain: "work",
       execution: "any",
       everyMs: 5 * 60_000,
+      // What it files can go on My list too, while the todo pack is on.
+      uses: ["todo"],
       settings: [
         { key: "JIRA_SITE", label: "Jira hostname", required: true, help: "e.g. your-org.atlassian.net" },
         { key: "JIRA_VIA", label: "How to reach Jira", help: "rest (an API token), mcp (Claude Code's Atlassian MCP, where tokens are locked down; local only) or off. Unset: rest with a token, else off." },
@@ -233,7 +235,7 @@ export function createJiraPack(
         const again = { project: got.project, types: got.types, ticket: got.ticket, fields: got.fields, blocked: [] };
         if (first(form.edit) === "1") return draw(c, formBody(again));
         if (!ticketValid(errors)) return draw(c, formBody({ ...again, errors }), { status: 422 });
-        return draw(c, previewBody({ ticket: got.ticket, fields: got.fields, nonce: randomUUID() }), { title: "Preview" });
+        return draw(c, previewBody({ ticket: got.ticket, fields: got.fields, nonce: randomUUID(), myList: !!ctx.required("todo", "list") }), { title: "Preview" });
       });
 
       /** Create: checked here, then filed in the background; the job's page fills itself in when it lands. */
@@ -244,14 +246,14 @@ export function createJiraPack(
         if (isNonce(nonce) && jobs.has(nonce) && jobs.get(nonce)!.state !== "failed") return c.redirect(`${NEW}/job/${nonce}`, 303);
         const got = await filing.fromForm(ctx, form);
         if ("problem" in got) return draw(c, problemBody(got.problem), { status: got.status });
-        if (!isNonce(nonce)) return draw(c, previewBody({ ticket: got.ticket, fields: got.fields, nonce: randomUUID(), problem: "Create from the preview: nothing was created." }), { status: 400, title: "Preview" });
+        if (!isNonce(nonce)) return draw(c, previewBody({ ticket: got.ticket, fields: got.fields, nonce: randomUUID(), problem: "Create from the preview: nothing was created.", myList: !!ctx.required("todo", "list") }), { status: 400, title: "Preview" });
         const errors = validateTicket(got.ticket, got.fields);
         if (!ticketValid(errors)) return draw(c, formBody({ project: got.project, types: got.types, ticket: got.ticket, fields: got.fields, blocked: [], errors }), { status: 422 });
         jobs.set(nonce, { state: "working", project: got.project, summary: (got.ticket.values[got.fields.find((f) => f.kind === "line")?.id ?? "summary"] ?? "").trim() });
         while (jobs.size > 50) jobs.delete(jobs.keys().next().value!);
         void filing
           .file(ctx, got, { myList: first(form.mylist) === "1" })
-          .then((r) => jobs.set(nonce, r.ok ? { state: "done", key: r.key, warning: r.warning } : { state: "failed", problem: r.problem, again: { ticket: got.ticket, fields: got.fields, nonce: randomUUID(), problem: r.problem } }))
+          .then((r) => jobs.set(nonce, r.ok ? { state: "done", key: r.key, warning: r.warning } : { state: "failed", problem: r.problem, again: { ticket: got.ticket, fields: got.fields, nonce: randomUUID(), problem: r.problem, myList: !!ctx.required("todo", "list") } }))
           .finally(() => ctx.publish(["jira"]));
         return c.redirect(`${NEW}/job/${nonce}`, 303);
       });

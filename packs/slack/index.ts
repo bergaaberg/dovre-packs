@@ -5,7 +5,6 @@
 import { html } from "hono/html";
 import { type Pack, type PackNeed } from "dovre/packs/types.ts";
 import { writeAct } from "dovre/packs/acts.ts";
-import { addTodo } from "dovre/todo/store.ts";
 import { checkChannel, type SlackKept, readSlack, sendSlack } from "./data.ts";
 import { slackCard, slackDock, slackPage } from "./view.ts";
 
@@ -16,8 +15,8 @@ export function createSlackPack(opts: { fetchFn?: typeof fetch } = {}): Pack & {
   return {
     kept: () => kept,
     manifest: {
-      api: "1.6",
-      version: "1.0.0",
+      api: "1.11",
+      version: "1.1.0",
       id: "slack",
       name: "Slack",
       description: "Direct mentions in watched channels and saved items from Slack, with a dock beside Bino's and proposals for My list.",
@@ -25,6 +24,8 @@ export function createSlackPack(opts: { fetchFn?: typeof fetch } = {}): Pack & {
       execution: "any",
       private: true, // chats are not for a model: nothing its pages show goes to Bino
       everyMs: 3 * 60_000,
+      // Saved messages it proposes go on My list, while the todo pack is on.
+      uses: ["todo"],
       settings: [
         { key: "SLACK_TOKEN", label: "Slack token", secret: true, required: true, help: "A user (xoxp-) or bot (xoxb-) token" },
         { key: "SLACK_CHANNELS", label: "Channels to watch", help: "Channel names or IDs, comma-separated (saved items need a user token)" },
@@ -44,10 +45,12 @@ export function createSlackPack(opts: { fetchFn?: typeof fetch } = {}): Pack & {
       const proposal = (key: string): SlackKept["saved"][number] | undefined => kept?.saved.find((s) => s.key === key && !dismissed.has(key));
       app.post("/slack/proposal/:key/add", async (c) => {
         const m = proposal(c.req.param("key"));
-        if (m) {
-          await addTodo(ctx.db, { title: `Follow up in #${m.channel}: ${m.text || "a saved message"}`.slice(0, 200) });
+        const list = ctx.required("todo", "list");
+        if (m && list) {
+          const item = await list.add({ title: `Follow up in #${m.channel}: ${m.text || "a saved message"}`.slice(0, 200) });
           dismissed.add(m.key);
           ctx.publish(["slack"]);
+          if (item) return c.redirect(list.href(item.id));
         }
         return c.redirect("/todo");
       });

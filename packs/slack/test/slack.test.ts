@@ -1,6 +1,7 @@
 /** Slack Pack (`slack`) tests: a fake Slack Web API answers; no real Slack is touched. */
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { Hono } from "hono";
 import type { D1 } from "dovre/db.ts";
 import { testContext } from "dovre/packs/testing.ts";
 import { snippet, wantedChannels } from "../data.ts";
@@ -133,6 +134,24 @@ test("slack: proposals come from saved items only, and only until handled", asyn
   assert.ok(proposals.includes("the deploy runbook"));
   assert.ok(proposals.includes('action="/slack/proposal/star%3AC1%3A1770000000.000400/add"'), "the key is URL-encoded, not a bare text echo");
   assert.ok(!proposals.includes("<script>"));
+});
+
+test("slack: Add puts a saved message on My list through the todo pack's share, and goes to the item", async () => {
+  const { fetchFn } = fakeSlack();
+  const pack = createSlackPack({ fetchFn });
+  await pack.refresh!(testContext({ env: ENV }));
+  const added: { title: string }[] = [];
+  const list = { items: async () => [], get: async () => undefined, add: async (t: { title: string }) => (added.push(t), { id: 7, ...t } as never), href: (id: number) => `/todo#t-${id}` };
+  const ctx = testContext({ env: ENV, required: ((id: string, key: string) => (id === "todo" && key === "list" ? list : undefined)) as never });
+  const app = new Hono();
+  pack.routes!(app as never, ctx);
+  const res = await app.request("http://localhost/slack/proposal/star%3AC1%3A1770000000.000400/add", { method: "POST" });
+  assert.equal(res.headers.get("location"), "/todo#t-7");
+  assert.equal(added.length, 1);
+  assert.match(added[0]!.title, /^Follow up in #/);
+  const offApp = new Hono();
+  createSlackPack({ fetchFn }).routes!(offApp as never, testContext({ env: ENV }));
+  assert.equal((await offApp.request("http://localhost/slack/proposal/x/add", { method: "POST" })).headers.get("location"), "/todo", "the todo pack off: nothing added");
 });
 
 test("slack: a missing or bad token says so; channels must be configured", async () => {

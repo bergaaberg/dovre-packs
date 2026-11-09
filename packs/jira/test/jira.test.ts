@@ -1,7 +1,7 @@
 /** Jira Pack (`jira`) tests: REST with a token, or Claude Code's Atlassian MCP where tokens are locked down. */
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { Kept } from "dovre/issues/templates.ts";
+import type { Kept } from "dovre/kept.ts";
 import { testContext } from "dovre/packs/testing.ts";
 import { viaOf } from "../data.ts";
 import { createJiraPack } from "../index.ts";

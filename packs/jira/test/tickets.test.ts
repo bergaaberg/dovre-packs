@@ -7,7 +7,8 @@ import { recentActions } from "dovre/actions/deploys.ts";
 import { openDb } from "dovre/db.ts";
 import { packApp, testContext } from "dovre/packs/testing.ts";
 import type { PackContext } from "dovre/packs/types.ts";
-import { listTodos } from "dovre/todo/store.ts";
+import { todoPack } from "dovre/packs/core/todo/index.ts";
+import { listTodos } from "dovre/packs/core/todo/store.ts";
 import { createJiraPack } from "../index.ts";
 import { type Agent, CREATE, createInput, FIELDS, type RunOff, TYPES } from "../mcp.ts";
 import { adf, readTicket, ticketFields, ticketPayload, validateTicket } from "../tickets.ts";
@@ -68,10 +69,12 @@ const devRest = (extra: Record<string, unknown> = {}) => ({
   ...extra,
 });
 
-function mounted(o: { env?: Record<string, string>; fetchFn?: typeof fetch; agent?: Agent; hosted?: boolean } = {}) {
+function mounted(o: { env?: Record<string, string>; fetchFn?: typeof fetch; agent?: Agent; hosted?: boolean; /** The todo pack is on (default). */ todo?: boolean } = {}) {
   const db = openDb();
   const published: string[][] = [];
+  const todo = todoPack({ links: () => ({ ghe: "acme.ghe.com", org: "ACME" }) });
   const ctx: PackContext = testContext({
+    required: ((id: string, key: string) => (o.todo !== false && id === "todo" && key === "list" ? todo.shares!(ctx).list : undefined)) as PackContext["required"],
     env: { JIRA_SITE: SITE, TICKET_PROJECTS: "DEV", ...o.env },
     db: db.DB,
     hosted: o.hosted ?? false,
@@ -177,6 +180,10 @@ test("tickets (rest): the screen reads in the background; then the type's live f
   assert.equal((await post("/jira/new/preview", { project: "DEV", type: "nope", j_summary: "x" })).status, 400, "a type id that isn't one is refused");
   const preview = await (await post("/jira/new/preview", sent)).text();
   assert.match(preview, /<strong>Se bilene mine<\/strong>/);
+  assert.match(preview, /name="mylist"/, "My list is on: the preview offers it");
+  const off = mounted({ env: restOn, fetchFn: fakeRest(devRest()).fetchFn, todo: false });
+  await landed(off.get, "/jira/new?project=DEV&type=10255");
+  assert.doesNotMatch(await (await off.post("/jira/new/preview", sent)).text(), /name="mylist"/, "the todo pack off: no My list box");
   assert.match(preview, /<dt>Område<\/dt><dd>Salg<\/dd>/);
   assert.ok(!rest.calls.some((c) => c.method === "POST"), "the preview creates nothing");
 
