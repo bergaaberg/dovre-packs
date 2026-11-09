@@ -1,9 +1,9 @@
 /**
  * Google Cloud Pub/Sub Pack (`pubsub`): radar for stuck unacked messages and dead-letter
  * topic depth. A subscription whose oldest unacked message exceeds the threshold or a DLQ
- * with unacked messages creates a need, rings the pubsub-stuck bell, and sets the avatar.
+ * with unacked messages creates a need, rings the pubsub-stuck bell, and sets the pulse.
  */
-import type { AvatarFeed, PackNeed } from "dovre/packs/types.ts";
+import type { PulseFeed, PackNeed } from "dovre/packs/types.ts";
 import type { PubsubRead, PubsubSubscription } from "./data.ts";
 
 /** Oldest unacked message age threshold for warning (10 minutes). */
@@ -172,7 +172,7 @@ export function needsOf(k: PubsubKept | undefined): PackNeed[] {
 }
 
 /** Fire for any bad condition, storm for any warning condition; counts only. */
-export function avatarOf(k: PubsubKept | undefined): AvatarFeed | undefined {
+export function pulseOf(k: PubsubKept | undefined): PulseFeed | undefined {
   if (!k) return undefined;
   const bad = k.subscriptions.filter((s) => s.tone === "bad").length;
   const warn = k.subscriptions.filter((s) => s.tone === "warn").length;

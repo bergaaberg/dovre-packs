@@ -83,7 +83,7 @@ export function createHttpPack(opts: CreateHttpPackOpts = {}): Pack & { history(
     styles: jsonStyles + quickStyles + storiesStyles,
     manifest: {
       api: "1.7",
-      version: "1.1.0",
+      version: "1.1.1",
       id: "http",
       name: "HTTP client",
       description: "Send HTTP requests from this machine; saved per repo as .http files, with environments and secrets bound to hosts.",
@@ -138,4 +138,3 @@ export function createHttpPack(opts: CreateHttpPackOpts = {}): Pack & { history(
 }
 
 export const httpPack: Pack = createHttpPack();
-export const httpCrate = httpPack;

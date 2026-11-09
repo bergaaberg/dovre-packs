@@ -16,7 +16,7 @@ export function createSlackPack(opts: { fetchFn?: typeof fetch } = {}): Pack & {
     kept: () => kept,
     manifest: {
       api: "1.11",
-      version: "1.1.0",
+      version: "1.1.1",
       id: "slack",
       name: "Slack",
       description: "Direct mentions in watched channels and saved items from Slack, with a dock beside Bino's and proposals for My list.",
@@ -107,7 +107,7 @@ export function createSlackPack(opts: { fetchFn?: typeof fetch } = {}): Pack & {
       const chans = kept.channels.map((c) => `#${c.name}`).join(", ");
       return `Slack: ${kept.mentions.length} direct mention${kept.mentions.length === 1 ? "" : "s"} today in ${chans}; ${kept.saved.length} saved item${kept.saved.length === 1 ? "" : "s"}.`;
     },
-    avatar: () => (kept?.ok && kept.mentions.length ? { asking: kept.mentions.length } : null),
+    pulse: () => (kept?.ok && kept.mentions.length ? { asking: kept.mentions.length } : null),
     acts(ctx) {
       const token = () => (ctx.env.SLACK_TOKEN ?? "").trim();
       return [
@@ -151,4 +151,3 @@ export function createSlackPack(opts: { fetchFn?: typeof fetch } = {}): Pack & {
 }
 
 export const slackPack: Pack = createSlackPack();
-export const slackCrate = slackPack;

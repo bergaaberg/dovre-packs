@@ -1,6 +1,6 @@
 /**
  * OpenTelemetry & Prometheus pack (`otel`): RED metrics per service from a Prometheus-compatible
- * API, firing alerts, a 24h error lane on Today's horizon, avatar storm/fire, and the running
+ * API, firing alerts, a 24h error lane on Today's horizon, pulse storm/fire, and the running
  * version beside mapped repos on /deploys. Reads only in `refresh()`; everything else is memory.
  */
 import { type Pack } from "dovre/packs/types.ts";
@@ -13,7 +13,7 @@ export function createOtelPack(opts: { fetchFn?: typeof fetch } = {}): Pack & { 
     kept: () => kept,
     manifest: {
       api: "1.6",
-      version: "1.0.0",
+      version: "1.0.1",
       id: "otel",
       name: "OpenTelemetry & Prometheus",
       description: "RED metrics, firing alerts and prod versions from Prometheus / Mimir / VictoriaMetrics / Grafana Cloud.",
@@ -43,7 +43,7 @@ export function createOtelPack(opts: { fetchFn?: typeof fetch } = {}): Pack & { 
       if (!kept?.ok || !kept.services.length) return [];
       return [{ label: "req/s", value: Math.round(kept.services.reduce((a, s) => a + s.rps, 0) * 10) / 10 }];
     },
-    avatar() {
+    pulse() {
       if (!kept?.ok) return undefined;
       const bad = kept.services.filter((s) => s.status === "bad");
       const warn = kept.services.filter((s) => s.status === "warn");
@@ -76,4 +76,3 @@ export function createOtelPack(opts: { fetchFn?: typeof fetch } = {}): Pack & { 
 }
 
 export const otelPack: Pack = createOtelPack();
-export const otelCrate = otelPack;

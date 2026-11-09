@@ -3,7 +3,7 @@
  * collector or backend in between. POST /otel-sink/ingest/v1/{traces,metrics,logs} with an ingest
  * token from Settings (core checks it, the size and the rate: src/packs/ingest.ts). What comes in
  * is cut to an attribute allowlist and kept briefly in the pack's own tables (store.ts); refresh()
- * prunes and reads the summary into memory, which feeds the pages, Today's horizon, the avatar,
+ * prunes and reads the summary into memory, which feeds the pages, Today's horizon, the pulse,
  * the needs (a service that starts erroring rings once) and the running version on /deploys.
  */
 import { html } from "hono/html";
@@ -50,7 +50,7 @@ export function createOtelSinkPack(opts: { now?: () => number } = {}): Pack & { 
     kept: () => kept,
     manifest: {
       api: "1.6",
-      version: "1.1.0",
+      version: "1.1.1",
       id: ID,
       name: "OTel sink",
       description: "Receives OTLP/HTTP (traces, metrics, logs) straight from your apps: RED per service, errors with their trace, a waterfall, a log tail.",
@@ -175,7 +175,7 @@ export function createOtelSinkPack(opts: { now?: () => number } = {}): Pack & { 
         label: "OTel sink",
       }));
     },
-    avatar() {
+    pulse() {
       const h = hot();
       if (!h.length) return undefined;
       const bad = h.filter((s) => s.status === "bad").length;

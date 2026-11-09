@@ -1,5 +1,10 @@
 # slack
 
+## 1.1.1 — 2026-11-09
+
+- Its pulse is `pulse` (`PulseFeed`), core's name for it; `avatar` was the old one.
+- The old `…Crate` export alias is gone: import the `…Pack` name.
+
 ## 1.1.0 — 2026-11-09
 
 - A saved message's Add goes on My list through the todo pack's `list` share (API 1.11, `uses: ["todo"]`) and lands on the item. With todo off, nothing is added.

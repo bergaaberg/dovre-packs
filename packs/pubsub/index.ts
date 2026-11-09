@@ -1,12 +1,12 @@
 /**
  * Google Cloud Pub/Sub Pack (`pubsub`): unacked backlog, oldest unacked age, and dead-letter
- * topic depth radar (needs, a ring, the avatar's storm or fire).
+ * topic depth radar (needs, a ring, the pulse's storm or fire).
  * Counts and subscription names only, never a message payload. Works locally and hosted on Cloudflare Workers.
  */
 import { type Pack } from "dovre/packs/types.ts";
 import { readPubsub, validateProject } from "./data.ts";
 import { pubsubCard, pubsubPage } from "./view.ts";
-import { avatarOf, binoOf, needsOf, type PubsubKept, RING, watch } from "./watch.ts";
+import { pulseOf, binoOf, needsOf, type PubsubKept, RING, watch } from "./watch.ts";
 
 export function createPubsubPack(
   opts: { fetchFn?: typeof fetch; now?: () => number } = {},
@@ -18,7 +18,7 @@ export function createPubsubPack(
     kept: () => kept,
     manifest: {
       api: "1.6",
-      version: "1.0.0",
+      version: "1.0.1",
       id: "pubsub",
       name: "Google Cloud Pub/Sub",
       description: "Subscription backlog, oldest unacked message age, and dead-letter radar.",
@@ -77,7 +77,7 @@ export function createPubsubPack(
     },
     today: () => (kept ? [{ id: "pubsub-now", render: pubsubCard(kept, now()) }] : []),
     needs: () => needsOf(kept),
-    avatar: () => avatarOf(kept),
+    pulse: () => pulseOf(kept),
     bino: () => binoOf(kept),
   };
 }

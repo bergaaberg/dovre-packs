@@ -1,5 +1,9 @@
 # otel-sink
 
+## 1.1.1 — 2026-11-09
+
+- Its pulse is `pulse` (`PulseFeed`), core's name for it; `avatar` was the old one.
+
 ## 1.1.0 — 2026-11-02
 
 - A service's page says which repo and version it runs, linked on the forge (`OTEL_SINK_SERVICES`).

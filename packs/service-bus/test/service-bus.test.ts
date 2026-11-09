@@ -1,6 +1,6 @@
 /**
  * Azure Service Bus Pack (`service-bus`) tests: both endpoint kinds against fake APIs (ARM JSON
- * and the namespace's Atom feed), the DLQ radar (needs, ring keys, avatar), soft failure, counts
+ * and the namespace's Atom feed), the DLQ radar (needs, ring keys, pulse), soft failure, counts
  * only, and hostile input on the page and card.
  */
 import assert from "node:assert/strict";
@@ -72,7 +72,7 @@ test("service-bus: endpoints, entity lists and tokens are read as documented", (
   assert.equal(authHeader("abc"), "Bearer abc");
 });
 
-test("service-bus: ARM discovery reads queues and subscriptions, and the DLQ radar raises needs, ring and avatar", async () => {
+test("service-bus: ARM discovery reads queues and subscriptions, and the DLQ radar raises needs, ring and pulse", async () => {
   const calls: Call[] = [];
   const pack = createServiceBusPack({ fetchFn: fakeApi(armRoutes(), calls), now: () => 1_000 });
   const topics: string[] = [];
@@ -102,7 +102,7 @@ test("service-bus: ARM discovery reads queues and subscriptions, and the DLQ rad
     ],
   );
   assert.match(needs[0]!.title, /billing\/invoices has 110 dead-lettered messages/);
-  assert.equal(pack.avatar!(ctx)?.trouble?.level, "fire");
+  assert.equal(pack.pulse!(ctx)?.trouble?.level, "fire");
   assert.match(pack.bino!(ctx), /subscription billing\/invoices: 0 active, 110 dead-lettered/);
   assert.match(pack.bino!(ctx), /queue emails: 5000 active/);
 });
@@ -123,17 +123,17 @@ test("service-bus: a need keeps its key and its since-time while the DLQ fills, 
   const again = pack.needs!(ctx)[0]!;
   assert.equal(again.key, first.key, "same state, same key: rings once");
   assert.equal(again.at, 1_000, "since the first refresh that saw it");
-  assert.equal(pack.avatar!(ctx)?.trouble?.level, "storm");
+  assert.equal(pack.pulse!(ctx)?.trouble?.level, "storm");
 
   dead = 150;
   await pack.refresh!(ctx);
   assert.notEqual(pack.needs!(ctx)[0]!.key, first.key, "turning bad rings once more");
-  assert.equal(pack.avatar!(ctx)?.trouble?.level, "fire");
+  assert.equal(pack.pulse!(ctx)?.trouble?.level, "fire");
 
   dead = 0;
   await pack.refresh!(ctx);
   assert.deepEqual(pack.needs!(ctx), []);
-  assert.equal(pack.avatar!(ctx), undefined);
+  assert.equal(pack.pulse!(ctx), undefined);
   assert.equal(pack.kept()!.entities[0]!.dlqSince, undefined);
 });
 

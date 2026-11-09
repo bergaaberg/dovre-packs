@@ -2,7 +2,7 @@
  * Kafka Pack (`kafka`): consumer group lag, dead-letter topics and partition health for Kafka,
  * Redpanda and Confluent clusters, from an HTTP lag endpoint. Metadata only — never a payload.
  */
-import { type AvatarFeed, type Pack, type PackNeed } from "dovre/packs/types.ts";
+import { type PulseFeed, type Pack, type PackNeed } from "dovre/packs/types.ts";
 import { type KafkaKept, lagState, lagWarn, readKafka } from "./data.ts";
 import { kafkaCard, kafkaPage } from "./view.ts";
 
@@ -13,7 +13,7 @@ export function createKafkaPack(opts: { fetchFn?: typeof fetch } = {}): Pack & {
     kept: () => kept,
     manifest: {
       api: "1.6",
-      version: "1.0.0",
+      version: "1.0.1",
       id: "kafka",
       name: "Kafka",
       description: "Consumer group lag, dead-letter topics and partition health for Kafka, Redpanda and Confluent (metadata only).",
@@ -72,7 +72,7 @@ export function createKafkaPack(opts: { fetchFn?: typeof fetch } = {}): Pack & {
       }
       return out;
     },
-    avatar(ctx): AvatarFeed | null {
+    pulse(ctx): PulseFeed | null {
       if (!kept?.ok) return null;
       const needs = this.needs?.(ctx) ?? [];
       const bad = needs.filter((n) => n.tone === "bad").length;
@@ -108,4 +108,3 @@ export function createKafkaPack(opts: { fetchFn?: typeof fetch } = {}): Pack & {
 }
 
 export const kafkaPack: Pack = createKafkaPack();
-export const kafkaCrate = kafkaPack;

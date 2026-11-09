@@ -103,7 +103,7 @@ export function createDuckDbPack(opts: CreateDuckDbPackOpts = {}): Pack & {
 
     manifest: {
       api: "1.6",
-      version: "1.0.0",
+      version: "1.0.1",
       id: "duckdb",
       name: "DuckDB",
       description: "Agentic analytics on local DuckDB databases, Parquet, CSV, and JSON lines files.",
@@ -519,4 +519,3 @@ export function createDuckDbPack(opts: CreateDuckDbPackOpts = {}): Pack & {
 }
 
 export const duckdbPack: Pack = createDuckDbPack();
-export const duckdbCrate = duckdbPack;

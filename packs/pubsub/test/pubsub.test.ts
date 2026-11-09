@@ -1,6 +1,6 @@
 /**
  * Google Cloud Pub/Sub Pack (`pubsub`) tests: fake Google APIs, Cloud Monitoring metrics join,
- * dead-letter radar (needs, rings, avatar), service-account JWT minting and caching, soft failure,
+ * dead-letter radar (needs, rings, pulse), service-account JWT minting and caching, soft failure,
  * metadata-only enforcement, and hostile input.
  */
 import assert from "node:assert/strict";
@@ -18,7 +18,7 @@ import { pubsubCard, pubsubPage } from "../view.ts";
 import {
   AGE_BAD_SECS,
   AGE_WARN_SECS,
-  avatarOf,
+  pulseOf,
   binoOf,
   DLQ_BAD,
   formatAge,
@@ -262,9 +262,9 @@ test("pubsub: joins subscription metadata with Cloud Monitoring metrics and assi
   assert.equal(needs[0]?.ring, RING);
 
   // Avatar has storm trouble for warnings
-  const avatar = pack.avatar!(ctx);
-  assert.equal(avatar?.trouble?.level, "storm");
-  assert.match(avatar?.trouble?.why ?? "", /2 subscriptions need attention/);
+  const pulse = pack.pulse!(ctx);
+  assert.equal(pulse?.trouble?.level, "storm");
+  assert.match(pulse?.trouble?.why ?? "", /2 subscriptions need attention/);
 
   // Bino output contains names and numbers only
   const bino = pack.bino!(ctx);
@@ -381,15 +381,15 @@ test("pubsub: stable keys and since-times across refreshes, escalating to bad", 
     "pubsub:orders-dlq-sub:dlq:bad",
     "pubsub:orders-sub:stuck:bad",
   ]);
-  const avatar = pack.avatar!(ctx);
-  assert.equal(avatar?.trouble?.level, "fire");
+  const pulse = pack.pulse!(ctx);
+  assert.equal(pulse?.trouble?.level, "fire");
 
   // Turn 4: drained/caught up -> needs clear!
   age = 10;
   dlqCount = 0;
   await pack.refresh!(ctx);
   assert.equal(pack.needs!(ctx).length, 0);
-  assert.equal(pack.avatar!(ctx), undefined);
+  assert.equal(pack.pulse!(ctx), undefined);
 });
 
 test("pubsub: service account JSON mints RS256 JWT, caches token and refreshes on expiry", async () => {

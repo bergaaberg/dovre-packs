@@ -1,9 +1,9 @@
 /**
  * Azure Service Bus Pack (`service-bus`): what the pack keeps between refreshes, and what it
  * makes of it (the DLQ radar): a dead-letter queue with anything in it is a need and trouble for
- * the avatar, a full one (DLQ_BAD or more) a bad need and a fire.
+ * the pulse, a full one (DLQ_BAD or more) a bad need and a fire.
  */
-import type { AvatarFeed, PackNeed } from "dovre/packs/types.ts";
+import type { PulseFeed, PackNeed } from "dovre/packs/types.ts";
 import type { Entity, ServiceBusRead } from "./data.ts";
 
 /** Dead-lettered messages (both dead-letter queues) from which a need is bad, not a warning. */
@@ -75,7 +75,7 @@ export function needsOf(k: ServiceBusKept | undefined): PackNeed[] {
 }
 
 /** A fire for a full DLQ, a storm for any non-empty one; counts only. */
-export function avatarOf(k: ServiceBusKept | undefined): AvatarFeed | undefined {
+export function pulseOf(k: ServiceBusKept | undefined): PulseFeed | undefined {
   const bad = k?.entities.filter((e) => e.tone === "bad").length ?? 0;
   const warn = k?.entities.filter((e) => e.tone === "warn").length ?? 0;
   if (bad) return { trouble: { level: "fire", why: `${plural(bad, "dead-letter queue")} over ${DLQ_BAD}`, href: "/service-bus" } };

@@ -150,7 +150,7 @@ export function createJiraPack(
     kept: () => kept,
     manifest: {
       api: "1.11",
-      version: "1.1.0",
+      version: "1.1.1",
       id: "jira",
       name: "Jira",
       description: "Jira issues assigned to me, what moved in my projects, ticket keys as links, and filing tickets.",
@@ -320,4 +320,3 @@ export function createJiraPack(
 }
 
 export const jiraPack: Pack = createJiraPack();
-export const jiraCrate = jiraPack;

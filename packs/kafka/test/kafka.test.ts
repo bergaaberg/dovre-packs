@@ -73,11 +73,11 @@ test("kafka: reads lag, sends the token as a header, and escalates across refres
   // Key stability: the same pair behind the same way keeps its key.
   const keys = needs.map((n) => n.key);
   assert.equal(new Set(keys).size, keys.length);
-  // And the avatar reports trouble while any need stands.
-  const avatar = pack.avatar!(ctx);
-  assert.ok(avatar && avatar.trouble);
-  assert.equal(avatar.trouble!.level, "fire");
-  assert.ok(avatar.asking! >= 2);
+  // And the pulse reports trouble while any need stands.
+  const pulse = pack.pulse!(ctx);
+  assert.ok(pulse && pulse.trouble);
+  assert.equal(pulse.trouble!.level, "fire");
+  assert.ok(pulse.asking! >= 2);
 });
 
 test("kafka: KAFKA_LAG_WARN sets the threshold; caught-up groups raise nothing", async () => {
