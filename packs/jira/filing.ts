@@ -12,7 +12,6 @@
  */
 import { logAction } from "dovre/actions/deploys.ts";
 import type { PackContext } from "dovre/packs/types.ts";
-import { addTodo } from "dovre/todo/store.ts";
 import { authOf, createRest, loadScreenRest, siteOf, viaOf } from "./data.ts";
 import { type Agent, createInput, createViaMcp, loadScreenViaMcp } from "./mcp.ts";
 import { type CreateType, first, readTicket, type Screen, summaryOf, type Ticket, type TicketField, ticketFields, ticketPayload, ticketProjectsOf, ticketValid, validateTicket } from "./tickets.ts";
@@ -115,9 +114,9 @@ export function createFiling(o: { agent: () => Promise<Agent>; fetchFn?: typeof 
       const r = viaOf(ctx.env) === "mcp" ? await createViaMcp(await o.agent(), site, createInput(site, payload, got.type.name)) : await createRest({ site, auth: authOf(ctx.env), fetchFn: o.fetchFn ?? fetch }, payload);
       await logAction(ctx.db, { kind: "ticket.create", target: r.key, detail, ok: true });
       if ("cost" in r) ctx.log(`via mcp: created ${r.key}, $${(r.cost as number).toFixed(4)}`);
-      if (opts.myList && summary)
-        // It's made already, so a miss here is only logged.
-        await addTodo(ctx.db, { title: summary, notes: `${r.key} in Jira: ${r.url}` }).catch((e) => ctx.log(`my list: ${msg(e)}`));
+      const list = opts.myList && summary ? ctx.required("todo", "list") : undefined;
+      // It's made already, so a miss here is only logged.
+      if (list) await list.add({ title: summary, notes: `${r.key} in Jira: ${r.url}` }).catch((e: unknown) => ctx.log(`my list: ${msg(e)}`));
       return { ok: true, key: r.key, url: r.url, warning: "warning" in r ? (r.warning as string | undefined) : undefined };
     } catch (e) {
       await logAction(ctx.db, { kind: "ticket.create", target: got.project, detail, ok: false, error: msg(e) });

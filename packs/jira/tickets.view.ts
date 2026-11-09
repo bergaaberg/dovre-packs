@@ -4,10 +4,17 @@
  * by the pack's routes (index.ts).
  */
 import { html } from "hono/html";
-import { Link, MyListBox, safeUrl } from "dovre/pages/parts.ts";
-import { hidden, rows, star, wrap } from "dovre/pages/work.ts";
+import { Link, safeUrl } from "dovre/pages/parts.ts";
 import { ConfirmSubmit, type Html, Item, KeyValues, List, Notice, PageHeader, Panel, Pill, Tabs } from "dovre/ui/kit.ts";
 import { type CreateType, MAX_SUMMARY, nameOf, shown, type Ticket, type TicketErrors, type TicketField, ticketPairs } from "./tickets.ts";
+
+// Form bits, kept here: core's own copies live inside the issues pack.
+const hidden = (pairs: [string, string][]) => pairs.map(([name, value]) => html`<input type="hidden" name="${name}" value="${value}">`);
+const wrap = (err: string | undefined, inner: Html | string) => (err ? html`<div class="field invalid">${inner}<span class="error">${err}</span></div>` : html`<div class="field">${inner}</div>`);
+const star = (on: boolean) => (on ? html` <abbr title="required">*</abbr>` : "");
+const rows = (text: string, min = 5) => Math.min(20, Math.max(min, text.split("\n").length + 1));
+/** Only while the todo pack shares My list. */
+const myListBox = (on: boolean | undefined) => (on ? html`<label class="check mylist"><input type="checkbox" name="mylist" value="1" checked> Also put it on My list</label>` : "");
 
 export const NEW = "/jira/new";
 export const newHref = (project?: string, type?: string) => safeUrl(`${NEW}${project ? `?project=${encodeURIComponent(project)}${type ? `&type=${encodeURIComponent(type)}` : ""}` : ""}`);
@@ -102,7 +109,7 @@ const paragraphs = (text: string) =>
 /** The write kind Settings → Writes lists (`<pack>.<kind>`); the actions log keeps its older `ticket.create`. */
 export const TICKET_KIND = "jira.ticket-create";
 
-export function previewBody(o: { ticket: Ticket; fields: TicketField[]; nonce: string; problem?: string }): Html {
+export function previewBody(o: { ticket: Ticket; fields: TicketField[]; nonce: string; problem?: string; myList?: boolean }): Html {
   const t = o.ticket;
   const summary = o.fields.find((f) => f.kind === "line");
   const description = o.fields.find((f) => f.kind === "paragraph");
@@ -114,7 +121,7 @@ export function previewBody(o: { ticket: Ticket; fields: TicketField[]; nonce: s
     ...selects.map((f): [string, Html | string] => [f.name, shown(f, t) || html`<span class="t3">${f.default ? "Jira's default" : "none"}</span>`]),
   ]);
   const body = description && t.values[description.id]?.trim() ? paragraphs(t.values[description.id]!) : html`<p class="t3">No description.</p>`;
-  const actions = html`<form method="post" action="${NEW}/create">${hidden([...ticketPairs(t, o.fields), ["nonce", o.nonce]])}${MyListBox}<div class="buttons"><button type="submit" formaction="${NEW}/preview" name="edit" value="1">Edit</button>${ConfirmSubmit({ kind: TICKET_KIND, label: "Create ticket", primary: true, question: html`Create this ticket in ${t.project} in Jira?` })}</div></form>`;
+  const actions = html`<form method="post" action="${NEW}/create">${hidden([...ticketPairs(t, o.fields), ["nonce", o.nonce]])}${myListBox(o.myList)}<div class="buttons"><button type="submit" formaction="${NEW}/preview" name="edit" value="1">Edit</button>${ConfirmSubmit({ kind: TICKET_KIND, label: "Create ticket", primary: true, question: html`Create this ticket in ${t.project} in Jira?` })}</div></form>`;
   return html`${PageHeader({ title: "Preview", sub: html`Nothing is created until <strong>Create ticket</strong>.`, crumbs: crumbs("New ticket") })}
 ${o.problem ? Notice({ tone: "bad", children: o.problem }) : ""}
 ${Panel({ title: "What will be created", children: html`${kv}${body}`, foot: actions })}`;
