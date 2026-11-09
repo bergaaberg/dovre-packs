@@ -22,3 +22,4 @@ export { wasmCanaryPack, createWasmCanaryPack } from "./packs/wasm-canary/index.
 export { codeReviewPack, createCodeReviewPack } from "./packs/code-review/index.ts";
 export { markdownPack, createMarkdownPack } from "./packs/markdown/index.ts";
 export { movementPack, createMovementPack } from "./packs/movement/index.ts";
+export { summariesPack, createSummariesPack } from "./packs/summaries/index.ts";
