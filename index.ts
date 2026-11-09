@@ -2,6 +2,7 @@
 export { cfHealthPack, cfHealthCrate, createCfHealthPack } from "./packs/cf-health/index.ts";
 export { httpOtelPack, httpOtelCrate, createHttpOtelPack } from "./packs/http-otel/index.ts";
 export { dockerPack, dockerCrate, createDockerPack } from "./packs/docker/index.ts";
+export { storybookPack, storybookCrate, createStorybookPack } from "./packs/storybook/index.ts";
 export { jiraPack, jiraCrate, createJiraPack } from "./packs/jira/index.ts";
 export { kafkaPack, kafkaCrate, createKafkaPack } from "./packs/kafka/index.ts";
 export { linearPack, linearCrate, createLinearPack } from "./packs/linear/index.ts";
