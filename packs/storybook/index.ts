@@ -15,9 +15,7 @@
  */
 import { html } from "hono/html";
 import { owns } from "dovre/owners.ts";
-import { Empty, type Html, Notice, type Pack, type PackContext, type PackForge, PageHeader, Panel, safeUrl } from "dovre/pack.ts";
-import { strictOrigin } from "dovre/strict.ts";
-import { later, Reading } from "dovre/pages/later.ts";
+import { Empty, type Html, later, Notice, type Pack, type PackContext, type PackForge, PageHeader, Panel, Reading, safeUrl, strictOrigin } from "dovre/pack.ts";
 import { type Builds, type BuildState, createBuilds, runWith } from "./build.ts";
 import { type Book, bookOf, booksOf, frameUrl, openUrl, originOf, parseStories, STORIES, storyId, touched, urlOf, type Changed } from "./model.ts";
 import { buildOrigins, buildServer, frameFrom } from "./serve.ts";
@@ -214,8 +212,8 @@ export function createStorybookPack(d: StorybookDeps = {}): Pack {
   const toBuild = (book: Book, f: FoundAt) => [!book.head ? f.sha : undefined, !book.base ? f.baseSha : undefined].filter((s): s is string => !!s);
   return {
     manifest: {
-      api: "1.26",
-      version: "1.0.4",
+      api: "1.27",
+      version: "1.0.5",
       id: "storybook",
       name: "Storybook",
       description: "A PR's stories before and after, published by CI or built here",

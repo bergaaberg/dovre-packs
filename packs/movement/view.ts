@@ -1,8 +1,6 @@
 /** The Moved page's view (#405). */
 import { html } from "hono/html";
-import type { Snapshot } from "dovre/gather.ts";
-import { Ago, Empty, failed, type Html, Item, List, PageHeader, Panel, safeUrl, Tabs } from "dovre/pack.ts";
-import { byPerson, type Move } from "dovre/sources/ghe.ts";
+import { Ago, byPerson, Empty, failed, type Html, Item, List, type Move, PageHeader, Panel, safeUrl, type Snapshot, Tabs } from "dovre/pack.ts";
 
 function moveItem(m: Move, s: Snapshot, showActor: boolean) {
   const title = m.title ?? (m.ref ? s.refs.get(m.ref)?.title : undefined);

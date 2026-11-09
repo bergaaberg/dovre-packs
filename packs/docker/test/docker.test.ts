@@ -1,4 +1,5 @@
 /** The docker pack: the model reads strictly, the service only does what's on its list, the pages keep hostile names inert. */
+import type { AppEnv } from "dovre/pack.ts";
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -13,7 +14,6 @@ import { allowed, groupsOf, parseContainers } from "../model.ts";
 import { dockerPage } from "../view.ts";
 import { createDockerPack } from "../index.ts";
 import { dockerRoutes } from "../routes.ts";
-import type { AppEnv } from "dovre/env.ts";
 import { shell } from "dovre/html.ts";
 import { HOSTILE as H, assertInert, assertScoped, packApp } from "dovre/pack-testing.ts";
 

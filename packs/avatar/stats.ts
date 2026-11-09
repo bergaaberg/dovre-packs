@@ -9,8 +9,7 @@
  * Gathered in the background, kept (the settings table, "avatar-stats") so a restart draws at once.
  * Numbers, times, repo and language names only.
  */
-import type { D1 } from "dovre/db.ts";
-import type { PackForge } from "dovre/pack.ts";
+import type { D1, PackForge } from "dovre/pack.ts";
 import { type AvatarStats, statsOf } from "./model.ts";
 
 const DAY = 86400e3;

@@ -3,9 +3,7 @@
  * already have (the snapshot and its needs, the packs' pulse (what works, waits and is wrong, and
  * whether one says I'm on duty), My list). Pure.
  */
-import type { Pulse } from "dovre/pack.ts";
-import type { Snapshot } from "dovre/gather.ts";
-import type { Need } from "dovre/home/needs.ts";
+import type { Need, Pulse, Snapshot } from "dovre/pack.ts";
 import type { Signals } from "./mood.ts";
 
 export function signalsFrom(o: { snap: Snapshot; needs: Need[]; /** The packs' pulse (PackContext.pulse): agents working and waiting, troubles, on duty. */ pulse: Omit<Pulse, "busy">; doing: number; mergedToday: number; hour: number }): Signals {

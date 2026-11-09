@@ -10,7 +10,7 @@ export function createGitlabPack(opts: { fetchFn?: Fetch } = {}): Pack {
   return {
     manifest: {
       api: "1.24",
-      version: "1.0.1",
+      version: "1.0.2",
       id: "gitlab",
       name: "GitLab",
       description: "GitLab as the forge: merge requests, pipelines, todos, activity and blocked deployments (set FORGE=gitlab).",

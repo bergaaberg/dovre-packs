@@ -5,8 +5,7 @@
  * both re-check the file first: one that changed since it was opened isn't written.
  */
 import type { Hono } from "hono";
-import type { AppEnv } from "dovre/env.ts";
-import type { PackContext } from "dovre/pack.ts";
+import type { AppEnv, PackContext } from "dovre/pack.ts";
 import { readFile, rootOf, writeFile } from "./files.ts";
 import { parseHttp, reqOfForm, secretIn, serializeReq, withReq } from "./model.ts";
 import { blanksOfForm, fillBlanks } from "./quick.ts";

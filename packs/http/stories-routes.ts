@@ -7,8 +7,7 @@
  */
 import type { Context, Hono } from "hono";
 import { html } from "hono/html";
-import type { AppEnv } from "dovre/env.ts";
-import type { PackContext } from "dovre/pack.ts";
+import type { AppEnv, PackContext } from "dovre/pack.ts";
 import { agentHref, MAX_ASK, storyAskPrompt } from "./agent.ts";
 import { noticedIn, pipsOf, uncovered, usesOf, whoOf } from "./board.ts";
 import { buildCatalog, endpointFor, endpointKey } from "./catalog.ts";

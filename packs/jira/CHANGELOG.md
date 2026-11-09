@@ -1,5 +1,9 @@
 # jira
 
+## 1.1.5 — 2026-11-09
+
+- Takes core's types from the SDK (`dovre/pack.ts`), not core's internals. Nothing changes in what it does.
+
 ## 1.1.4 — 2026-11-09
 
 - Its own `Ran` type, not core's `dovre/spawn.ts`. Nothing changes in what it does.

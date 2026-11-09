@@ -15,9 +15,7 @@
 import { readFileSync, realpathSync } from "node:fs";
 import type { Context } from "hono";
 import { html } from "hono/html";
-import type { AppEnv } from "dovre/env.ts";
-import type { Pack, WasmFile } from "dovre/pack.ts";
-import { strictOrigin } from "dovre/strict.ts";
+import { type AppEnv, type Pack, strictOrigin, type WasmFile } from "dovre/pack.ts";
 import { MAX_SOURCE, render } from "./render.ts";
 import { codeDirOf, listDocs, listRepos, readDoc, readImage, repoRoot, resolver } from "./docs.ts";
 import { dockView, docPage, docsPage, hostedDocsPage, notFound, previewFragment, reposPage, standalone, titleOf, writePage } from "./view.ts";
@@ -63,8 +61,8 @@ function restOf(path: string, prefix: string): string | null {
 export function createMarkdownPack(): Pack {
   return {
     manifest: {
-      api: "1.24",
-      version: "1.1.1",
+      api: "1.27",
+      version: "1.1.2",
       id: "markdown",
       name: "Markdown",
       description: "GitHub-flavoured Markdown with math, mermaid and Graphviz diagrams: write with a live preview, export or print, and read the docs in your checkouts with their links checked.",

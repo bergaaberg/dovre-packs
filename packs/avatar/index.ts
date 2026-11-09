@@ -6,15 +6,13 @@
  * My list (the todo pack's share, while it's on) and the packs' pulse (PackContext.pulse: what works and waits, what's wrong, whether
  * I'm on duty, whether Bino is answering), all counts.
  */
-import { needsOf } from "dovre/home/needs.ts";
-import type { Pack, PackContext } from "dovre/pack.ts";
+import { hourAt, needsOf, type Pack, type PackContext } from "dovre/pack.ts";
 import { type Avatar, createAvatar } from "./avatar.ts";
 import { signalsFrom } from "./feed.ts";
 import { AVATAR_JS } from "./script.ts";
 import { type AvatarData, createAvatarData } from "./stats.ts";
 import { AVATAR_CSS, AVATAR_PAGE_CSS } from "./style.ts";
 import { avatarDock, avatarHero, avatarMini, avatarRoutes } from "./view.ts";
-import { hourAt } from "dovre/when.ts";
 
 export type AvatarDeps = {
   now?: () => number;
@@ -43,8 +41,8 @@ export function createAvatarPack(o: AvatarDeps = {}): Pack {
   });
   return {
     manifest: {
-      api: "1.24",
-      version: "1.1.1",
+      api: "1.27",
+      version: "1.1.2",
       id: "avatar",
       name: "Avatar",
       description: "Me in Dovre: a creature shaped by what I do on the forge, in a scene set by how things are",

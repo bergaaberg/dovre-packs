@@ -1,5 +1,9 @@
 # storybook
 
+## 1.0.5 — 2026-11-09
+
+- Takes `strictOrigin`, `later` and `Reading` and core's types from the SDK (`dovre/pack.ts`), not core's internals. Nothing changes in what it does. Needs core API 1.27.
+
 ## 1.0.4 — 2026-11-09
 
 - Runs git, pnpm and npm through `ctx.run`, not core's `runOff` and `findTool`, and names them in its manifest (`binaries`). Builds move to the pack's own folder, `packs/storybook` next to the database: the ones in `data/storybook` are built again when asked for, and that folder can be deleted. Needs core API 1.26.

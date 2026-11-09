@@ -9,9 +9,7 @@
  */
 import { readFileSync } from "node:fs";
 import type { Context } from "hono";
-import type { AppEnv } from "dovre/env.ts";
-import type { Pack } from "dovre/pack.ts";
-import { strictOrigin } from "dovre/strict.ts";
+import { type AppEnv, type Pack, strictOrigin } from "dovre/pack.ts";
 import { MAX_INPUT, b64Decode, b64Encode, diff, epoch, format, jwtDecode, minify, parse, query, sortKeys, urlDecode, urlEncode } from "./tools.ts";
 import { fromToml, fromYaml, shapeOf, toJsonSchema, toToml, toTypeScript, toYaml } from "./convert.ts";
 import { type ConvertOp, type ConvertState, type DecodeOp, type DecodeResult, type DockOp, CONVERT_OPS, DECODE_OPS, DOCK_OPS, convertPage, decodePage, diffPage, dockView, formatPage, jqPage, queryPage, styles } from "./view.ts";
@@ -99,8 +97,8 @@ export function createJsonPack(opts: { now?: () => number } = {}): Pack {
   const now = opts.now ?? Date.now;
   return {
     manifest: {
-      api: "1.24",
-      version: "1.0.1",
+      api: "1.27",
+      version: "1.0.2",
       id: "json",
       name: "JSON tools",
       description: "Format, validate, browse, query, diff and convert JSON (YAML, TypeScript types, JSON Schema); decode JWTs, base64, URL-encoding and Unix times. Runs in the request; nothing is sent anywhere.",

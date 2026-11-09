@@ -6,14 +6,12 @@
  * changes address only when the picture does, and says why in a line (counts only). `onStart`
  * gets the idle picture whenever it changes (here: a copy for the starting page, data/avatar-start.svg).
  */
-import type { D1 } from "dovre/db.ts";
-import { hashOf } from "dovre/ui/style.ts";
+import { type D1, hashOf, hourAt } from "dovre/pack.ts";
 import { AVATAR_CSS } from "./style.ts";
 import { isoSvg } from "./iso.ts";
 import { buildAvatar, DEFAULT_LOOK, type Look, lookOf, statsOf } from "./model.ts";
 import { type Signals, type Situation, situationKey, situationOf } from "./mood.ts";
 import type { AvatarData } from "./stats.ts";
-import { hourAt } from "dovre/when.ts";
 
 export const MOODS = ["idle", "working", "pop", "ask", "done", "sleep"] as const;
 export type Mood = (typeof MOODS)[number];

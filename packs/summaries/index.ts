@@ -5,9 +5,7 @@
  * reads the newest snapshot on its refresh, queues what's new, and answers the "ai.summary" slot by
  * key; core draws the text. Local only. It left Dovre's core in dovre#466.
  */
-import { deploySummaryKey, prSummaryKey, type Snapshot } from "dovre/gather.ts";
-import { throttle } from "dovre/live.ts";
-import type { Pack, PackContext } from "dovre/pack.ts";
+import { deploySummaryKey, type Pack, type PackContext, prSummaryKey, type Snapshot, throttle } from "dovre/pack.ts";
 import { createSummaries, deployPrompt, prPrompt, type Summaries } from "./store.ts";
 
 /** Queues a summary for every open PR at its head commit and every deploy that ships something. */
@@ -41,8 +39,8 @@ export function createSummariesPack(deps: { now?: () => number } = {}): Pack {
 
   return {
     manifest: {
-      api: "1.24",
-      version: "1.0.1",
+      api: "1.27",
+      version: "1.0.2",
       id: "summaries",
       name: "AI summaries",
       description: "A short summary on each PR and deploy, from the PR's own text",

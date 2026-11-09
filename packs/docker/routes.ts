@@ -6,9 +6,7 @@
  */
 import type { Context, Hono } from "hono";
 import { streamSSE } from "hono/streaming";
-import type { AppEnv } from "dovre/env.ts";
-import { strictOrigin } from "dovre/strict.ts";
-import type { PageOpts } from "dovre/pack.ts";
+import { type AppEnv, type PageOpts, strictOrigin } from "dovre/pack.ts";
 import type { Docker } from "./docker.ts";
 import { ID_RE, PROJECT_RE, isVerb } from "./model.ts";
 import { containerGonePage, containerPage, dockerPage } from "./view.ts";

@@ -1,8 +1,8 @@
 /** Slack Pack (`slack`) tests: a fake Slack Web API answers; no real Slack is touched. */
+import type { D1 } from "dovre/pack.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Hono } from "hono";
-import type { D1 } from "dovre/db.ts";
 import { testContext } from "dovre/pack-testing.ts";
 import { snippet, wantedChannels } from "../data.ts";
 import { createSlackPack } from "../index.ts";

@@ -14,8 +14,7 @@ import { dirname, join, resolve } from "node:path";
 import { keptFile, type Kept } from "dovre/kept.ts";
 import type { Context } from "hono";
 import { html } from "hono/html";
-import type { AppEnv } from "dovre/env.ts";
-import { type ActKind, type FindItem, type Html, Notice, type Pack, type PackContext } from "dovre/pack.ts";
+import { type ActKind, type AppEnv, type FindItem, type Html, Notice, type Pack, type PackContext } from "dovre/pack.ts";
 import { browseHref, type JiraKept, projectsOf, readJira, siteOf, siteOk, viaOf } from "./data.ts";
 import { type Agent, JiraSetupError, loadViaMcp } from "./mcp.ts";
 import { createFiling, type Filed, SCREEN_MS } from "./filing.ts";
@@ -149,7 +148,7 @@ export function createJiraPack(
     kept: () => kept,
     manifest: {
       api: "1.25",
-      version: "1.1.4",
+      version: "1.1.5",
       id: "jira",
       name: "Jira",
       description: "Jira issues assigned to me, what moved in my projects, ticket keys as links, and filing tickets.",

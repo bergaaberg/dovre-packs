@@ -5,8 +5,7 @@
  * new file or the end of one (`http.save`, one click: nothing that was there changes).
  */
 import type { Hono } from "hono";
-import type { AppEnv } from "dovre/env.ts";
-import type { PackContext } from "dovre/pack.ts";
+import type { AppEnv, PackContext } from "dovre/pack.ts";
 import { fromCollection, varLines } from "./collections.ts";
 import { readFile, reposOf, rootOf, writeFile } from "./files.ts";
 import { blankReq, fromCurl, masker, parseHttp, placeholdSecrets, reqOfForm, secretIn, serializeReq } from "./model.ts";
