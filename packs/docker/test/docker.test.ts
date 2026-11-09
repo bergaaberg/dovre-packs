@@ -14,13 +14,12 @@ import { allowed, groupsOf, parseContainers } from "../model.ts";
 import { dockerPage } from "../view.ts";
 import { createDockerPack } from "../index.ts";
 import { dockerRoutes } from "../routes.ts";
-import { shell } from "dovre/html.ts";
-import { HOSTILE as H, assertInert, assertScoped, packApp } from "dovre/pack-testing.ts";
+import { assertInert, assertScoped, HOSTILE as H, packApp, testPage } from "dovre/pack-testing.ts";
 
 /** The pack's routes on their own, in a shell whose frame is `operator`'s. */
 function routesOf(docker: Docker, operator: string) {
   const app = new Hono<AppEnv>();
-  dockerRoutes(app, () => docker, async (c, o) => c.html(shell({ title: o.title, frame: { operator, nav: [], host: "acme.ghe.com" }, current: o.current ?? c.req.path, body: o.body, head: o.head })));
+  dockerRoutes(app, () => docker, testPage({ operator }));
   return app;
 }
 

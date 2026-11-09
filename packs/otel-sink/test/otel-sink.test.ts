@@ -3,10 +3,8 @@ import assert from "node:assert/strict";
 import { html } from "hono/html";
 import { test } from "node:test";
 import { Hono } from "hono";
-import { createToken } from "dovre/packs/ingest.ts";
-import { openDb, testContext } from "dovre/pack-testing.ts";
+import { createWorker, ingestToken, openDb, testContext } from "dovre/pack-testing.ts";
 import type { IngestInput, PackContext } from "dovre/pack.ts";
-import { createWorker } from "dovre/worker.ts";
 import { createOtelSinkPack, repoMap } from "../index.ts";
 import { extraKeys, hexId, scrub } from "../otlp.ts";
 import { MAX_SPANS, readLogs, readMetricTrends, readTrace } from "../store.ts";
@@ -301,7 +299,7 @@ async function throughWorker(withRoutes: boolean) {
   const env = { DB: db, IS_HOSTED: "1", CF_ACCESS_TEAM: "team", CF_ACCESS_AUD: "aud" };
   const pending: Promise<unknown>[] = [];
   const wctx = { waitUntil: (x: Promise<unknown>) => void pending.push(x) };
-  const token = await createToken(db, "otel-sink", "checkout");
+  const token = await ingestToken(db, "otel-sink", "checkout");
   const post = (auth: string | undefined) =>
     worker.fetch(new Request("https://dovre.example.dev/otel-sink/ingest/v1/traces", { method: "POST", headers: { "content-type": "application/json", ...(auth ? { authorization: auth } : {}) }, body: JSON.stringify(traces("api", [span({ id: 1, at: Date.now() - 1000 })])) }), env as never, wctx);
   assert.equal((await post(undefined)).status, 401);

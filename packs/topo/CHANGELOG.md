@@ -1,5 +1,9 @@
 # topo
 
+## 1.1.4 — 2026-11-09
+
+- Lists checkouts only through `ctx.checkouts()`, without its own fallback into core's internals. Nothing changes on a core that runs it.
+
 ## 1.1.3 — 2026-11-09
 
 - Takes `strictOrigin` and core's types from the SDK (`dovre/pack.ts`), not core's internals. Nothing changes in what it does. Needs core API 1.27.

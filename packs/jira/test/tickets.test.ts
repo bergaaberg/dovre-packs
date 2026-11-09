@@ -3,10 +3,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Hono } from "hono";
 import { html } from "hono/html";
-import { openDb, packApp, testContext } from "dovre/pack-testing.ts";
+import { openDb, packApp, testContext, testList } from "dovre/pack-testing.ts";
 import type { PackContext } from "dovre/pack.ts";
-import { todoPack } from "dovre/packs/core/todo/index.ts";
-import { listTodos } from "dovre/packs/core/todo/store.ts";
 import { createJiraPack } from "../index.ts";
 import { type Agent, CREATE, createInput, FIELDS, type RunOff, TYPES } from "../mcp.ts";
 import { adf, readTicket, ticketFields, ticketPayload, validateTicket } from "../tickets.ts";
@@ -71,9 +69,9 @@ function mounted(o: { env?: Record<string, string>; fetchFn?: typeof fetch; agen
   const db = openDb();
   const published: string[][] = [];
   const logged: Parameters<PackContext["logged"]>[0][] = [];
-  const todo = todoPack({ links: () => ({ ghe: "acme.ghe.com", org: "ACME" }) });
+  const list = testList();
   const ctx: PackContext = testContext({
-    required: ((id: string, key: string) => (o.todo !== false && id === "todo" && key === "list" ? todo.shares!(ctx).list : undefined)) as PackContext["required"],
+    required: ((id: string, key: string) => (o.todo !== false && id === "todo" && key === "list" ? list : undefined)) as PackContext["required"],
     env: { JIRA_SITE: SITE, TICKET_PROJECTS: "DEV", ...o.env },
     db: db.DB,
     logged: async (a) => void logged.push(a),
@@ -87,7 +85,7 @@ function mounted(o: { env?: Record<string, string>; fetchFn?: typeof fetch; agen
   pack.routes!(app as never, ctx);
   const get = (p: string) => app.request(`http://localhost${p}`);
   const post = (p: string, body: [string, string][] | Record<string, string>) => app.request(`http://localhost${p}`, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(body).toString() });
-  return { pack, ctx, db, get, post, published, logged };
+  return { pack, ctx, db, get, post, published, logged, list };
 }
 
 const restOn = { JIRA_EMAIL: "me@example.com", JIRA_TOKEN: "t0k" };
@@ -163,7 +161,7 @@ test("tickets: createInput puts the payload's fields onto createJiraIssue's argu
 
 test("tickets (rest): the screen reads in the background; then the type's live fields, a preview, and Create files once, re-checked, logged, on My list", async () => {
   const rest = fakeRest(devRest({ "POST /rest/api/3/issue": { id: "1", key: "DEV-13" } }));
-  const { get, post, db, published, logged } = mounted({ env: restOn, fetchFn: rest.fetchFn });
+  const { get, post, db, published, logged, list } = mounted({ env: restOn, fetchFn: rest.fetchFn });
   const first = await (await get("/jira/new")).text();
   assert.match(first, /data-pending/, "nothing kept yet: the page says it's reading, and fills in");
   assert.match(first, /<meta name="u-topics" content="jira">/);
@@ -198,7 +196,7 @@ test("tickets (rest): the screen reads in the background; then the type's live f
   assert.deepEqual(writes[0]!.body, { fields: { project: { key: "DEV" }, issuetype: { id: "10255" }, summary: "Se bilene mine", description: adf("Kunden vil se bilene."), priority: { id: "10006" }, customfield_10476: { id: "10597" } } });
   assert.equal(rest.calls.filter((c) => c.path.startsWith("/rest/api/3/issue/createmeta/DEV/issuetypes?")).length, 2, "the type is checked against Jira again right before the write");
   assert.deepEqual(logged.map((a) => [a.kind, a.target, a.ok, a.detail]), [["ticket-create", "DEV-13", true, "Story · Se bilene mine"]], "logged with type and summary, never the description");
-  assert.deepEqual((await listTodos(db.DB)).map((t) => [t.title, t.notes]), [["Se bilene mine", "DEV-13 in Jira: https://example.atlassian.net/browse/DEV-13"]]);
+  assert.deepEqual((await list.items()).map((t) => [t.title, t.notes]), [["Se bilene mine", "DEV-13 in Jira: https://example.atlassian.net/browse/DEV-13"]]);
 
   const twice = await post("/jira/new/create", hiddenOf(preview, "/jira/new/create"));
   assert.deepEqual([twice.status, twice.headers.get("location")], [303, job], "pressed twice: the same job");

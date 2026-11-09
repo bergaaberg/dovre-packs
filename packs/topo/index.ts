@@ -16,8 +16,6 @@
  * claim an orphan, take out a missing entry, or start a peak.yaml, each behind a Confirm of kind
  * topo.peak-pr.
  */
-import { listRepos } from "dovre/sources/claude.ts";
-import { WORK } from "dovre/agents/workdir.ts";
 import { type Pack, type PackContext, type Snapshot, strictOrigin } from "dovre/pack.ts";
 import { TopoCatalog } from "./catalog.ts";
 import { CloudInventory } from "./cloud.ts";
@@ -99,11 +97,10 @@ export function createTopoPack(o: TopoDeps = {}): Pack {
   const of = (ctx: PackContext): TopoCatalog => {
     if (catalog) return catalog;
     const codeDir = ctx.hosted ? undefined : ctx.codeDir;
-    // Core's checkouts (API 1.7, narrowed to one in a pack session), else the code folder listed here.
-    const names = () => (ctx.checkouts ? ctx.checkouts() : codeDir ? listRepos(codeDir) : []);
-    const scanner = o.scanner ?? (codeDir ? new TopoScanner(codeDir, ctx.checkouts ? { names: ctx.checkouts } : {}) : undefined);
+    // Core's checkouts: the git repos directly under the code folder, narrowed to one in a pack session.
+    const checkouts = () => ctx.checkouts?.() ?? [];
+    const scanner = o.scanner ?? (codeDir ? new TopoScanner(codeDir, { names: checkouts }) : undefined);
     const forge = o.forge ?? new ForgeCatalog({ forge: () => ctx.forge() });
-    const checkouts = () => (codeDir ? names().filter((r) => r !== WORK) : []);
     return (catalog = new TopoCatalog({ scanner, forge, checkouts }));
   };
   /** Fresh forge and Cloudflare reads, then the page's region redrawn. The forge's is read again after a push to a main branch. */
@@ -118,7 +115,7 @@ export function createTopoPack(o: TopoDeps = {}): Pack {
   return {
     manifest: {
       api: "1.27",
-      version: "1.1.3",
+      version: "1.1.4",
       id: "topo",
       name: "Topo",
       description: "What each repo is, from its peak.yaml: tier, components, rules and docs, and which repos have none",

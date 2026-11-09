@@ -9,10 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createTopoPack, TopoScanner, type TopoEntry } from "../index.ts";
 import { topoPage, foldNames, binoLines, draftPrompt, fixPrompt } from "../view.ts";
-import { prBody, prCard, type PrSlots } from "dovre/pages/inline.ts";
-import { entryPage, type Ctx } from "dovre/packs/core/issues/compose/work.ts";
-import { contextOf } from "dovre/packs/core/assistant/bino/context.ts";
-import type { Pr, Slots } from "dovre/pack.ts";
+import { html, type PrSlotArg, type Slots } from "dovre/pack.ts";
 import { HOSTILE as H, assertInert, packApp, testContext } from "dovre/pack-testing.ts";
 
 /** A code folder with these peak.yaml files (folder → text). */
@@ -42,35 +39,10 @@ components:
 
 /** The pack's slots, as core's fill would call them. */
 const slotsOf = (dir: string): Slots => createTopoPack().slots!(testContext({ codeDir: dir }));
-const prSlots = (sl: Slots): PrSlots => ({ lead: (p) => [sl["pr.lead"]!(p)], facts: (p) => sl["pr.facts"]!(p) });
-
-function fakePr(repo: string, number = 101): Pr {
-  return {
-    repo,
-    number,
-    title: "Add Toolkit support",
-    branch: "feat/toolkit",
-    headSha: "abcdef123456",
-    author: "andreasberg",
-    url: `https://github.com/${repo}/pull/${number}`,
-    draft: false,
-    openThreads: 0,
-    checks: "SUCCESS",
-    review: "APPROVED",
-    updatedAt: "2026-10-23T20:00:00Z",
-    additions: 120,
-    deletions: 15,
-    files: [
-      { path: "src/topo/range.ts", additions: 100, deletions: 10 },
-      { path: "README.md", additions: 20, deletions: 5 },
-    ],
-    reviews: [{ state: "APPROVED", login: "reviewer" }],
-    requested: [],
-    labels: ["enhancement"],
-    runs: [{ name: "build", state: "ok", url: "https://ci.example.com/build" }],
-    body: "Implements range.yaml support.",
-  };
-}
+/** The PR a "pr.*" slot is drawn on. */
+const onPr = (repo: string, number = 101): PrSlotArg => ({ repo, number, branch: "feat/x", title: "A PR", url: `https://github.com/${repo}/pull/${number}` });
+/** What the PR slots put on a PR: the row's lead, then each fact as "name: value". */
+const prShown = (sl: Slots, pr: PrSlotArg) => String(html`${sl["pr.lead"]!(pr)}${sl["pr.facts"]!(pr).map(([k, v]) => html`${k}: ${v}`)}`);
 
 test("TopoScanner: peak.yaml is read and range.yaml (the old name) is not; broken files are listed with every problem", () => {
   const dir = mkdtempSync(join(tmpdir(), "dovre-topo-peak-"));
@@ -192,22 +164,20 @@ test("TopoScanner: an empty folder is cached too — no rescan inside the TTL, a
 
 test("PR slots: a cataloged repo's PR shows its tier, site and docs; others show nothing", () => {
   const sl = slotsOf(codeDir({ quill: QUILL }));
-  const summary = () => undefined;
-  const card = String(prCard(fakePr("bergaaberg/quill", 42), { org: "bergaaberg", summary, slots: prSlots(sl) }));
-  assert.match(card, /tier: active/);
-  assert.match(card, /Quill/);
-  assert.match(card, /docs%2FPLAN\.md/);
-  assert.match(card, /ARCHITECTURE\.md/);
-  const body = String(prBody(fakePr("bergaaberg/quill", 42), { summary, slots: prSlots(sl) }));
-  assert.match(body, /Topo/);
-  const other = String(prBody(fakePr("bergaaberg/plain", 7), { summary, slots: prSlots(sl) }));
-  assert.doesNotMatch(other, /Topo/);
+  const shown = prShown(sl, onPr("bergaaberg/quill", 42));
+  assert.match(shown, /active/, "the row's lead: its tier");
+  assert.match(shown, /Topo: /);
+  assert.match(shown, /tier: active/);
+  assert.match(shown, /Quill/);
+  assert.match(shown, /docs%2FPLAN\.md/);
+  assert.match(shown, /ARCHITECTURE\.md/);
+  assert.equal(prShown(sl, onPr("bergaaberg/plain", 7)), "");
 });
 
 test("work.new slot: New work lists the cataloged projects", () => {
   const sl = slotsOf(codeDir({ quill: QUILL, harbor: "name: Harbor\ndescription: Laid-back Roman city builder\ntier: active\ndocs:\n  design: docs/DESIGN.md\n" }));
-  const ctx: Ctx = { sortingRepos: [], formRepos: [], operator: "andreasberg", org: "bergaaberg", ghe: "github.com", extra: [sl["work.new"]!({})] };
-  const out = String(entryPage(ctx).body);
+  // What the slot puts on New work, above "What is it?" (the issues pack draws the page around it).
+  const out = String(sl["work.new"]!({}));
   assert.match(out, /Projects/);
   assert.match(out, /Quill/);
   assert.match(out, /Harbor/);
@@ -348,8 +318,6 @@ test("Bino: a line per cataloged repo with its components and docs, capped", () 
   const capped = binoLines(many);
   assert.ok(capped.length <= 1500, `capped at what a pack may say (${capped.length})`);
   assert.match(capped, /and \d+ more cataloged repositories/);
-
-  assert.match(contextOf({ todos: [], apps: [{ name: "Topo", text }] }), /## Topo/);
 });
 
 test("the peak.yaml prompts: draft one from the repo, fix one with every problem and the check", () => {

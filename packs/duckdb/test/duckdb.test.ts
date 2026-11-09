@@ -14,7 +14,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Hono } from "hono";
-import { apiGap } from "dovre/packs/api.ts";
 import { testContext } from "dovre/pack-testing.ts";
 import { createDuckDbPack, duckdbPack } from "../index.ts";
 import {
@@ -67,7 +66,6 @@ function fakeAsker(answers: string[]): Asker & { seen: string[] } {
 }
 
 test("duckdb: manifest adheres to PACK_API and declares settings", () => {
-  assert.equal(apiGap(duckdbPack.manifest.api), null, "runs on this core");
   assert.equal(duckdbPack.manifest.id, "duckdb");
   assert.equal(duckdbPack.manifest.execution, "local-only");
   assert.equal(duckdbPack.manifest.private, true);

@@ -11,27 +11,9 @@ import { test } from "node:test";
 import { assertDoors } from "dovre/pack-testing.ts";
 
 const REACH_INS: Record<string, number> = {
-  "dovre/agents/workdir.ts": 1,
-  "dovre/app.ts": 1,
-  "dovre/forge/pick.ts": 1,
-  "dovre/html.ts": 1,
   "dovre/kept.ts": 2,
   "dovre/owners.ts": 2,
-  "dovre/packs/api.ts": 2,
-  "dovre/packs/core/assistant/bino/context.ts": 1,
-  "dovre/packs/core/issues/compose/work.ts": 1,
-  "dovre/packs/core/todo/index.ts": 1,
-  "dovre/packs/core/todo/store.ts": 1,
-  "dovre/packs/guard.ts": 1,
-  "dovre/packs/ingest.ts": 1,
-  "dovre/packs/registry.ts": 1,
-  "dovre/pages/inline.ts": 1,
-  "dovre/sources/claude.ts": 1,
   "dovre/spawn.ts": 1,
-  "dovre/ui/on.js.ts": 1,
-  "dovre/ui/style.ts": 2,
-  "dovre/when.ts": 1,
-  "dovre/worker.ts": 1,
 };
 
 test("packs import core only through its SDK, but for the reach-ins listed", () => {
