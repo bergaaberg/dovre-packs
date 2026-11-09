@@ -1,7 +1,7 @@
 /** OpenTelemetry pack tests: a fake Prometheus API answers; no real service is touched. */
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { testContext } from "dovre/packs/testing.ts";
+import { testContext } from "dovre/pack-testing.ts";
 import { wantedServices } from "../data.ts";
 import { createOtelPack } from "../index.ts";
 import { otelCard, otelPage, otelProd } from "../view.ts";

@@ -11,7 +11,7 @@ import { CloudInventory, type CloudRead, createTopoPack, drift } from "../index.
 import { claimer, declaresCloudflare } from "../drift.ts";
 import { driftLines, topoPage } from "../view.ts";
 import type { TopoEntry } from "../scan.ts";
-import { HOSTILE as H, assertInert, packApp, testContext } from "dovre/packs/testing.ts";
+import { HOSTILE as H, assertInert, packApp, testContext } from "dovre/pack-testing.ts";
 
 const entry = (repo: string, text: string): TopoEntry => {
   const r = parsePeak(yaml.parse(text));

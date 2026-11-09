@@ -4,7 +4,7 @@
  * never asked. `want(key, prompt)` queues one; a few run at a time.
  */
 import type { D1 } from "dovre/db.ts";
-import type { AiSummary, PackContext } from "dovre/packs/types.ts";
+import type { AiSummary, PackContext } from "dovre/pack.ts";
 import { inFiles } from "dovre/sources/ghe.ts";
 
 export type Summary = AiSummary;

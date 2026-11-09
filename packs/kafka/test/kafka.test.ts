@@ -1,7 +1,7 @@
 /** Kafka Pack (`kafka`) tests: a fake lag endpoint answers. */
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { testContext } from "dovre/packs/testing.ts";
+import { testContext } from "dovre/pack-testing.ts";
 import { type KafkaKept, lagState, LAG_WARN_DEFAULT, parseKafka } from "../data.ts";
 import { createKafkaPack } from "../index.ts";
 import { kafkaCard, kafkaPage } from "../view.ts";

@@ -5,7 +5,7 @@
  * repos and dollars I granted on Settings. The newest turn per issue is kept in memory, with what
  * it said, until Dovre restarts.
  */
-import type { PackAgentRun, PackAgentWhere, PackContext } from "dovre/packs/types.ts";
+import type { PackAgentRun, PackAgentWhere, PackContext } from "dovre/pack.ts";
 import type { LinearIssue } from "./data.ts";
 
 /** The write kind a try lands under (`linear.try` on Settings → Writes). */

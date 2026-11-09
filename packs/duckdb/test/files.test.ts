@@ -11,7 +11,7 @@ import { after, test } from "node:test";
 import { execFileSync } from "node:child_process";
 import { Hono } from "hono";
 import { html } from "hono/html";
-import { testContext } from "dovre/packs/testing.ts";
+import { testContext } from "dovre/pack-testing.ts";
 import { createDuckDbPack } from "../index.ts";
 import { createDuckDbData, type DuckDbRunner, parseSources } from "../data.ts";
 import { cleanRel, columnsOf, columnMetaSql, exportName, fromSql, handoffSql, ident, lit, look, open, orderSql, previewSql, slice, sliceOf, toCsv, whereSql } from "../files.ts";

@@ -10,8 +10,7 @@
  * safeUrl (agentHref does too).
  */
 import { html } from "hono/html";
-import { safeUrl } from "dovre/pages/parts.ts";
-import { type Child, Dot, Empty, Notice, PageHeader, Panel, Tabs, type Tone } from "dovre/ui/kit.ts";
+import { type Child, Dot, Empty, Notice, PageHeader, Panel, safeUrl, Tabs, type Tone } from "dovre/pack.ts";
 import { agentHref, coverPrompt, MAX_ASK, noticedPrompt, storyAskPrompt, storyDebugPrompt } from "./agent.ts";
 import { failedAt, type Noticed, type Pip, usesOf, type Who } from "./board.ts";
 import type { Endpoint } from "./catalog.ts";

@@ -8,7 +8,7 @@
 import { html } from "hono/html";
 import type { Hono } from "hono";
 import type { AppEnv } from "dovre/env.ts";
-import type { PackContext } from "dovre/packs/types.ts";
+import type { PackContext } from "dovre/pack.ts";
 import { previous } from "./compare.ts";
 import { reqOfForm, toCurl } from "./model.ts";
 import { blanksOfForm, fillBlanks } from "./quick.ts";

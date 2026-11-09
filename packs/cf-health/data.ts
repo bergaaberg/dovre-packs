@@ -2,7 +2,7 @@
  * Cloudflare Health Pack (`cf-health`): queries Cloudflare's GraphQL Analytics API
  * (`workersInvocationsAdaptive`) for 24h request & error counts per Worker.
  */
-import type { PackContext } from "dovre/packs/types.ts";
+import type { PackContext } from "dovre/pack.ts";
 
 export type WorkerMetric = {
   script: string;

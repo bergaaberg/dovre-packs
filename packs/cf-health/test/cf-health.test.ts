@@ -1,7 +1,7 @@
 /** Cloudflare Health Pack (`cf-health`) tests: GraphQL parsing, status thresholds, and hostile input escaping. */
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { testContext } from "dovre/packs/testing.ts";
+import { testContext } from "dovre/pack-testing.ts";
 import { createCfHealthPack } from "../index.ts";
 import { cfHealthPage } from "../view.ts";
 

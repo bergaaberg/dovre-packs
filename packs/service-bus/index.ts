@@ -3,7 +3,7 @@
  * and topic subscription, with a DLQ radar (needs, a ring, the pulse's storm or fire).
  * Counts and entity names only, never a message. Works locally and hosted on Cloudflare Workers.
  */
-import { type Pack } from "dovre/packs/types.ts";
+import type { Pack } from "dovre/pack.ts";
 import { parseEndpoint, readServiceBus } from "./data.ts";
 import { serviceBusCard, serviceBusPage } from "./view.ts";
 import { pulseOf, binoOf, needsOf, RING, type ServiceBusKept, watch } from "./watch.ts";
@@ -14,8 +14,8 @@ export function createServiceBusPack(opts: { fetchFn?: typeof fetch; now?: () =>
   return {
     kept: () => kept,
     manifest: {
-      api: "1.6",
-      version: "1.0.1",
+      api: "1.24",
+      version: "1.0.2",
       id: "service-bus",
       name: "Azure Service Bus",
       description: "Queue and subscription backlog and dead-letter queue depth, with a DLQ radar.",

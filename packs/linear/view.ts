@@ -1,10 +1,7 @@
 /** Linear Pack (`linear`) views. */
 import { html } from "hono/html";
-import { type Html, Card, Confirm, Empty, Gauge, Item, KeyValues, List, Notice, PageHeader, Panel, Pill } from "dovre/ui/kit.ts";
-import { markdown } from "dovre/ui/markdown.ts";
-import type { PackAgentCan, PackAgentRun } from "dovre/packs/types.ts";
+import { Card, Confirm, Empty, Gauge, type Html, Item, KeyValues, Link, List, markdown, Notice, type PackAgentCan, type PackAgentRun, PageHeader, Panel, Pill, safeUrl } from "dovre/pack.ts";
 import { LANDS, settled, type Turn } from "./agent.ts";
-import { Link, safeUrl } from "dovre/pages/parts.ts";
 import { type LinearIssue, type LinearKept, PRIORITY } from "./data.ts";
 
 const stateTone = (i: LinearIssue): "ok" | "warn" | "accent" | "neutral" => {

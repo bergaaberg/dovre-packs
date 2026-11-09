@@ -1,7 +1,6 @@
 /** Cloudflare Health Pack (`cf-health`) views: Today card and `/cf-health` page. */
 import { html } from "hono/html";
-import { safeUrl } from "dovre/pages/parts.ts";
-import { Card, Empty, Item, List, Notice, PageHeader, Panel, Pill } from "dovre/ui/kit.ts";
+import { Card, Empty, Item, List, Notice, PageHeader, Panel, Pill, safeUrl } from "dovre/pack.ts";
 import type { CfHealthKept } from "./data.ts";
 
 function renderList(k: CfHealthKept) {

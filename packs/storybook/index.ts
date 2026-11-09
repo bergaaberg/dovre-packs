@@ -17,12 +17,10 @@ import { dirname, join, resolve } from "node:path";
 import { html } from "hono/html";
 import { logAction } from "dovre/actions/deploys.ts";
 import { owns } from "dovre/owners.ts";
-import { safeUrl } from "dovre/pages/parts.ts";
+import { Empty, type Html, Notice, type Pack, type PackContext, type PackForge, PageHeader, Panel, safeUrl } from "dovre/pack.ts";
 import { strictOrigin } from "dovre/strict.ts";
 import { findTool } from "dovre/tools.ts";
-import { Empty, Notice, PageHeader, Panel, type Html } from "dovre/ui/kit.ts";
 import { later, Reading } from "dovre/pages/later.ts";
-import type { Pack, PackContext, PackForge } from "dovre/packs/types.ts";
 import { type Builds, type BuildState, createBuilds } from "./build.ts";
 import { type Book, bookOf, booksOf, frameUrl, openUrl, originOf, parseStories, STORIES, storyId, touched, urlOf, type Changed } from "./model.ts";
 import { buildOrigins, buildServer, frameFrom } from "./serve.ts";
@@ -217,8 +215,8 @@ export function createStorybookPack(d: StorybookDeps = {}): Pack {
   const toBuild = (book: Book, f: FoundAt) => [!book.head ? f.sha : undefined, !book.base ? f.baseSha : undefined].filter((s): s is string => !!s);
   return {
     manifest: {
-      api: "1.21",
-      version: "1.0.1",
+      api: "1.24",
+      version: "1.0.2",
       id: "storybook",
       name: "Storybook",
       description: "A PR's stories before and after, published by CI or built here",

@@ -5,7 +5,7 @@
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { testContext } from "dovre/packs/testing.ts";
+import { testContext } from "dovre/pack-testing.ts";
 import {
   authHeader,
   clearTokenCache,

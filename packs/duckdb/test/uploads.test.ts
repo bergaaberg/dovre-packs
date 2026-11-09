@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { Hono } from "hono";
-import { testContext } from "dovre/packs/testing.ts";
+import { testContext } from "dovre/pack-testing.ts";
 import { createDuckDbPack } from "../index.ts";
 import type { DuckDbRunner } from "../data.ts";
 import { lit } from "../files.ts";

@@ -3,8 +3,7 @@
  * All dynamic strings go through `html` tagged templates and all links through `safeUrl()`.
  */
 import { html } from "hono/html";
-import { safeUrl } from "dovre/pages/parts.ts";
-import { Card, Empty, Item, List, PageHeader, Panel } from "dovre/ui/kit.ts";
+import { Card, Empty, Item, List, PageHeader, Panel, safeUrl } from "dovre/pack.ts";
 import type { Kept } from "./data.ts";
 
 const items = (k: Kept) =>

@@ -15,7 +15,7 @@ import { createDockerPack } from "../index.ts";
 import { dockerRoutes } from "../routes.ts";
 import type { AppEnv } from "dovre/env.ts";
 import { shell } from "dovre/html.ts";
-import { HOSTILE as H, assertInert, assertScoped, packApp } from "dovre/packs/testing.ts";
+import { HOSTILE as H, assertInert, assertScoped, packApp } from "dovre/pack-testing.ts";
 
 /** The pack's routes on their own, in a shell whose frame is `operator`'s. */
 function routesOf(docker: Docker, operator: string) {

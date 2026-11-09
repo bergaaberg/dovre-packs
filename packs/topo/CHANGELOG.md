@@ -1,5 +1,9 @@
 # topo
 
+## 1.1.2 — 2026-11-09
+
+- Imports core through its SDK, `dovre/pack.ts`, in place of core's own files. Needs core API 1.24.
+
 ## 1.1.1 — 2026-11-08
 
 - Tests follow core: New work's page moved into the issues pack (dovre#402), and a proposal's `text` is optional now that one can carry `files` (API 1.17). The pack itself is unchanged.

@@ -1,7 +1,7 @@
 /** Moved: its page from the snapshot, by person, as a timeline, and in the menu and search. */
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { assertInert, HOSTILE, packApp, testSnapshot } from "dovre/packs/testing.ts";
+import { assertInert, HOSTILE, packApp, testSnapshot } from "dovre/pack-testing.ts";
 import type { Move } from "dovre/sources/ghe.ts";
 import { createMovementPack } from "../index.ts";
 

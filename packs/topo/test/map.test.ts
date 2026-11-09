@@ -11,7 +11,7 @@ import { drift } from "../drift.ts";
 import { checkRules } from "../rules.ts";
 import type { TopoEntry } from "../scan.ts";
 import { topoPage } from "../view.ts";
-import { HOSTILE as H, assertInert } from "dovre/packs/testing.ts";
+import { HOSTILE as H, assertInert } from "dovre/pack-testing.ts";
 
 const entry = (repo: string, text: string): TopoEntry => {
   const r = parsePeak(yaml.parse(text));

@@ -5,8 +5,7 @@
  * through safeUrl.
  */
 import { html } from "hono/html";
-import { safeUrl } from "dovre/pages/parts.ts";
-import { Empty, KeyValues, Notice, PageHeader, Panel, Pill, type Child, type Crumb, type Html } from "dovre/ui/kit.ts";
+import { type Child, type Crumb, Empty, type Html, KeyValues, Notice, PageHeader, Panel, Pill, safeUrl } from "dovre/pack.ts";
 import { fileViewName, MAX_SQL, type DuckDbTarget, type FileKind, type Row } from "./data.ts";
 import { DEFAULT_COLS, EXPORT_ROWS, FILTER_LABELS, FILTER_OPS, type Filter, handoffSql, type Look, MAX_ENTRIES, type Opened, PAGE_SIZES, type Slice, type Sort, STATS_ROWS } from "./files.ts";
 import { dbHref, queryForm } from "./view.ts";

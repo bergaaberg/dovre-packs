@@ -1,7 +1,6 @@
 /** Google Cloud Pub/Sub Pack (`pubsub`) views: Today card and the `/pubsub` page. */
 import { html } from "hono/html";
-import { Ago, Link } from "dovre/pages/parts.ts";
-import { Card, Empty, Item, List, Notice, PageHeader, Panel, Pill } from "dovre/ui/kit.ts";
+import { Ago, Card, Empty, Item, Link, List, Notice, PageHeader, Panel, Pill } from "dovre/pack.ts";
 import {
   AGE_BAD_SECS,
   AGE_WARN_SECS,

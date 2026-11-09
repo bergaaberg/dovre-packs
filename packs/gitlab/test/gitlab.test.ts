@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { pickForge } from "dovre/forge/pick.ts";
-import { HOSTILE } from "dovre/packs/testing.ts";
+import { HOSTILE } from "dovre/pack-testing.ts";
 import { GitLabError, checksOf, createGitLab, describeEvent, diffCounts, gitlabForge, hostOf, isBot, jobState, toDeploys, toNote } from "../forge.ts";
 import { createGitlabPack } from "../index.ts";
 

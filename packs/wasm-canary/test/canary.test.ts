@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { assertInert, packApp } from "dovre/packs/testing.ts";
+import { assertInert, packApp } from "dovre/pack-testing.ts";
 import { createWasmCanaryPack, diffWasm } from "../index.ts";
 import { DIFF_GLUE, DIFF_SHA256 } from "../diff.wasm.ts";
 

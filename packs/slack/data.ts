@@ -2,7 +2,7 @@
  * Slack Pack (`slack`): direct mentions in watched channels and saved items, from the Slack Web
  * API. Bounded metadata in memory only — snippet lines, never full bodies or threads.
  */
-import type { PackContext } from "dovre/packs/types.ts";
+import type { PackContext } from "dovre/pack.ts";
 
 /** One message that concerns me: where, who, and its first line (kept short and inert). */
 export type SlackMsg = {

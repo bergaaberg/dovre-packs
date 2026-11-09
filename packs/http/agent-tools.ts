@@ -17,7 +17,7 @@
  * What goes back is what a page shows: statuses, times, the masked URL and what each check got
  * (from masked responses). A secret's value never goes back.
  */
-import type { PackContext, PackTool, ToolCall, ToolResult } from "dovre/packs/types.ts";
+import type { PackContext, PackTool, ToolCall, ToolResult } from "dovre/pack.ts";
 import { agentMayReach } from "./agent.ts";
 import { READS, whoOf, whoRuns } from "./board.ts";
 import { buildCatalog } from "./catalog.ts";

@@ -1,7 +1,7 @@
 /**
  * HTTP & OpenTelemetry Pack (`http-otel`): polls `/healthz` endpoints and OTel collector status.
  */
-import { type Pack } from "dovre/packs/types.ts";
+import type { Pack } from "dovre/pack.ts";
 import { type HttpOtelKept, readHttpOtel } from "./data.ts";
 import { httpOtelCard, httpOtelPage } from "./view.ts";
 
@@ -10,8 +10,8 @@ export function createHttpOtelPack(opts: { fetchFn?: typeof fetch } = {}): Pack 
   return {
     kept: () => kept,
     manifest: {
-      api: "1.6",
-      version: "1.0.1",
+      api: "1.24",
+      version: "1.0.2",
       id: "http-otel",
       name: "HTTP & OpenTelemetry",
       description: "Polls HTTP /healthz endpoints and OpenTelemetry collector health.",

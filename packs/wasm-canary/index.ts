@@ -7,7 +7,7 @@
  */
 import { readFileSync } from "node:fs";
 import { html } from "hono/html";
-import { type Pack } from "dovre/packs/types.ts";
+import type { Pack } from "dovre/pack.ts";
 import { DIFF_GLUE, DIFF_SHA256 } from "./diff.wasm.ts";
 
 /** The module's bytes, from diff.wasm beside this file. Under Node only: the Worker never reads it. */
@@ -69,8 +69,8 @@ const script = `${DIFF_GLUE}
 export function createWasmCanaryPack(): Pack {
   return {
     manifest: {
-      api: "1.6",
-      version: "1.0.0",
+      api: "1.24",
+      version: "1.0.1",
       id: "wasm-canary",
       name: "WASM canary",
       description: "A line diff written in Rust, run as WebAssembly in your browser: proves a pack can ship and run WebAssembly. Nothing typed here is sent anywhere.",

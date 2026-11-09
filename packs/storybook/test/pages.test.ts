@@ -1,7 +1,7 @@
 /** The Storybook pack's pages in the app (dovre#160, #166): hostile input inert, frames only for its origins, building only from Dovre. */
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { HOSTILE as H, assertInert, assertScoped, packApp } from "dovre/packs/testing.ts";
+import { HOSTILE as H, assertInert, assertScoped, packApp } from "dovre/pack-testing.ts";
 import type { BuildState } from "../build.ts";
 import { createStorybookPack } from "../index.ts";
 

@@ -1,7 +1,6 @@
 /** Azure Service Bus Pack (`service-bus`) views: Today card and the `/service-bus` page. */
 import { html } from "hono/html";
-import { Ago, Link } from "dovre/pages/parts.ts";
-import { Card, Empty, Item, List, Notice, PageHeader, Panel, Pill } from "dovre/ui/kit.ts";
+import { Ago, Card, Empty, Item, Link, List, Notice, PageHeader, Panel, Pill } from "dovre/pack.ts";
 import type { Target } from "./data.ts";
 import { BACKLOG_WARN, DLQ_BAD, type ServiceBusKept, type Watched } from "./watch.ts";
 

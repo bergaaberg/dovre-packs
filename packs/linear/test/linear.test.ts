@@ -1,7 +1,7 @@
 /** Linear Pack (`linear`) tests: a fake Linear answers the GraphQL calls. */
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { testContext } from "dovre/packs/testing.ts";
+import { testContext } from "dovre/pack-testing.ts";
 import type { D1 } from "dovre/db.ts";
 import { createLinearPack } from "../index.ts";
 import { linearCard, linearPage } from "../view.ts";

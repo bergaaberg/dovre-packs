@@ -9,7 +9,7 @@
  * few repos at once; a repo it couldn't read is named, not taken for one without a file.
  */
 import { FILES } from "@bergaaberg/peak";
-import type { PackForge } from "dovre/packs/types.ts";
+import type { PackForge } from "dovre/pack.ts";
 import { parseText, type TopoEntry, type TopoProblem, type TopoRepo } from "./scan.ts";
 
 export type ForgeRead = {

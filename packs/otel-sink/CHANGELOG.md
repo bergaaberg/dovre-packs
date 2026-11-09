@@ -1,5 +1,9 @@
 # otel-sink
 
+## 1.1.2 — 2026-11-09
+
+- Imports core through its SDK, `dovre/pack.ts`, in place of core's own files. Needs core API 1.24.
+
 ## 1.1.1 — 2026-11-09
 
 - Its pulse is `pulse` (`PulseFeed`), core's name for it; `avatar` was the old one.

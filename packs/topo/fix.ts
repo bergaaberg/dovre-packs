@@ -13,7 +13,7 @@
 import { Document, isMap, isScalar, isSeq, parseDocument, type YAMLMap, type YAMLSeq } from "yaml";
 import { SCHEMA_URL, SPEC_URL, TIERS } from "@bergaaberg/peak";
 import type { Proposed } from "dovre/actions/propose.ts";
-import type { PackForge } from "dovre/packs/types.ts";
+import type { PackForge } from "dovre/pack.ts";
 import type { CloudWhat } from "./cloud.ts";
 import { CF_NAMES, type Drift } from "./drift.ts";
 import type { TopoEntry, TopoRepo } from "./scan.ts";

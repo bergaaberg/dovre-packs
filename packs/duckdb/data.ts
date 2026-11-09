@@ -5,7 +5,7 @@ import { execFile } from "node:child_process";
 import { existsSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { basename, extname, join } from "node:path";
 import { promisify } from "node:util";
-import type { PackContext } from "dovre/packs/types.ts";
+import type { PackContext } from "dovre/pack.ts";
 
 const execFileAsync = promisify(execFile);
 

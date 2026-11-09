@@ -4,8 +4,7 @@
  * by the pack's routes (index.ts).
  */
 import { html } from "hono/html";
-import { Link, safeUrl } from "dovre/pages/parts.ts";
-import { ConfirmSubmit, type Html, Item, KeyValues, List, Notice, PageHeader, Panel, Pill, Tabs } from "dovre/ui/kit.ts";
+import { ConfirmSubmit, type Html, Item, KeyValues, Link, List, Notice, PageHeader, Panel, Pill, safeUrl, Tabs } from "dovre/pack.ts";
 import { type CreateType, MAX_SUMMARY, nameOf, shown, type Ticket, type TicketErrors, type TicketField, ticketPairs } from "./tickets.ts";
 
 // Form bits, kept here: core's own copies live inside the issues pack.

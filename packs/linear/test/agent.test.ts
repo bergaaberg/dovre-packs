@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Hono } from "hono";
 import type { AppEnv } from "dovre/env.ts";
-import { testContext } from "dovre/packs/testing.ts";
-import type { PackAgent, PackAgentRun, PackContext, PackForge, PackNote } from "dovre/packs/types.ts";
+import { testContext } from "dovre/pack-testing.ts";
+import type { PackAgent, PackAgentRun, PackContext, PackForge, PackNote } from "dovre/pack.ts";
 import { promptFor, settled } from "../agent.ts";
 import { createLinearPack } from "../index.ts";
 
