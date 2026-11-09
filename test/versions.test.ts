@@ -9,8 +9,8 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { apiGap } from "dovre/packs/api.ts";
-import { PACK_API } from "dovre/packs/types.ts";
+import { apiGap } from "dovre/pack-testing.ts";
+import { PACK_API } from "dovre/pack.ts";
 import { bump, changedSince, lastTag, manifestOf, packIds, problemsOf } from "../scripts/versions.ts";
 
 test("every pack is versioned, its changelog current, and changed only with a bump", () => {

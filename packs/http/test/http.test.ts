@@ -14,16 +14,13 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { Hono } from "hono";
 import { html } from "hono/html";
-import { openDb, testContext } from "dovre/pack-testing.ts";
-import { apiGap } from "dovre/packs/api.ts";
+import { assertFragment, assertStyled, openDb, testContext } from "dovre/pack-testing.ts";
 import type { PackContext } from "dovre/pack.ts";
-import { STYLE } from "dovre/ui/style.ts";
 import { readdirSync } from "node:fs";
 import { createHttpPack, httpPack } from "../index.ts";
 import { MAX_RESPONSE } from "../send.ts";
 import { quickStyles } from "../quick-view.ts";
 import { storiesStyles } from "../stories-view.ts";
-import { checkHtml } from "dovre/packs/guard.ts";
 
 const H = `<script>alert(1)</script><img src=x onerror=alert(1)>`;
 const JS_URL = "javascript:alert(1)";
@@ -99,7 +96,6 @@ function inert(page: string) {
 }
 
 test("manifest: PACK_API, local only, private, its settings; off when hosted", () => {
-  assert.equal(apiGap(httpPack.manifest.api), null, "runs on this core");
   assert.equal(httpPack.manifest.id, "http");
   assert.equal(httpPack.manifest.execution, "local-only");
   assert.equal(httpPack.manifest.private, true);
@@ -252,11 +248,7 @@ test("hostile input: response body, headers, status text, URLs, names and file n
 
 test("every class the views use is styled by core's stylesheet or the pack's own", () => {
   const src = ["view.ts", "index.ts", "quick-view.ts", "stories-view.ts", "stories-routes.ts"].map((f) => readFileSync(new URL(`../${f}`, import.meta.url), "utf8")).join("\n");
-  const styled = STYLE + (httpPack.styles ?? "");
-  const missing = new Set<string>();
-  for (const m of src.matchAll(/class="([^"]*)"/g))
-    for (const name of m[1]!.replace(/\$\{[^}]*\}/g, " ").split(/\s+/).filter(Boolean)) if (/^[a-z][a-z0-9-]*$/.test(name) && !new RegExp(`\\.${name}(?![a-z0-9-])`).test(styled)) missing.add(name);
-  assert.deepEqual([...missing], []);
+  assertStyled("http", src, httpPack.styles ?? "");
   // The pack's own rules style only its own classes: none would be dropped as restyling core.
   for (const sel of ((quickStyles + storiesStyles).match(/[^{}]+(?=\{)/g) ?? []).filter((x) => !x.trim().startsWith("@"))) assert.match(sel, /\.http-/, sel);
 });
@@ -728,7 +720,7 @@ test("quick view: the catalog in the sidebar, an endpoint's blanks only, its ref
   assert.match(page, /Gone/);
   assert.match(page, /Run all 2/);
   // Core boxes a pack's page only when its markup is whole.
-  for (const p of [home, page]) assert.equal(checkHtml(p.replace(/^<meta[^>]*>/, "")), undefined);
+  for (const p of [home, page]) assertFragment("p", p.replace(/^<meta[^>]*>/, ""));
 
   const post = await (await m.get(`/http?${qs({ repo: "shop", env: "dev", ep: "POST /orders" })}`)).text();
   assert.match(post, /name="blank\.customer"/);
@@ -753,7 +745,7 @@ test("quick view: a send fills its blanks in as typed, comes back to the view, a
   assert.match(page, /https:\/\/api.example.com\/orders\/ord_42/);
   assert.match(page, /Keep as case/);
   assert.match(page, /name="blank\.id" value="ord_42"/, "the blank starts from what was typed last");
-  assert.equal(checkHtml(page.replace(/^<meta[^>]*>/, "")), undefined);
+  assertFragment("page", page.replace(/^<meta[^>]*>/, ""));
   assert.match(page, /<meta name="u-topics" content="http">/);
   assert.match(page, /data-live id="http-cards"/);
   // The endpoint's dot says it answered.
@@ -1003,7 +995,7 @@ test("stories: the story page sends nothing; one click runs it, values flow, alw
   assert.match(page, /uses order\.id/);
   assert.match(page, /needs your click/);
   assert.match(page, /Run the story/);
-  assert.equal(checkHtml(page.replace(/^<meta[^>]*>/, "")), undefined);
+  assertFragment("page", page.replace(/^<meta[^>]*>/, ""));
 
   const res = await m.post("/http/story/run", { repo: "shop", story: "cancel.story", env: "dev", hash: hashIn(page) });
   assert.equal(res.status, 303);
@@ -1011,7 +1003,7 @@ test("stories: the story page sends nothing; one click runs it, values flow, alw
   assert.match(at, /^\/http\/story\/run\/[0-9a-f-]{36}$/);
   const done = await landed(m.get, at);
   assert.match(done, /It passed: all 4 passed/);
-  assert.equal(checkHtml(done.replace(/^<meta[^>]*>/, "")), undefined);
+  assertFragment("done", done.replace(/^<meta[^>]*>/, ""));
   assert.deepEqual(
     fake.calls.map((c) => `${c.init.method} ${c.url}`),
     ["POST https://api.example.com/customers", "POST https://api.example.com/orders", "POST https://api.example.com/orders/o9/cancel", "DELETE https://api.example.com/customers/c7"],
@@ -1030,7 +1022,7 @@ test("stories: the story page sends nothing; one click runs it, values flow, alw
   const list = await (await m.get("/http/stories?repo=shop")).text();
   assert.match(list, /A customer orders and cancels/);
   assert.match(list, /passed/);
-  assert.equal(checkHtml(list.replace(/^<meta[^>]*>/, "")), undefined);
+  assertFragment("list", list.replace(/^<meta[^>]*>/, ""));
   const again = await (await m.get(`/http/story?${qs({ repo: "shop", story: "cancel.story", env: "dev" })}`)).text();
   assert.match(again, /Earlier runs/);
   assert.match(again, /all 4 passed/);
@@ -1071,11 +1063,11 @@ test("stories: hostile titles, steps, file names and repos come out inert", asyn
   storyRepo(m, `# ${H}\n# ${H}\nstep: ${H}\n  GET {{baseUrl}}/x?q=${encodeURIComponent(H)}\n  expect: header x-y contains ${H}\n`);
   const page = await (await m.get(`/http/story?${qs({ repo: "shop", story: "cancel.story", env: "dev" })}`)).text();
   inert(page);
-  assert.equal(checkHtml(page.replace(/^<meta[^>]*>/, "")), undefined);
+  assertFragment("page", page.replace(/^<meta[^>]*>/, ""));
   const res = await m.post("/http/story/run", { repo: "shop", story: "cancel.story", env: "dev", hash: hashIn(page) });
   const done = await landed(m.get, res.headers.get("location")!);
   inert(done);
-  assert.equal(checkHtml(done.replace(/^<meta[^>]*>/, "")), undefined);
+  assertFragment("done", done.replace(/^<meta[^>]*>/, ""));
   for (const p of [`/http/story?${qs({ repo: H, story: H })}`, `/http/stories?${qs({ repo: JS_URL })}`, `/http/story/run/${encodeURIComponent(H)}`]) {
     const r = await m.get(p);
     inert(await r.text());
@@ -1111,7 +1103,7 @@ test("stories overview: who can run each, Run from the table, pips and the faili
 
   const page = await (await m.get("/http/stories?repo=shop")).text();
   assert.equal(fake.calls.length, 0);
-  assert.equal(checkHtml(page.replace(/^<meta[^>]*>/, "")), undefined);
+  assertFragment("page", page.replace(/^<meta[^>]*>/, ""));
   assert.match(page, /2 stories, 1 setup, 1 case in \.http\//);
   assert.match(page, /<option value="dev" selected>dev<\/option>/);
   assert.match(page, /A customer orders and cancels<\/a><span class="t3">given one customer<\/span>/);
@@ -1287,12 +1279,12 @@ test("stories overview: hostile stories, setups, spec paths, failed checks and q
   writeFileSync(join(m.code, "shop", "openapi.yaml"), JSON.stringify({ openapi: "3.0.0", info: { title: H }, paths: { [`/x/${H}`]: { post: { summary: H } } } }));
   const page = await (await m.get("/http/stories?repo=shop")).text();
   inert(page);
-  assert.equal(checkHtml(page.replace(/^<meta[^>]*>/, "")), undefined);
+  assertFragment("page", page.replace(/^<meta[^>]*>/, ""));
   const res = await m.post("/http/story/run", { repo: "shop", story: "cancel.story", env: "dev", hash: runHash(page, "cancel.story") });
   inert(await landed(m.get, res.headers.get("location")!));
   const after = await (await m.get("/http/stories?repo=shop")).text();
   inert(after);
-  assert.equal(checkHtml(after.replace(/^<meta[^>]*>/, "")), undefined);
+  assertFragment("after", after.replace(/^<meta[^>]*>/, ""));
   for (const p of [`/http/stories?${qs({ repo: "shop", env: H, show: H })}`, `/http/stories?${qs({ repo: H })}`]) inert(await (await m.get(p)).text());
   const ask = await m.get(`/http/stories/ask?${qs({ repo: H, ask: H })}`);
   assert.match(ask.headers.get("location")!, /^\/agents\/new\?prompt=/);

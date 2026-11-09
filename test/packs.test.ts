@@ -6,8 +6,8 @@
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { Pack } from "dovre/packs/types.ts";
-import { assertFragment, assertScoped, testContext } from "dovre/packs/testing.ts";
+import type { Pack } from "dovre/pack.ts";
+import { assertFragment, assertScoped, testContext } from "dovre/pack-testing.ts";
 import * as index from "../index.ts";
 
 // Each `xxxPack` export; the crates and the createXxxPack factories are the same packs or build them.

@@ -1,8 +1,7 @@
 /** The GitLab pack: GitLab's API as Dovre's forge, against a fake GitLab. */
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { pickForge } from "dovre/forge/pick.ts";
-import { HOSTILE } from "dovre/pack-testing.ts";
+import { HOSTILE, testForge } from "dovre/pack-testing.ts";
 import { GitLabError, checksOf, createGitLab, describeEvent, diffCounts, gitlabForge, hostOf, isBot, jobState, toDeploys, toNote } from "../forge.ts";
 import { createGitlabPack } from "../index.ts";
 
@@ -35,12 +34,12 @@ test("the pack brings GitLab as a forge; FORGE=gitlab picks it, and without a to
   const { fetchFn } = fakeGitLab({ "/user": { username: "kari", name: "Kari Nordmann" } });
   const pack = createGitlabPack({ fetchFn });
   assert.equal(pack.forge?.id, "gitlab");
-  const forge = pickForge("gitlab", [pack], () => assert.fail("not GitHub"), { GITLAB_HOST: `https://${HOST}/`, GITLAB_TOKEN: "glpat-test" });
+  const forge = testForge(pack, { GITLAB_HOST: `https://${HOST}/`, GITLAB_TOKEN: "glpat-test" });
   assert.equal(forge.host, HOST);
   assert.deepEqual(forge.can, []);
   assert.deepEqual(await forge.viewer(), { login: "kari", name: "Kari Nordmann" });
 
-  const missing = pickForge("gitlab", [pack], () => assert.fail("not GitHub"), {});
+  const missing = testForge(pack);
   await assert.rejects(missing.prs("kari", "northwind"), /GITLAB_TOKEN isn't set/);
   assert.equal(hostOf(undefined), "gitlab.com");
 });

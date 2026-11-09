@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createAvatar } from "../avatar.ts";
 import { createAvatarPack } from "../index.ts";
-import { activePacks } from "dovre/packs/registry.ts";
 import { needsOf, type Pack, PACK_API, type PackForge } from "dovre/pack.ts";
 import { isoSvg, shade } from "../iso.ts";
 import { signalsFrom } from "../feed.ts";
@@ -12,9 +11,7 @@ import { type Signals, situationKey, situationOf, trySituation } from "../mood.t
 import { createAvatarData, gatherAvatarStats, gatherMerges, nightShareOf, statsFrom, streakOf } from "../stats.ts";
 import { AVATAR_CSS, AVATAR_PAGE_CSS } from "../style.ts";
 import { AVATAR_JS } from "../script.ts";
-import { ON_JS } from "dovre/ui/on.js.ts";
-import { resetWhen, setWhen } from "dovre/when.ts";
-import { assertInert, HOSTILE as H, openDb, packApp, testDeploy as deploy, testPr as pr, testSession as session, testSnapshot as snapshot } from "dovre/pack-testing.ts";
+import { activePacks, assertInert, assertStyled, HOSTILE as H, ON_JS, openDb, packApp, resetWhen, setWhen, testDeploy as deploy, testPr as pr, testSession as session, testSnapshot as snapshot } from "dovre/pack-testing.ts";
 
 const STATS = { prs: 30, reviews: 90, repos: 5, streak: 12, night: 40, langs: ["C#", "TypeScript"] };
 const CALM: Signals = { redBuilds: 0, deploysWaiting: 0, agentsWorking: 0, agentsAsking: 0, reviewsAsked: 0, mergedToday: 0, doing: 0, hour: 11 };
@@ -357,18 +354,8 @@ test("the pack runs hosted too: nothing it needs is this machine's", () => {
 
 test("every class its views use is styled, by its own stylesheet or the core's", async () => {
   const { readFileSync, readdirSync } = await import("node:fs");
-  const { STYLE } = await import("dovre/ui/style.ts");
-  const css = STYLE + AVATAR_PAGE_CSS + AVATAR_CSS;
   const dir = new URL("../", import.meta.url);
-  const missing: string[] = [];
-  for (const f of readdirSync(dir).filter((n: string) => n.endsWith(".ts"))) {
-    for (const m of readFileSync(new URL(f, dir), "utf8").matchAll(/class="([^"]*)"/g)) {
-      for (const name of m[1]!.replace(/\$\{[^}]*\}/g, " ").split(/\s+/).filter(Boolean)) {
-        if (/^[a-z][a-z0-9-]*$/.test(name) && !new RegExp(`\\.${name}(?![a-z0-9-])`).test(css)) missing.push(`${name} (${f})`);
-      }
-    }
-  }
-  assert.deepEqual(missing, []);
+  for (const f of readdirSync(dir).filter((n: string) => n.endsWith(".ts"))) assertStyled(f, readFileSync(new URL(f, dir), "utf8"), AVATAR_PAGE_CSS + AVATAR_CSS);
 });
 
 test("the avatar's script asks /avatar/now only for changes that move it, not while hidden, and one at a time", async () => {
