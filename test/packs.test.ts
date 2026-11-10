@@ -5,9 +5,10 @@
  * silently loses styles. Per-pack behaviour is tested in packs/<name>/test.
  */
 import assert from "node:assert/strict";
+import { join } from "node:path";
 import { test } from "node:test";
 import type { Pack } from "dovre/pack.ts";
-import { assertFragment, assertScoped, assertTables, testContext } from "dovre/pack-testing.ts";
+import { assertApi, assertFragment, assertScoped, assertTables, testContext } from "dovre/pack-testing.ts";
 import * as index from "../index.ts";
 
 // Each `xxxPack` export; the crates and the createXxxPack factories are the same packs or build them.
@@ -51,6 +52,11 @@ test("each write kind and ring kind is declared once", () => {
 for (const { name, pack } of packs) {
   test(`${name}: styles are scoped to its own classes`, () => {
     assertScoped(pack);
+  });
+
+  // dovre#482: "uses ctx.agent (1.23), declares 1.6". The fix is the manifest's api, and a release.
+  test(`${name}: its manifest's api is no older than what it uses`, () => {
+    assertApi(pack, join(import.meta.dirname, "..", "packs", pack.manifest.id));
   });
 
   test(`${name}: the tables its migrations make are named after it`, () => {
