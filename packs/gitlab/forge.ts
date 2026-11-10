@@ -3,8 +3,7 @@
  * onto Dovre's PRs, todos onto notifications, project events onto movement, and blocked deployments
  * onto waiting deploys, issues onto the Issues pack's sets. Read-only: nothing here writes to GitLab.
  */
-import type { Deploy, Forge, Issue, IssueSets, Move, Note, Pr, PrRef } from "dovre/pack.ts";
-import { ownersOf } from "dovre/owners.ts";
+import { type Deploy, type Forge, type Issue, type IssueSets, type Move, type Note, owners as ownersList, type Pr, type PrRef } from "dovre/pack.ts";
 
 export type Fetch = typeof fetch;
 const enc = encodeURIComponent;
@@ -194,7 +193,7 @@ async function loadMr(gl: GitLab, mr: RawMr, slot: ReturnType<typeof limiter>): 
 }
 
 export async function loadPrs(gl: GitLab, login: string, owners: string): Promise<{ mine: Pr[]; review: Pr[] }> {
-  const groups = ownersOf(owners);
+  const groups = ownersList.of(owners);
   const [mine, review] = await Promise.all([
     gl.getAll<RawMr>(`/merge_requests?state=opened&scope=created_by_me&per_page=${PAGE_SIZE}`),
     gl.getAll<RawMr>(`/merge_requests?state=opened&scope=all&reviewer_username=${enc(login)}&per_page=${PAGE_SIZE}`),
@@ -282,7 +281,7 @@ export async function loadMoves(gl: GitLab, owners: string, hours = 24, now = Da
   const after = new Date(since - 86400e3).toISOString().slice(0, 10);
   const out: Move[] = [];
   const slot = limiter(PARALLEL);
-  for (const owner of ownersOf(owners)) {
+  for (const owner of ownersList.of(owners)) {
     const q = `?order_by=last_activity_at&sort=desc&per_page=20&archived=false&last_activity_after=${enc(new Date(since).toISOString())}`;
     const projects = await gl
       .get<RawProject[]>(`/groups/${enc(owner)}/projects${q}&include_subgroups=true`)
@@ -370,7 +369,7 @@ const MAX_CLOSED_BY = 40;
  * In the owners' groups only; newest first.
  */
 export async function loadIssues(gl: GitLab, owners: string, opts: { triage?: string[] } = {}): Promise<IssueSets> {
-  const groups = ownersOf(owners);
+  const groups = ownersList.of(owners);
   const ours = (list: RawIssue[]) => list.filter((i) => i.state === "opened" && inOwners(repoOfUrl(i.web_url), groups));
   const triage = [...new Set(opts.triage ?? [])].filter((r) => REPO_PATH.test(r) && !r.split("/").some((p) => p === "." || p === "..") && inOwners(r, groups));
   const [assigned, authored, todos, ...waiting] = await Promise.all([

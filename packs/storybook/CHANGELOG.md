@@ -1,5 +1,9 @@
 # storybook
 
+## 1.0.6 — 2026-11-10
+
+- Asks the forge whether a repo is one of the owners' (`ctx.forge().owns`), not core's `owns`. Nothing changes in what it does. Needs core API 1.32.
+
 ## 1.0.5 — 2026-11-09
 
 - Takes `strictOrigin`, `later` and `Reading` and core's types from the SDK (`dovre/pack.ts`), not core's internals. Nothing changes in what it does. Needs core API 1.27.
