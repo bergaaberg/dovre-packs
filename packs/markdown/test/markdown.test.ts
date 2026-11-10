@@ -280,7 +280,7 @@ test("markdown: a PR's .md file read rendered at its head commit, through the fo
   const SHA = "c".repeat(40);
   const asked: string[] = [];
   const forge = {
-    id: "github", name: "GitHub", host: "github.com", login: "me", owners: "acme",
+    id: "github", name: "GitHub", host: "github.com", login: "me", owners: "acme", owns: () => true,
     file: async (repo: string, path: string, at?: string) => {
       asked.push(`${repo} ${path} ${at}`);
       if (path === "docs/guide.md") return `# Guide ${HOSTILE}\n\n[next](./next.md#Part-2) · [code](../src/a.ts) · [up](../../../etc/passwd)\n\n![logo](logo.png)\n\n\`\`\`mermaid\ngraph TD; A-->B\n\`\`\`\n`;

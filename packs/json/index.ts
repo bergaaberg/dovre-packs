@@ -97,8 +97,8 @@ export function createJsonPack(opts: { now?: () => number } = {}): Pack {
   const now = opts.now ?? Date.now;
   return {
     manifest: {
-      api: "1.27",
-      version: "1.0.2",
+      api: "2.0",
+      version: "1.0.3",
       id: "json",
       name: "JSON tools",
       description: "Format, validate, browse, query, diff and convert JSON (YAML, TypeScript types, JSON Schema); decode JWTs, base64, URL-encoding and Unix times. Runs in the request; nothing is sent anywhere.",

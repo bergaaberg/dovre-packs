@@ -39,8 +39,8 @@ export function createSummariesPack(deps: { now?: () => number } = {}): Pack {
 
   return {
     manifest: {
-      api: "1.35",
-      version: "1.1.0",
+      api: "2.0",
+      version: "1.1.1",
       id: "summaries",
       name: "AI summaries",
       description: "A short summary on each PR and deploy, from the PR's own text",

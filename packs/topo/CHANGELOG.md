@@ -1,5 +1,9 @@
 # topo
 
+## 1.1.5 — 2026-11-10
+
+- Moved to Pack API 2.0 (dovre#484): needs Dovre with pack contract 2. Nothing changes in what it does.
+
 ## 1.1.4 — 2026-11-09
 
 - Lists checkouts only through `ctx.checkouts()`, without its own fallback into core's internals. Nothing changes on a core that runs it.

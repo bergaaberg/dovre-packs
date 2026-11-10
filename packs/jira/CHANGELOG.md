@@ -1,5 +1,9 @@
 # jira
 
+## 1.2.1 — 2026-11-10
+
+- Moved to Pack API 2.0 (dovre#484): needs Dovre with pack contract 2. Nothing changes in what it does.
+
 ## 1.2.0 — 2026-11-10
 
 - `JIRA_VIA=mcp` goes through core's MCP calls (`ctx.mcp`), not a Claude Code the pack starts itself. **After updating, tick "MCP calls" on Settings → Packs → Jira**: until then the page says so and nothing is read. Each job now counts against the pack's dollars a day there.

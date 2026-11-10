@@ -66,8 +66,8 @@ const js = (body: string) => new Response(body, { headers: { "Content-Type": "te
 export function createCodeReviewPack(): Pack {
   return {
     manifest: {
-      api: "1.24",
-      version: "1.0.1",
+      api: "2.0",
+      version: "1.0.2",
       id: "code-review",
       name: "Code review",
       description: "Diffs read as a reviewer does: highlighting, changes marked by token, whitespace and layout changes folded. Runs in your browser (tree-sitter, as WebAssembly).",

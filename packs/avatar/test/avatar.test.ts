@@ -137,7 +137,7 @@ test("the forge's numbers: streaks skip weekends and allow an empty today, late 
   assert.deepEqual(s, { prs: 12, reviews: 30, repos: 2, streak: 0, night: 33, langs: ["C#", "HCL", "TypeScript", "Shell"] });
 });
 
-const FORGE: PackForge = { id: "github", name: "GitHub", host: "github.com", login: "me", owners: "ACME" };
+const FORGE: PackForge = { id: "github", name: "GitHub", host: "github.com", login: "me", owners: "ACME", owns: () => true };
 
 test("from the forge's work: the numbers it shapes; a forge that doesn't say leaves its starting shape", async () => {
   const at = Date.parse("2026-10-23T10:00:00Z");

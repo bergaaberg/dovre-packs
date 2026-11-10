@@ -41,8 +41,9 @@ export function createAvatarPack(o: AvatarDeps = {}): Pack {
   });
   return {
     manifest: {
-      api: "1.28",
-      version: "1.1.3",
+      api: "2.0",
+      db: "raw",
+      version: "1.1.4",
       id: "avatar",
       name: "Avatar",
       description: "Me in Dovre: a creature shaped by what I do on the forge, in a scene set by how things are",

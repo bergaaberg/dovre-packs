@@ -1,5 +1,9 @@
 # http
 
+## 1.2.1 — 2026-11-10
+
+- Moved to Pack API 2.0 (dovre#484): needs Dovre with pack contract 2. Nothing changes in what it does. Its manifest now says `db: "raw"`, shown on its card: it keeps its own tables in Dovre's database. It fills otel-sink's own place only; core's `span.actions` slot is gone.
+
 ## 1.2.0 — 2026-11-10
 
 - "Open in HTTP client" on a trace's span fills otel-sink's own place (`"otel-sink/span.actions"`, with `uses: ["otel-sink"]`), and what it's handed there is checked before it's read. Needs core API 1.39. It still fills core's `span.actions` slot as well, so an older otel-sink keeps its button; update otel-sink to 1.2.0 with it.

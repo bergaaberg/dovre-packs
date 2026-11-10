@@ -54,7 +54,7 @@ Each pack is released on its own: its manifest has a semver `version`, `packs/<i
 
 ## Pack Architecture & Security Contract
 
-Every pack in this repository names the oldest Pack contract it works with (`api: "1.6"`; core's `PACK_API` in `dovre/packs/types.ts` is `"major.minor"`). A core with that major and at least that minor runs it; an older one shows it as off on the Packs page, saying which API it needs. Every pack:
+Every pack in this repository names the oldest Pack contract it works with (`api: "2.0"`; core's `PACK_API`, from `dovre/pack.ts`, is `"major.minor"`). A core with that major and at least that minor runs it; an older one shows it as off on the Packs page, saying which API it needs. Every pack:
 - **Synchronous reads:** `nav`, `today`, `brief`, `glance`, `bino`, and `routes` read strictly from in-memory state populated by `refresh()`.
 - **Isolated & time-boxed:** A slow or failing upstream never blocks Dovre's Today view or crashes another pack.
 - **Escaped markup & URLs:** All HTML is rendered with Hono's `html` tagged template and every external URL passes through `safeUrl()`. Every pack includes a hostile-input test (`<script>alert(1)</script>` and `javascript:alert(1)`).

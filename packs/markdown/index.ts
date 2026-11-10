@@ -61,8 +61,8 @@ function restOf(path: string, prefix: string): string | null {
 export function createMarkdownPack(): Pack {
   return {
     manifest: {
-      api: "1.27",
-      version: "1.1.2",
+      api: "2.0",
+      version: "1.1.3",
       id: "markdown",
       name: "Markdown",
       description: "GitHub-flavoured Markdown with math, mermaid and Graphviz diagrams: write with a live preview, export or print, and read the docs in your checkouts with their links checked.",

@@ -101,8 +101,8 @@ export function createDuckDbPack(opts: CreateDuckDbPackOpts = {}): Pack & {
     },
 
     manifest: {
-      api: "1.27",
-      version: "1.0.3",
+      api: "2.0",
+      version: "1.0.4",
       id: "duckdb",
       name: "DuckDB",
       description: "Agentic analytics on local DuckDB databases, Parquet, CSV, and JSON lines files.",

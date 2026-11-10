@@ -9,8 +9,8 @@ import { createGitLab, type Fetch, gitlabForge, hostOf } from "./forge.ts";
 export function createGitlabPack(opts: { fetchFn?: Fetch } = {}): Pack {
   return {
     manifest: {
-      api: "1.32",
-      version: "1.0.3",
+      api: "2.0",
+      version: "1.0.4",
       id: "gitlab",
       name: "GitLab",
       description: "GitLab as the forge: merge requests, pipelines, todos, activity and blocked deployments (set FORGE=gitlab).",

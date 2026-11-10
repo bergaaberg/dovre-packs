@@ -55,8 +55,8 @@ export function createDockerPack(make: (ctx: PackContext) => Docker = (ctx) => m
   };
   return {
     manifest: {
-      api: "1.28",
-      version: "2.0.5",
+      api: "2.0",
+      version: "2.0.6",
       id: "docker",
       name: "Docker",
       description: "Containers on Docker Engine: start, stop, logs",

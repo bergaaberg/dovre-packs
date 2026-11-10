@@ -1,5 +1,9 @@
 # docker
 
+## 2.0.6 — 2026-11-10
+
+- Moved to Pack API 2.0 (dovre#484): needs Dovre with pack contract 2. Nothing changes in what it does.
+
 ## 2.0.5 — 2026-11-10
 
 - Needs core API 1.28 (it declared 1.27): Its tests use `testPage`, which core's testing door gained at 1.28, so it says so. Nothing changes in what it does.

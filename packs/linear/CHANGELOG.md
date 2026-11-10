@@ -1,5 +1,9 @@
 # linear
 
+## 1.3.1 — 2026-11-10
+
+- Moved to Pack API 2.0 (dovre#484): needs Dovre with pack contract 2. Nothing changes in what it does.
+
 ## 1.3.0 — 2026-11-10
 
 - Core now tells the pack when one of its agent turns ends, so it no longer checks every 10 seconds on a timer of its own. A turn that ended while Dovre was down rings on the next refresh, not only when its issue's page is opened. Needs core API 1.40.

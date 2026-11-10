@@ -377,7 +377,7 @@ test("otel-sink: an erroring service links to its repo and version, and Investig
 
   const app = new Hono();
   const pageOf: PackContext["page"] = async (_c, o) => new Response(String(await o.body));
-  pack.routes!(app as never, { ...ctx, page: pageOf, forge: () => ({ id: "github", name: "GitHub", host: "github.com", login: "me", owners: "acme" }) });
+  pack.routes!(app as never, { ...ctx, page: pageOf, forge: () => ({ id: "github", name: "GitHub", host: "github.com", login: "me", owners: "acme", owns: () => true }) });
   const tr = await (await app.request(`http://localhost/otel-sink/trace/${TRACE.replace(/.$/, "1")}`)).text();
   assert.match(tr, /Investigate<\/a>/);
   assert.match(tr, /repo=acme%2Fapi/);

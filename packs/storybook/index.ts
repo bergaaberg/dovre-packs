@@ -211,8 +211,8 @@ export function createStorybookPack(d: StorybookDeps = {}): Pack {
   const toBuild = (book: Book, f: FoundAt) => [!book.head ? f.sha : undefined, !book.base ? f.baseSha : undefined].filter((s): s is string => !!s);
   return {
     manifest: {
-      api: "1.32",
-      version: "1.0.6",
+      api: "2.0",
+      version: "1.0.7",
       id: "storybook",
       name: "Storybook",
       description: "A PR's stories before and after, published by CI or built here",

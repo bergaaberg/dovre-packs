@@ -14,8 +14,8 @@ export function createServiceBusPack(opts: { fetchFn?: typeof fetch; now?: () =>
   return {
     kept: () => kept,
     manifest: {
-      api: "1.24",
-      version: "1.0.2",
+      api: "2.0",
+      version: "1.0.3",
       id: "service-bus",
       name: "Azure Service Bus",
       description: "Queue and subscription backlog and dead-letter queue depth, with a DLQ radar.",

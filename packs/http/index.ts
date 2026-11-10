@@ -81,8 +81,9 @@ export function createHttpPack(opts: CreateHttpPackOpts = {}): Pack & { history(
     // The JSON tools' tree and diff classes, for a response body shown as a tree or compared.
     styles: jsonStyles + quickStyles + storiesStyles,
     manifest: {
-      api: "1.39",
-      version: "1.2.0",
+      api: "2.0",
+      db: "raw",
+      version: "1.2.1",
       id: "http",
       name: "HTTP client",
       description: "Send HTTP requests from this machine; saved per repo as .http files, with environments and secrets bound to hosts.",
@@ -116,7 +117,6 @@ export function createHttpPack(opts: CreateHttpPackOpts = {}): Pack & { history(
       "actions.what": ({ kind }) => (kind === "http.send" ? "Sent an HTTP request" : kind === "http.run" ? "Ran HTTP requests as a test (cases or a story)" : kind === "http.agentRun" ? "An agent ran an HTTP story" : kind === "http.save" ? "Saved an HTTP request to a repo" : undefined),
       // otel-sink's own place (API 1.39), and core's old name for it until Pack API 2.0, for an otel-sink copy that still fills that one.
       "otel-sink/span.actions": spanActions,
-      "span.actions": spanActions,
     }),
 
     settings: (ctx) => {
