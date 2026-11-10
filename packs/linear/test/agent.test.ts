@@ -53,8 +53,10 @@ function fakeAgent(o: { ok?: boolean; where?: ("read" | "sandbox")[] } = {}) {
   return { agent, starts, lands, s };
 }
 
-async function setup(o: Parameters<typeof fakeAgent>[0] & { store?: PackContext["store"] } = {}) {
+async function setup(o: Parameters<typeof fakeAgent>[0] & { store?: PackContext["store"]; next?: PackAgentRun } = {}) {
   const f = fakeAgent(o);
+  // What result() says from the first refresh on (a plain refresh asks about open turns).
+  f.s.next = o.next;
   const rings: PackNote[] = [];
   const published: string[][] = [];
   const ctx: PackContext = testContext({
@@ -77,7 +79,7 @@ async function setup(o: Parameters<typeof fakeAgent>[0] & { store?: PackContext[
     return { status: r.status, text: await r.text() };
   };
   const post = (path: string, form: Record<string, string>) => app.request(path, { method: "POST", body: new URLSearchParams(form) });
-  return { ...f, rings, published, pack, get, post, store: ctx.store };
+  return { ...f, rings, published, pack, ctx, get, post, store: ctx.store };
 }
 
 const done = (o: Partial<PackAgentRun> = {}): PackAgentRun => ({ run: "r1", status: "done", where: "read", repo: "acme/shop", cost: 0.12, said: "", ...o });
@@ -140,7 +142,6 @@ test("linear agent: Plan it starts a read turn in an offered repo, then shows th
   assert.equal(k.rings.length, 1, "rung once, when it ended");
   assert.equal(k.rings[0]!.href, "/linear/issue/ENG-7");
   assert.match(k.rings[0]!.title, /Plan for ENG-7 is ready/);
-  k.pack.dispose?.();
 });
 
 test("linear agent: a turn is still there after a restart, picked up where it stood and rung once", async () => {
@@ -149,24 +150,20 @@ test("linear agent: a turn is still there after a restart, picked up where it st
   k.s.next = done({ status: "running" });
   assert.match((await k.get("/linear/issue/ENG-7")).text, /Planning in acme\/shop/);
   assert.deepEqual(await k.store.kv.list("turn/"), ["turn/ENG-7"]);
-  k.pack.dispose?.();
 
   // A new process: the same store, nothing in memory.
-  const again = await setup({ store: k.store });
-  again.s.next = done({ status: "running" });
+  const again = await setup({ store: k.store, next: done({ status: "running" }) });
   assert.match((await again.get("/linear/issue/ENG-7")).text, /Planning in acme\/shop/);
   assert.equal(again.starts.length, 0, "followed, not started again");
   again.s.next = done({ said: "## Plan\n- change `x.ts`" });
   assert.match((await again.get("/linear/issue/ENG-7")).text, /<code>x\.ts<\/code>/);
   assert.equal(again.rings.length, 1);
-  again.pack.dispose?.();
 
   // And once it has ended, a later start draws it without ringing again.
   const later = await setup({ store: k.store });
   assert.match((await later.get("/linear/issue/ENG-7")).text, /<code>x\.ts<\/code>/);
   assert.equal(later.rings.length, 0);
   assert.match((await later.get("/linear/issue/ENG-8")).text, /Plan it/, "an issue with no turn has none");
-  later.pack.dispose?.();
 });
 
 test("linear agent: Try it runs in the sandbox on the large model; its commits land as a draft PR from a Confirm", async () => {
@@ -196,7 +193,59 @@ test("linear agent: Try it runs in the sandbox on the large model; its commits l
   const landed = await k.get("/linear/issue/ENG-7");
   assert.match(landed.text, /href="https:\/\/github\.com\/acme\/shop\/pull\/12"/);
   assert.doesNotMatch(landed.text, /\/land"/);
-  k.pack.dispose?.();
+});
+
+test("linear agent: core says a turn ended (refresh's agent): rung with no page open, Linear not read again, no timer", async () => {
+  const k = await setup();
+  await k.post("/linear/issue/ENG-7/start", { repo: "acme/shop", where: "read" });
+  const before = k.published.length;
+  let asked = 0;
+  k.agent.result = async () => (asked++, undefined);
+
+  // A run that isn't one of its turns changes nothing.
+  await k.pack.refresh!(k.ctx, { agent: done({ run: "other" }) });
+  assert.equal(k.rings.length, 0);
+
+  await k.pack.refresh!(k.ctx, { agent: done({ said: "## Plan\n- change `x.ts`" }) });
+  assert.equal(asked, 0, "what core told is the result; it isn't asked again");
+  assert.equal(k.rings.length, 1);
+  assert.match(k.rings[0]!.title, /Plan for ENG-7 is ready/);
+  assert.deepEqual(k.published.slice(before), [["linear"]], "the turn's region only: no snapshot, Linear wasn't read");
+  assert.match((await k.get("/linear/issue/ENG-7")).text, /<code>x\.ts<\/code>/);
+
+  // Told twice (or a page after it): still one ring.
+  await k.pack.refresh!(k.ctx, { agent: done({ said: "again" }) });
+  assert.equal(k.rings.length, 1);
+  assert.equal(k.pack.dispose, undefined, "nothing of its own to stop");
+});
+
+test("linear agent: a try told before its commits are home waits; a plain refresh settles it", async () => {
+  const k = await setup();
+  await k.post("/linear/issue/ENG-7/start", { repo: "acme/shop", where: "sandbox" });
+  await k.pack.refresh!(k.ctx, { agent: done({ where: "sandbox", said: "Changed x.ts" }) });
+  assert.equal(k.rings.length, 0, "not over until its commits are home");
+
+  k.s.next = done({ where: "sandbox", said: "Changed x.ts", commits: 2 });
+  await k.pack.refresh!(k.ctx);
+  assert.equal(k.rings.length, 1);
+  assert.match(k.rings[0]!.title, /Try at ENG-7 ended: 2 commits/);
+  await k.pack.refresh!(k.ctx);
+  assert.equal(k.rings.length, 1);
+});
+
+test("linear agent: a turn that ended while Dovre was down rings on the first refresh after", async () => {
+  const k = await setup();
+  await k.post("/linear/issue/ENG-7/start", { repo: "acme/shop", where: "read" });
+
+  // A new process on the same store: its first refresh finds the open turn, now ended.
+  const again = await setup({ store: k.store, next: done({ said: "## Plan" }) });
+  assert.equal(again.rings.length, 1);
+  assert.match(again.rings[0]!.title, /Plan for ENG-7 is ready/);
+
+  // Another, told of it by run id with nothing in memory: found in the store, settled, not rung again.
+  const later = await setup({ store: k.store });
+  await later.pack.refresh!(later.ctx, { agent: done({ said: "## Plan" }) });
+  assert.equal(later.rings.length, 0);
 });
 
 test("linear agent: a turn core turns away says why, once; odd keys and plans can't land", async () => {
@@ -218,7 +267,6 @@ test("linear agent: a turn core turns away says why, once; odd keys and plans ca
   // The hostile title is escaped on its page.
   const hostile = await k.get("/linear/issue/ENG-8");
   assert.ok(!hostile.text.includes("<script>") && !hostile.text.includes("<img"));
-  k.pack.dispose?.();
 });
 
 test("linear agent: a try whose commits never come home settles after 45 minutes", () => {

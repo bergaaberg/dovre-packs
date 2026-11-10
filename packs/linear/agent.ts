@@ -3,7 +3,8 @@
  * answers with a plan for an issue. Try it: a sandbox run that does the issue; its commits land as
  * a draft PR from their own Confirm (`linear.try`). Core allows one turn at a time per pack, in the
  * repos and dollars I granted on Settings. The newest turn per issue is kept in memory, with what
- * it said, until Dovre restarts.
+ * it said, in the pack's store. Core says when a turn ends (`refresh`'s `agent`, pack API 1.40,
+ * dovre#479), so nothing here runs on a timer; a plain refresh looks at the open ones too.
  */
 import type { PackAgentRun, PackAgentWhere, PackContext } from "dovre/pack.ts";
 import type { LinearIssue } from "./data.ts";
@@ -54,21 +55,20 @@ const turnKey = (key: string) => `turn/${key}`;
 const KEEP_MS = 30 * 86_400_000;
 const keep = (ctx: PackContext, t: Turn) => ctx.store.kv.set(turnKey(t.key), t, { ttlMs: KEEP_MS }).catch((e) => ctx.log(`turn ${t.key} not kept: ${(e as Error)?.message ?? e}`));
 
-/** The pack's turns: start, follow until settled (then publish and ring), land. */
-export function linearAgent(o: { everyMs?: number; now?: () => number } = {}) {
+/** The pack's turns: start, look when core says one ended (then publish and ring), land. */
+export function linearAgent(o: { now?: () => number } = {}) {
   const now = o.now ?? Date.now;
   const turns = new Map<string, Turn>();
   /** The repo last used per team, offered first next time. */
   const lastRepo = new Map<string, string>();
   /** Why the last start for an issue didn't, shown once on its page. */
   const notes = new Map<string, string>();
-  let timer: ReturnType<typeof setInterval> | undefined;
-  let ctxOf: PackContext | undefined;
 
-  const look = async (ctx: PackContext, t: Turn) => {
+  /** How the turn stands now: `told` is what core just said of it, else it's asked. */
+  const look = async (ctx: PackContext, t: Turn, told?: PackAgentRun) => {
     if (settled(t, now())) return;
-    const r = await ctx.agent.result(t.run).catch(() => undefined);
-    // Another look (the timer, a page) settled it meanwhile: it has rung already.
+    const r = told ?? (await ctx.agent.result(t.run).catch(() => undefined));
+    // Another look (a refresh, a page) settled it meanwhile: it has rung already.
     if (settled(t, now())) return;
     if (r) t.last = r;
     else t.last = { run: t.run, status: "failed", where: t.where, repo: t.repo, cost: t.last?.cost ?? 0, said: "" };
@@ -80,21 +80,20 @@ export function linearAgent(o: { everyMs?: number; now?: () => number } = {}) {
     ctx.ring({ kind: "agent", title, href: `/linear/issue/${t.key}`, tag: t.key });
   };
 
-  const tick = async () => {
-    const ctx = ctxOf;
-    if (!ctx) return;
-    for (const t of turns.values()) await look(ctx, t);
-    if ([...turns.values()].every((t) => settled(t, now())) && timer) {
-      clearInterval(timer);
-      timer = undefined;
-    }
+  /** The turn kept for an issue, from memory or (after a restart; hosted, another isolate) the store. */
+  const load = async (ctx: PackContext, key: string) => {
+    const has = turns.get(key);
+    if (has) return has;
+    const was = await ctx.store.kv.get<Turn>(turnKey(key)).catch(() => undefined);
+    const t = turns.get(key) ?? (was && was.key === key && typeof was.run === "string" ? was : undefined);
+    if (t) turns.set(key, t);
+    return t;
   };
 
-  const follow = (ctx: PackContext) => {
-    ctxOf = ctx;
-    if (timer) return;
-    timer = setInterval(() => void tick(), o.everyMs ?? 10_000);
-    (timer as { unref?: () => void }).unref?.();
+  /** Every kept turn, in memory. */
+  const loadAll = async (ctx: PackContext) => {
+    const keys = await ctx.store.kv.list("turn/").catch(() => [] as string[]);
+    for (const k of keys) await load(ctx, k.slice("turn/".length));
   };
 
   return {
@@ -108,18 +107,23 @@ export function linearAgent(o: { everyMs?: number; now?: () => number } = {}) {
     },
     /** Asks how the issue's turn stands now (a page about to draw it). */
     async fresh(ctx: PackContext, key: string) {
-      let t = turns.get(key);
-      if (!t) {
-        // From before a restart (or, hosted, another isolate): picked up where it stood.
-        const was = await ctx.store.kv.get<Turn>(turnKey(key)).catch(() => undefined);
-        t = turns.get(key) ?? (was && was.key === key && typeof was.run === "string" ? was : undefined);
-        if (t && !turns.has(key)) {
-          turns.set(key, t);
-          if (!settled(t, now())) follow(ctx);
-        }
-      }
+      const t = await load(ctx, key);
       if (t) await look(ctx, t);
       return t;
+    },
+    /** Core says this turn ended (`refresh`'s `agent`): its result is taken as told. */
+    async ended(ctx: PackContext, run: PackAgentRun) {
+      let t = [...turns.values()].find((x) => x.run === run.run);
+      if (!t) {
+        await loadAll(ctx);
+        t = [...turns.values()].find((x) => x.run === run.run);
+      }
+      if (t) await look(ctx, t, run);
+    },
+    /** A plain refresh: every turn still open is asked about (one that ended while Dovre was down). */
+    async open(ctx: PackContext) {
+      await loadAll(ctx);
+      for (const t of turns.values()) await look(ctx, t);
     },
     async start(ctx: PackContext, issue: LinearIssue, text: string, repo: string, where: PackAgentWhere) {
       const ai = ctx.ai();
@@ -131,7 +135,6 @@ export function linearAgent(o: { everyMs?: number; now?: () => number } = {}) {
         turns.set(issue.key, t);
         await keep(ctx, t);
         lastRepo.set(issue.team, repo);
-        follow(ctx);
         ctx.publish(["linear"]);
         return true;
       }
@@ -150,11 +153,6 @@ export function linearAgent(o: { everyMs?: number; now?: () => number } = {}) {
       }
       await keep(ctx, t);
       ctx.publish(["linear"]);
-    },
-    tick,
-    dispose() {
-      if (timer) clearInterval(timer);
-      timer = undefined;
     },
   };
 }
