@@ -57,8 +57,8 @@ export function createLinearPack(
   return {
     kept: () => kept,
     manifest: {
-      api: "1.33",
-      version: "1.2.0",
+      api: "1.40",
+      version: "1.3.0",
       id: "linear",
       name: "Linear",
       description: "Assigned Linear issues, cycle progress, un-triaged team issues and TEAM-123 linking.",
@@ -73,10 +73,12 @@ export function createLinearPack(
       rings: [{ kind: "agent", label: "An agent's plan or try for a Linear issue ended" }],
     },
     writes: [{ kind: LANDS, label: "Open a draft PR from an agent's try at a Linear issue" }],
-    dispose: () => agent.dispose(),
-    async refresh(ctx) {
+    async refresh(ctx, o) {
+      // A turn of the pack's ended: only that, Linear isn't read again for it.
+      if (o?.agent) return agent.ended(ctx, o.agent);
       kept = await read(ctx);
       ctx.publish(["linear", "snapshot"]);
+      await agent.open(ctx).catch((e) => ctx.log(`turns not looked at: ${(e as Error)?.message ?? e}`));
     },
     slots: (ctx) => ({
       "pr.lead": (pr) => {
