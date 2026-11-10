@@ -9,13 +9,11 @@
  * fails keeps the last good answer, which is also kept in the pack's store so a restart has something to draw.
  */
 import { randomUUID } from "node:crypto";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import type { Context } from "hono";
 import { html } from "hono/html";
 import { type ActKind, type AppEnv, type FindItem, type Html, Notice, type Pack, type PackContext } from "dovre/pack.ts";
 import { browseHref, type JiraKept, projectsOf, readJira, siteOf, siteOk, viaOf } from "./data.ts";
-import { type Agent, JiraSetupError, loadViaMcp } from "./mcp.ts";
+import { JiraSetupError, loadViaMcp, MCP_ASK } from "./mcp.ts";
 import { createFiling, type Filed, SCREEN_MS } from "./filing.ts";
 import { draftPrompt, emptyTicket, first, MAX_SUMMARY, nameOf, ticketFields, ticketProjectsOf, ticketValid, validateTicket } from "./tickets.ts";
 import { doneBody, failedBody, formBody, loadingBody, NEW, newHref, noProjectsBody, pickProjectBody, previewBody, problemBody, projectsPanel, workingBody } from "./tickets.view.ts";
@@ -30,30 +28,18 @@ const everyMsOf = (env: Record<string, string | undefined>) => {
   return (Number.isFinite(min) && min >= 2 ? Math.min(min, 240) : 10) * 60_000;
 };
 
-/** The agent as a server runs it: off the main thread, in an empty folder of its own (no CLAUDE.md or project settings to pick up). */
-async function serverAgent(): Promise<Agent> {
-  const [{ runOff }, { mkdirSync }] = await Promise.all([import("dovre/spawn.ts"), import("node:fs")]);
-  const cwd = join(tmpdir(), "dovre-jira");
-  mkdirSync(cwd, { recursive: true });
-  return { run: runOff, cwd };
-}
-
 export function createJiraPack(
   opts: {
     fetchFn?: typeof fetch;
-    /** For tests: the MCP agent (default: claude on the PATH, off the main thread). */
-    agent?: Agent;
     now?: () => number;
   } = {},
 ): Pack & { kept(): JiraKept | undefined } {
   const now = opts.now ?? Date.now;
   let kept: JiraKept | undefined;
-  let agent: Agent | undefined;
   /** When the last MCP job started: the cadence counts from attempts, so a signed-out MCP isn't asked every round. */
   let triedAt = Number.NEGATIVE_INFINITY;
   let force = false;
-  const theAgent = async () => (agent ??= opts.agent ?? (await serverAgent()));
-  const filing = createFiling({ agent: theAgent, fetchFn: opts.fetchFn, now });
+  const filing = createFiling({ fetchFn: opts.fetchFn, now });
   /** Creates started from a preview, by its one-time value: pressing Create twice shows the same one. */
   type Job = { state: "working"; project: string; summary: string } | { state: "done"; key: string; warning?: string } | { state: "failed"; problem: string; again: Parameters<typeof previewBody>[0] };
   const jobs = new Map<string, Job>();
@@ -82,9 +68,8 @@ export function createJiraPack(
     if (!force && now() - triedAt < everyMsOf(ctx.env)) return;
     force = false;
     triedAt = now();
-    agent ??= opts.agent ?? (await serverAgent());
     try {
-      const r = await loadViaMcp(agent, site, projectsOf(ctx.env), ctx.env.JIRA_JQL?.trim() || undefined);
+      const r = await loadViaMcp(ctx.mcp, site, projectsOf(ctx.env), ctx.env.JIRA_JQL?.trim() || undefined);
       ctx.log(`via mcp: ${r.mine.length} mine, ${r.moving.length} moving, $${r.cost.toFixed(4)}`);
       kept = { at: now(), ok: true, site, via: "mcp", mine: r.mine, moving: r.moving };
       // For the next start; one that can't be kept (too big) is still the answer now.
@@ -148,8 +133,8 @@ export function createJiraPack(
   return {
     kept: () => kept,
     manifest: {
-      api: "1.33",
-      version: "1.1.6",
+      api: "1.34",
+      version: "1.2.0",
       id: "jira",
       name: "Jira",
       description: "Jira issues assigned to me, what moved in my projects, ticket keys as links, and filing tickets.",
@@ -158,6 +143,8 @@ export function createJiraPack(
       everyMs: 5 * 60_000,
       // What it files can go on My list too, while the todo pack is on.
       uses: ["todo"],
+      // Only JIRA_VIA=mcp uses it; with rest, nothing needs allowing.
+      ai: { mcp: MCP_ASK },
       settings: [
         { key: "JIRA_SITE", label: "Jira hostname", required: true, help: "e.g. your-org.atlassian.net" },
         { key: "JIRA_VIA", label: "How to reach Jira", help: "rest (an API token), mcp (Claude Code's Atlassian MCP, where tokens are locked down; local only) or off. Unset: rest with a token, else off." },

@@ -10,9 +10,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { assertDoors } from "dovre/pack-testing.ts";
 
-const REACH_INS: Record<string, number> = {
-  "dovre/spawn.ts": 1,
-};
+const REACH_INS: Record<string, number> = {};
 
 test("packs import core only through its SDK, but for the reach-ins listed", () => {
   assertDoors(join(import.meta.dirname, "..", "packs"), REACH_INS);

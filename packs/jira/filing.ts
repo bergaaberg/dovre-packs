@@ -12,7 +12,7 @@
  */
 import type { PackContext } from "dovre/pack.ts";
 import { authOf, createRest, loadScreenRest, siteOf, viaOf } from "./data.ts";
-import { type Agent, createInput, createViaMcp, loadScreenViaMcp } from "./mcp.ts";
+import { createInput, createViaMcp, loadScreenViaMcp } from "./mcp.ts";
 import { type CreateType, first, readTicket, type Screen, summaryOf, type Ticket, type TicketField, ticketFields, ticketPayload, ticketProjectsOf, ticketValid, validateTicket } from "./tickets.ts";
 
 /** How long a create screen is drawn without reading it again. */
@@ -24,7 +24,7 @@ export type Filed = { ok: true; key: string; url: string; warning?: string } | {
 
 const msg = (e: unknown) => String((e as Error)?.message ?? e).slice(0, 300);
 
-export function createFiling(o: { agent: () => Promise<Agent>; fetchFn?: typeof fetch; now?: () => number }) {
+export function createFiling(o: { fetchFn?: typeof fetch; now?: () => number }) {
   const now = o.now ?? Date.now;
   const kept = new Map<string, Kept>();
   const reading = new Map<string, Promise<Screen>>();
@@ -33,7 +33,7 @@ export function createFiling(o: { agent: () => Promise<Agent>; fetchFn?: typeof 
   async function read(ctx: PackContext, project: string): Promise<Screen> {
     const site = siteOf(ctx.env);
     if (viaOf(ctx.env) === "mcp") {
-      const r = await loadScreenViaMcp(await o.agent(), site, project);
+      const r = await loadScreenViaMcp(ctx.mcp, site, project);
       ctx.log(`via mcp: ${project}'s create screen, $${r.cost.toFixed(4)}`);
       return { types: r.types, fields: r.fields };
     }
@@ -110,7 +110,7 @@ export function createFiling(o: { agent: () => Promise<Agent>; fetchFn?: typeof 
     const detail = `${got.type.name} · ${summary}`.slice(0, 300);
     try {
       const payload = ticketPayload(got.ticket, got.fields);
-      const r = viaOf(ctx.env) === "mcp" ? await createViaMcp(await o.agent(), site, createInput(site, payload, got.type.name)) : await createRest({ site, auth: authOf(ctx.env), fetchFn: o.fetchFn ?? fetch }, payload);
+      const r = viaOf(ctx.env) === "mcp" ? await createViaMcp(ctx.mcp, site, createInput(site, payload, got.type.name)) : await createRest({ site, auth: authOf(ctx.env), fetchFn: o.fetchFn ?? fetch }, payload);
       await ctx.logged({ kind: "ticket-create", target: r.key, detail, ok: true });
       if ("cost" in r) ctx.log(`via mcp: created ${r.key}, $${(r.cost as number).toFixed(4)}`);
       const list = opts.myList && summary ? ctx.required("todo", "list") : undefined;

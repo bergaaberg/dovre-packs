@@ -4,14 +4,14 @@ import { test } from "node:test";
 import { testContext } from "dovre/pack-testing.ts";
 import { viaOf } from "../data.ts";
 import { createJiraPack } from "../index.ts";
-import { agentArgs, type Agent, readStream, type RunOff, SEARCH, searches, WRITES } from "../mcp.ts";
+import { CREATE, FIELDS, MCP_ASK, SEARCH, searches, TYPES } from "../mcp.ts";
+import { fakeMcp, setupError } from "./fakemcp.ts";
 import { Pill } from "dovre/pack.ts";
 import { jiraPage, tone } from "../view.ts";
 
 const H = `<script>alert(1)</script><img src=x onerror=alert(1)>`;
 const SITE = "acme.atlassian.net";
 const inert = (out: string) => assert.ok(!out.includes("<script>") && !out.includes("<img") && !out.includes('href="javascript:'), out.slice(0, 300));
-const argOf = (args: string[], flag: string) => args[args.indexOf(flag) + 1] ?? "";
 
 // ── REST ──
 
@@ -65,29 +65,6 @@ test("jira: which way, and when it's on", () => {
 
 // ── Through Claude Code's Atlassian MCP ──
 
-/** A stream as `claude -p --output-format stream-json` writes it: init, the calls and their results, the result. */
-function stream(o: { mcp?: string; calls?: { name: string; input: Record<string, unknown>; result: string; error?: boolean }[]; cost?: number }): string {
-  const lines: unknown[] = [{ type: "system", subtype: "init", mcp_servers: [{ name: "atlassian", status: o.mcp ?? "connected", source: "dynamic" }], tools: [] }];
-  (o.calls ?? []).forEach((c, i) => {
-    lines.push({ type: "assistant", message: { content: [{ type: "tool_use", id: `t${i}`, name: c.name, input: c.input }] } });
-    lines.push({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: `t${i}`, content: [{ type: "text", text: c.result }], is_error: c.error ?? false }] } });
-  });
-  lines.push({ type: "result", subtype: "success", is_error: false, total_cost_usd: o.cost ?? 0.004, result: "done" });
-  return lines.map((l) => JSON.stringify(l)).join("\n") + "\nnot json at all\n";
-}
-
-/** A fake runOff that answers each job, and remembers every one. */
-function fakeAgent(answer: (prompt: string) => string | Error): { agent: Agent; jobs: { args: string[]; prompt: string }[] } {
-  const jobs: { args: string[]; prompt: string }[] = [];
-  const run: RunOff = async (_bin, args, opts) => {
-    jobs.push({ args, prompt: opts.input ?? "" });
-    const a = answer(opts.input ?? "");
-    if (a instanceof Error) throw a;
-    return { code: 0, stdout: a, stderr: "" };
-  };
-  return { agent: { run, cwd: "x" }, jobs };
-}
-
 const node = (key: string, f: Record<string, unknown> = {}) => ({
   key,
   webUrl: "javascript:alert(1)",
@@ -96,34 +73,27 @@ const node = (key: string, f: Record<string, unknown> = {}) => ({
 const found = (...nodes: unknown[]) => JSON.stringify({ issues: { nodes, pageInfo: {} } });
 const mcpEnv = { JIRA_SITE: SITE, JIRA_VIA: "mcp", JIRA_PROJECTS: "JSD,FS,x;DROP" };
 
-test("jira (mcp): a read may call the search only; nothing built in; only the Atlassian MCP; every write tool denied", () => {
-  const args = agentArgs([SEARCH]);
-  assert.equal(argOf(args, "--allowedTools"), SEARCH);
-  assert.equal(argOf(args, "--tools"), "", "no Bash, no files, no web");
-  assert.equal(argOf(args, "--setting-sources"), "");
-  assert.ok(args.includes("--strict-mcp-config") && args.includes("--no-session-persistence") && args.includes("--disable-slash-commands"));
-  assert.deepEqual(Object.keys(JSON.parse(argOf(args, "--mcp-config")).mcpServers), ["atlassian"]);
-  assert.deepEqual(argOf(args, "--disallowedTools").split(","), WRITES);
-  assert.equal(argOf(args, "--model"), "haiku");
+test("jira (mcp): the manifest asks for the Atlassian MCP only, three tools that read, and the create under its write kind", () => {
+  const pack = createJiraPack();
+  assert.deepEqual(pack.manifest.ai, { mcp: MCP_ASK });
+  assert.deepEqual([MCP_ASK.server.name, MCP_ASK.reads, MCP_ASK.writes], ["atlassian", [SEARCH, TYPES, FIELDS], { [CREATE]: "ticket-create" }]);
+  assert.ok(pack.writes!.some((w) => w.kind === "ticket-create"), "the kind is one of its writes, or core leaves the tool out");
 });
 
 test("jira (mcp): both searches in one job; the pack keeps what the tools returned, checked field by field, never the model's words", async () => {
   const q = searches(SITE, ["JSD", "FS", "x;DROP"]);
   assert.match(q.moving!.jql, /^project in \(JSD,FS\) /, "only project keys reach the JQL");
-  const { agent, jobs } = fakeAgent(() =>
-    stream({
-      calls: [
-        { name: SEARCH, input: q.mine, result: found(node("DEV-4"), node("<script>-1"), { key: "DEV-5" }, node("DEV-6", { summary: H, status: { name: H, statusCategory: { key: "javascript:" } } })) },
-        { name: SEARCH, input: q.moving!, result: found(node("JSD-10", { issuetype: undefined, assignee: undefined })) },
-      ],
-    }),
-  );
-  const pack = createJiraPack({ agent });
-  const ctx = testContext({ env: mcpEnv });
+  const { mcp, jobs } = fakeMcp(() => [
+    { tool: SEARCH, input: q.mine, result: found(node("DEV-4"), node("<script>-1"), { key: "DEV-5" }, node("DEV-6", { summary: H, status: { name: H, statusCategory: { key: "javascript:" } } })) },
+    { tool: SEARCH, input: q.moving!, result: found(node("JSD-10", { issuetype: undefined, assignee: undefined })) },
+  ]);
+  const pack = createJiraPack();
+  const ctx = testContext({ env: mcpEnv, mcp });
   await pack.init!(ctx);
   assert.equal(pack.kept()!.setup, "waiting", "before the first answer: asking");
   await pack.refresh!(ctx);
   assert.equal(jobs.length, 1, "one job for both");
+  assert.deepEqual(jobs[0], { write: false, calls: [{ tool: SEARCH, input: q.mine }, { tool: SEARCH, input: q.moving! }] }, "exactly the two searches");
   const k = pack.kept()!;
   assert.deepEqual(k.mine.map((i) => i.key), ["DEV-4", "DEV-6"], "no key, or no summary: dropped");
   assert.equal(k.mine[1]!.category, "new", "an unknown status category isn't passed on");
@@ -136,28 +106,29 @@ test("jira (mcp): both searches in one job; the pack keeps what the tools return
 test("jira (mcp): a changed call, a result that didn't come back whole, or junk is a failure, not empty", async () => {
   const q = searches(SITE, []);
   for (const result of [
-    stream({ calls: [{ name: SEARCH, input: { ...q.mine, jql: "project = HR" }, result: found(node("HR-1")) }] }),
-    stream({ calls: [{ name: SEARCH, input: q.mine, result: "<persisted-output>\nOutput too large (99.3KB)." }] }),
-    stream({ calls: [{ name: SEARCH, input: q.mine, result: '{"error":"x"}', error: true }] }),
+    [{ tool: SEARCH, input: { ...q.mine, jql: "project = HR" }, result: found(node("HR-1")) }],
+    [{ tool: SEARCH, input: q.mine, result: "<persisted-output>\nOutput too large (99.3KB)." }],
+    [{ tool: SEARCH, input: q.mine, result: '{"error":"x"}', error: true }],
+    [],
   ]) {
-    const pack = createJiraPack({ agent: fakeAgent(() => result).agent });
-    const ctx = testContext({ env: { JIRA_SITE: SITE, JIRA_VIA: "mcp" } });
+    const pack = createJiraPack();
+    const ctx = testContext({ env: { JIRA_SITE: SITE, JIRA_VIA: "mcp" }, mcp: fakeMcp(() => result).mcp });
     await pack.init!(ctx);
     await pack.refresh!(ctx);
     assert.deepEqual([pack.kept()!.ok, pack.kept()!.mine.length], [false, 0]);
     assert.match(pack.kept()!.error!, /searchJiraIssuesUsingJql|Output too large/);
   }
-  assert.deepEqual(readStream("garbage\n{]\n").calls, []);
 });
 
-test("jira (mcp): not signed in, or no Claude Code, says how to fix it", async () => {
+test("jira (mcp): not allowed yet, not signed in, or no Claude Code, says how to fix it", async () => {
   const cases = [
-    { answer: () => stream({ mcp: "needs-auth" }), setup: "sign-in", says: /type <code>\/mcp<\/code>, pick <strong>atlassian<\/strong>/ },
-    { answer: () => new Error("spawn claude ENOENT"), setup: "no-claude", says: /Claude Code isn't installed|isn.t installed/ },
+    { mcp: fakeMcp(() => setupError("sign-in", "Claude Code's atlassian MCP is needs-auth.")).mcp, setup: "sign-in", says: /type <code>\/mcp<\/code>, pick <strong>atlassian<\/strong>/ },
+    { mcp: fakeMcp(() => setupError("no-claude", "Claude Code isn't installed here.")).mcp, setup: "no-claude", says: /Claude Code isn't installed|isn.t installed/ },
+    { mcp: fakeMcp(() => [], { allowed: false }).mcp, setup: "allow", says: /href="\/settings\/packs\/jira#ai"/ },
   ];
   for (const c of cases) {
-    const pack = createJiraPack({ agent: fakeAgent(c.answer).agent });
-    const ctx = testContext({ env: { JIRA_SITE: SITE, JIRA_VIA: "mcp" } });
+    const pack = createJiraPack();
+    const ctx = testContext({ env: { JIRA_SITE: SITE, JIRA_VIA: "mcp" }, mcp: c.mcp });
     await pack.init!(ctx);
     await pack.refresh!(ctx);
     assert.equal(pack.kept()!.setup, c.setup);
@@ -172,10 +143,10 @@ test("jira (mcp): once per JIRA_EVERY_MIN, at once on Read now, the last good an
   const clock = { t: 1_000_000 };
   let fail = false;
   const q = searches(SITE, []);
-  const { agent, jobs } = fakeAgent(() => (fail ? stream({ mcp: "failed" }) : stream({ calls: [{ name: SEARCH, input: q.mine, result: found(node(`DEV-${jobs.length}`)) }] })));
+  const { mcp, jobs } = fakeMcp(() => (fail ? new Error("no answer (exit 1)") : [{ tool: SEARCH, input: q.mine, result: found(node(`DEV-${jobs.length}`)) }]));
   const env = { JIRA_SITE: SITE, JIRA_VIA: "mcp", JIRA_EVERY_MIN: "10" };
-  const pack = createJiraPack({ agent, now: () => clock.t });
-  const ctx = testContext({ env });
+  const pack = createJiraPack({ now: () => clock.t });
+  const ctx = testContext({ env, mcp });
   const { store } = ctx;
   await pack.init!(ctx);
   await pack.refresh!(ctx);
@@ -192,21 +163,21 @@ test("jira (mcp): once per JIRA_EVERY_MIN, at once on Read now, the last good an
   assert.equal(jobs.length, 2, "a failure doesn't make it ask every round");
 
   // A restart draws the kept answer at once, before any job.
-  const again = createJiraPack({ agent, now: () => clock.t });
-  await again.init!(testContext({ env, store }));
+  const again = createJiraPack({ now: () => clock.t });
+  await again.init!(testContext({ env, store, mcp }));
   assert.deepEqual([again.kept()!.ok, again.kept()!.mine[0]!.key], [true, "DEV-1"]);
   // Another site's answer isn't drawn.
-  const other = createJiraPack({ agent, now: () => clock.t });
-  await other.init!(testContext({ env: { ...env, JIRA_SITE: "other.atlassian.net" }, store }));
+  const other = createJiraPack({ now: () => clock.t });
+  await other.init!(testContext({ env: { ...env, JIRA_SITE: "other.atlassian.net" }, store, mcp }));
   assert.equal(other.kept()!.setup, "waiting");
 });
 
 test("jira (mcp): Read now asks at once, past the cadence, and goes back to the page", async () => {
   const { Hono } = await import("hono");
   const q = searches(SITE, []);
-  const { agent, jobs } = fakeAgent(() => stream({ calls: [{ name: SEARCH, input: q.mine, result: found(node("DEV-1")) }] }));
-  const pack = createJiraPack({ agent });
-  const ctx = testContext({ env: { JIRA_SITE: SITE, JIRA_VIA: "mcp" } });
+  const { mcp, jobs } = fakeMcp(() => [{ tool: SEARCH, input: q.mine, result: found(node("DEV-1")) }]);
+  const pack = createJiraPack();
+  const ctx = testContext({ env: { JIRA_SITE: SITE, JIRA_VIA: "mcp" }, mcp });
   await pack.init!(ctx);
   await pack.refresh!(ctx);
   await pack.refresh!(ctx);
