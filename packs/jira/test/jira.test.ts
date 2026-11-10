@@ -257,3 +257,53 @@ test("jira pr slots: no data yet draws nothing", async () => {
   assert.equal(lead("feature/plat-42-migration"), "");
   assert.deepEqual(facts("feature/plat-42-migration"), []);
 });
+
+// ── Bino lookups ──
+
+test("jira (rest): lookups read one issue (rich text as plain text, cut) and search summaries; JQL can't be rewritten; none without REST", async () => {
+  const urls: string[] = [];
+  const pack = createJiraPack({
+    fetchFn: async (u) => {
+      const url = String(u);
+      urls.push(url);
+      if (url.includes("/issue/PLAT-404")) return new Response("{}", { status: 404 });
+      if (url.includes("/issue/")) {
+        const doc = (text: string) => ({ type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text }, { type: "mention", attrs: { text: "@Kari" } }, { type: "inlineCard", attrs: { url: "https://secret.example/x" } }] }] });
+        return Response.json({
+          key: "PLAT-42",
+          fields: {
+            summary: "Add D1 migration check",
+            description: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: `Long ${"x".repeat(3000)}` }] }] },
+            status: { name: "In Progress" },
+            issuetype: { name: "Task" },
+            priority: { name: "High" },
+            assignee: { displayName: "Ola" },
+            labels: ["d1"],
+            comment: { comments: [{ author: { displayName: "Kari" }, created: "2026-11-09T10:00:00.000+0100", body: doc("Ping ") }] },
+          },
+        });
+      }
+      return Response.json({ issues: [{ key: "PLAT-7", fields: { summary: "Certs renew", status: { name: "To Do" }, assignee: null } }, { key: "bad key", fields: {} }] });
+    },
+  });
+  assert.deepEqual(pack.lookups!(testContext({ env: { JIRA_SITE: SITE } })), [], "no token, no lookups");
+  assert.deepEqual(pack.lookups!(testContext({ env: { JIRA_SITE: SITE, JIRA_TOKEN: "t", JIRA_VIA: "mcp" } })), [], "not through the MCP");
+  const ctx = testContext({ env: { JIRA_SITE: SITE, JIRA_TOKEN: "tok" } });
+  const [issue, search] = pack.lookups!(ctx);
+  assert.deepEqual([issue!.kind, search!.kind], ["issue", "search"]);
+  const text = await issue!.run({ key: "plat-42" }, ctx);
+  assert.match(text, /^PLAT-42: Add D1 migration check/);
+  assert.match(text, /Status: In Progress, type: Task, priority: High, assignee: Ola, labels: d1\./);
+  assert.match(text, /- Kari \(2026-11-09\): Ping @Kari/);
+  assert.ok(!text.includes("secret.example"), "links in rich text aren't handed over");
+  assert.ok(text.length < 2600, "the description is cut");
+  assert.ok(urls[0]!.startsWith(`https://${SITE}/rest/api/3/issue/PLAT-42?`));
+  // Not a key: Jira isn't asked.
+  assert.match(await issue!.run({ key: "PLAT-1 OR 1=1" }, ctx), /isn't an issue key/);
+  assert.equal(urls.length, 1);
+  assert.match(await issue!.run({ key: "PLAT-404" }, ctx), /no issue PLAT-404/);
+  assert.equal(await search!.run({ q: 'certs" OR project = SECRET' }, ctx), 'Issues with "certs OR project SECRET" in the summary:\n- PLAT-7 [To Do] Certs renew');
+  const jql = decodeURIComponent(new URL(urls.at(-1)!).searchParams.get("jql")!);
+  assert.equal(jql, 'summary ~ "certs OR project SECRET" ORDER BY updated DESC', "the words stay inside one quoted string");
+  assert.match(await search!.run({ q: "!!" }, ctx), /at least two/);
+});

@@ -128,3 +128,26 @@ test("kafka: lagState says which level, and why", () => {
   assert.equal(lagState(kept, { ...g, key: "s/t", totalLag: 3 }, 1000).level, "ok"); // rising, but tiny
   assert.equal(lagState(kept, { ...g, key: "w/t", totalLag: 200 }, 1000).level, "ok"); // wobbling
 });
+
+test("kafka: the lag lookup reads what was kept for a topic or group, worst first, with its samples; nothing is fetched", async () => {
+  let calls = 0;
+  const reading = endpointReading(READING);
+  const pack = createKafkaPack({ fetchFn: (async (...a: Parameters<typeof fetch>) => (calls++, reading(...a))) as typeof fetch });
+  const ctx = testContext({ env: { KAFKA_ADMIN_URL: "https://k.example/lag" } });
+  const [lag] = pack.lookups!(ctx);
+  assert.equal(lag!.kind, "lag");
+  assert.equal(await lag!.run({}, ctx), "Kafka hasn't been read yet.");
+  await pack.refresh!(ctx);
+  await pack.refresh!(ctx);
+  const before = calls;
+  const one = await lag!.run({ name: "ORDERS" }, ctx);
+  assert.match(one, /- orders on orders-v1: lag 50, worst partition 3 of 12; last reads 50 → 50$/);
+  assert.ok(!one.includes("payments"));
+  const dlq = await lag!.run({ name: "dlq" }, ctx);
+  assert.match(dlq, /payments on payments\.dlq \(dead-letter\): lag 7, worst partition 0, bad: dead-letter payments\.dlq is 7 behind/);
+  const all = await lag!.run({ name: "" }, ctx);
+  assert.equal(all.split("\n").filter((l) => l.startsWith("- ")).length, 3, "every pair, worst first");
+  assert.ok(!all.includes("<script>") && !all.includes("<img"), "names are cut of markup as when kept");
+  assert.match(await lag!.run({ name: "nope" }, ctx), /No consumer group or topic has "nope"/);
+  assert.equal(calls, before, "a lookup doesn't fetch");
+});

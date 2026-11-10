@@ -1,7 +1,8 @@
 /**
  * Jira Pack (`jira`): what's assigned to me and not done, what moved lately in the projects I
  * follow, a Today card, Jira in search, ticket keys (`PROJ-123`) as links, and filing tickets in
- * TICKET_PROJECTS (filing.ts): from New work, search ("New ticket in …") and Bino's card.
+ * TICKET_PROJECTS (filing.ts): from New work, search ("New ticket in …") and Bino's card, and Bino
+ * lookups through REST (lookups.ts: an issue by key, a summary search; agents get them as tools too).
  *
  * Two ways to Jira (JIRA_VIA): `rest` with an API token, or `mcp` through Claude Code's Atlassian
  * MCP where tokens are locked down (mcp.ts; local only). A job through the MCP takes ~15 s and a
@@ -13,6 +14,7 @@ import type { Context } from "hono";
 import { html } from "hono/html";
 import { type ActKind, type AppEnv, type FindItem, type Html, Notice, type Pack, type PackContext } from "dovre/pack.ts";
 import { browseHref, type JiraKept, projectsOf, readJira, siteOf, siteOk, viaOf } from "./data.ts";
+import { jiraLookups } from "./lookups.ts";
 import { JiraSetupError, loadViaMcp, MCP_ASK } from "./mcp.ts";
 import { createFiling, type Filed, SCREEN_MS } from "./filing.ts";
 import { draftPrompt, emptyTicket, first, MAX_SUMMARY, nameOf, ticketFields, ticketProjectsOf, ticketValid, validateTicket } from "./tickets.ts";
@@ -134,7 +136,7 @@ export function createJiraPack(
     kept: () => kept,
     manifest: {
       api: "2.0",
-      version: "1.2.1",
+      version: "1.3.0",
       id: "jira",
       name: "Jira",
       description: "Jira issues assigned to me, what moved in my projects, ticket keys as links, and filing tickets.",
@@ -294,6 +296,8 @@ export function createJiraPack(
       for (const i of kept.moving) moved.set(i.project, (moved.get(i.project) ?? 0) + 1);
       return [mine.length ? `Mine in Jira:\n${mine.join("\n")}` : "Nothing in Jira assigned to me.", ...[...moved].map(([p, n]) => `${n} moved in ${p} in 3 days.`), where].filter(Boolean).join("\n");
     },
+    /** An issue in full and a summary search, through REST (a job through the MCP takes longer than a lookup may). */
+    lookups: (ctx) => jiraLookups(ctx.env, opts.fetchFn ?? fetch),
     acts: (ctx) => (ticketProjectsOf(ctx.env).length && !ctx.hosted ? [ticketAct(ctx)] : []),
     slots: (ctx) => ({
       "work.new": () => projectsPanel(ticketProjectsOf(ctx.env)),

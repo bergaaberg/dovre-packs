@@ -1,9 +1,10 @@
 /**
  * Kafka Pack (`kafka`): consumer group lag, dead-letter topics and partition health for Kafka,
  * Redpanda and Confluent clusters, from an HTTP lag endpoint. Metadata only — never a payload.
+ * Bino's `lag` lookup reads what was last kept for a topic or group (agents get it as a tool too).
  */
 import type { Pack, PackNeed, PulseFeed } from "dovre/pack.ts";
-import { type KafkaKept, lagState, lagWarn, readKafka } from "./data.ts";
+import { type KafkaKept, lagLookup, lagState, lagWarn, readKafka } from "./data.ts";
 import { kafkaCard, kafkaPage } from "./view.ts";
 
 export function createKafkaPack(opts: { fetchFn?: typeof fetch } = {}): Pack & { kept(): KafkaKept | undefined } {
@@ -13,7 +14,7 @@ export function createKafkaPack(opts: { fetchFn?: typeof fetch } = {}): Pack & {
     kept: () => kept,
     manifest: {
       api: "2.0",
-      version: "1.0.3",
+      version: "1.1.0",
       id: "kafka",
       name: "Kafka",
       description: "Consumer group lag, dead-letter topics and partition health for Kafka, Redpanda and Confluent (metadata only).",
@@ -103,6 +104,14 @@ export function createKafkaPack(opts: { fetchFn?: typeof fetch } = {}): Pack & {
       }
       return lines.join("\n");
     },
+    lookups: (ctx) => [
+      {
+        kind: "lag",
+        when: "Consumer lag for one topic or group as last read (a minute old at most): each group/topic pair's lag, worst partition and its recent samples. Leave name empty for every pair.",
+        fields: [{ name: "name", about: "a topic or consumer group name, or part of one", max: 200 }],
+        run: (a) => lagLookup(kept, a.name ?? "", lagWarn(ctx.env)),
+      },
+    ],
     glance: () => (kept?.ok ? [{ label: "groups behind", value: kept.groups.filter((g) => g.totalLag > 0).length }] : []),
   };
 }

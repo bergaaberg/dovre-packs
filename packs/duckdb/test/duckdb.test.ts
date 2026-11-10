@@ -604,3 +604,31 @@ test("real duckdb: a database file source can't read other files or the environm
   await assert.rejects(data.query("shop", `SELECT content FROM read_text('${joinPath(root, "secret.txt")}')`), /disabled|Permission/i);
   await assert.rejects(data.query("shop", "SELECT getenv('HOME') AS h"), /disabled|Permission/i);
 });
+
+test("duckdb: the tables lookup gives names and column types only, by source and words; never a row", async () => {
+  const seen: string[] = [];
+  const runner: DuckDbRunner = async (_args, opts) => {
+    seen.push(opts?.input ?? "");
+    return {
+      stdout: JSON.stringify([
+        { s: "main", t: "customers", c: "id", ty: "INTEGER" },
+        { s: "main", t: "customers", c: "email", ty: "VARCHAR" },
+        { s: "sales", t: "orders", c: "customer_id", ty: "INTEGER" },
+        { s: "sales", t: "orders", c: "total", ty: "DECIMAL" },
+      ]),
+      stderr: "",
+      code: 0,
+    };
+  };
+  const pack = createDuckDbPack({ run: runner });
+  const ctx = testContext({ env: { DUCKDB_SOURCES: "shop=:memory:" } });
+  const [tables] = pack.lookups!(ctx);
+  assert.equal(tables!.kind, "tables");
+  const all = await tables!.run({}, ctx);
+  assert.match(all, /^shop \(2 of 2 tables\):\ncustomers\(id INTEGER, email VARCHAR\)\nsales\.orders\(customer_id INTEGER, total DECIMAL\)$/);
+  assert.match(await tables!.run({ find: "TOTAL" }, ctx), /1 of 2 tables\):\nsales\.orders\(/);
+  assert.match(await tables!.run({ find: "nope" }, ctx), /no table or column has "nope"/);
+  assert.match(await tables!.run({ source: "other" }, ctx), /No DuckDB source is called "other"\. Sources: shop\./);
+  assert.ok(seen.every((q) => q.includes("information_schema")), "only the zero-row schema query runs");
+  assert.match(await createDuckDbPack({ run: runner }).lookups!(testContext({ env: {} }))[0]!.run({}, ctx), /No DuckDB sources/);
+});
