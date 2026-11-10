@@ -5,7 +5,7 @@
  */
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -42,8 +42,12 @@ test("release moves Unreleased under the bumped version; tags tags it; the guard
     mkdirSync(join(root, "packs", "foo", "test"), { recursive: true });
     mkdirSync(join(root, "scripts"));
     for (const f of ["versions.ts", "release.ts", "tags.ts"]) writeFileSync(join(root, "scripts", f), readFileSync(join(import.meta.dirname, "..", "scripts", f)));
-    writeFileSync(join(root, "packs", "foo", "index.ts"), `export const fooPack = { manifest: { api: "1.0", version: "1.0.0", id: "foo" } };\n`);
+    writeFileSync(join(root, "packs", "foo", "index.ts"), `export const fooPack = { manifest: { api: "1.6", version: "1.0.0", id: "foo" } };\n`);
     writeFileSync(join(root, "packs", "foo", "CHANGELOG.md"), "# foo\n\n## 1.0.0 — 2026-11-01\n\n- First.\n");
+    // release.ts loads the pack through index.ts and core's check through this repo's node_modules.
+    writeFileSync(join(root, "index.ts"), `export { fooPack } from "./packs/foo/index.ts";\n`);
+    writeFileSync(join(root, ".gitignore"), "node_modules\n");
+    symlinkSync(join(import.meta.dirname, "..", "node_modules"), join(root, "node_modules"));
     sh(root, "git", ["init", "-q", "-b", "main"]);
     sh(root, "git", ["add", "."]);
     sh(root, "git", ["commit", "-qm", "first"]);
@@ -60,6 +64,13 @@ test("release moves Unreleased under the bumped version; tags tags it; the guard
     const early = spawnSync("node", ["scripts/release.ts", "foo", "minor"], { cwd: root, encoding: "utf8" });
     assert.notEqual(early.status, 0);
     assert.match(early.stderr, /no lines under "## Unreleased"/);
+
+    // dovre#482: a pack using something newer than its manifest's api isn't released.
+    writeFileSync(join(root, "packs", "foo", "data.ts"), "export const who = (ctx: { viewer(): string }) => ctx.viewer();\n");
+    const old = spawnSync("node", ["scripts/release.ts", "foo", "minor"], { cwd: root, encoding: "utf8" });
+    assert.notEqual(old.status, 0);
+    assert.match(old.stderr, /declares too old an api: uses ctx\.viewer \(1\.31\), declares 1\.6/);
+    writeFileSync(join(root, "packs", "foo", "data.ts"), "export const x = 1;\n");
 
     writeFileSync(join(root, "packs", "foo", "CHANGELOG.md"), "# foo\n\n## Unreleased\n\n- Adds x.\n\n## 1.0.0 — 2026-11-01\n\n- First.\n");
     assert.match(problemsOf("foo", root).join(), /## Unreleased: run pnpm release foo/);

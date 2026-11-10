@@ -1,5 +1,9 @@
 # docker
 
+## 2.0.5 — 2026-11-10
+
+- Needs core API 1.28 (it declared 1.27): Its tests use `testPage`, which core's testing door gained at 1.28, so it says so. Nothing changes in what it does.
+
 ## 2.0.4 — 2026-11-09
 
 - Takes `strictOrigin` and core's types from the SDK (`dovre/pack.ts`), not core's internals. Nothing changes in what it does. Needs core API 1.27.

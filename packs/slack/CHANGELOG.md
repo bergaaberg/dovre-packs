@@ -1,5 +1,9 @@
 # slack
 
+## 1.1.4 — 2026-11-10
+
+- Needs core API 1.27 (it declared 1.24): It uses the `D1` type, which core's SDK gained at 1.27, so it says so. Nothing changes in what it does.
+
 ## 1.1.3 — 2026-11-09
 
 - Its tests take core's types from the SDK (`dovre/pack.ts`), not core's internals. Nothing changes in what it does.

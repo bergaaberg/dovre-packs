@@ -1,5 +1,9 @@
 # avatar
 
+## 1.1.3 — 2026-11-10
+
+- Needs core API 1.28 (it declared 1.27): Its tests use what core's testing door gained at 1.28 (`assertStyled`, `activePacks`, `ON_JS`, `setWhen`, `resetWhen`), so it says so. Nothing changes in what it does.
+
 ## 1.1.2 — 2026-11-09
 
 - Takes `needsOf`, `hourAt` and `hashOf` and core's types from the SDK (`dovre/pack.ts`), not core's internals. Nothing changes in what it does. Needs core API 1.27.
