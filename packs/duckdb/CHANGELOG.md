@@ -1,5 +1,9 @@
 # duckdb
 
+## 1.1.0 — 2026-11-10
+
+- A Bino lookup (dovre#262): `duckdb.tables` lists a source's tables and their columns with types, or the ones whose names have some words. Names only, never a row, as the pack stays private. Agent turns get it as a tool too. It reads through the same 24-hour schema cache as the query builder.
+
 ## 1.0.4 — 2026-11-10
 
 - Moved to Pack API 2.0 (dovre#484): needs Dovre with pack contract 2. Nothing changes in what it does.

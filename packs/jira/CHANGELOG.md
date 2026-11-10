@@ -1,5 +1,9 @@
 # jira
 
+## 1.3.0 — 2026-11-10
+
+- Bino lookups (dovre#262), with `JIRA_VIA=rest`: `jira.issue` reads one issue by key (status, type, priority, assignee, description and the latest five comments, cut to size), and `jira.search` finds issues by words in their summary (15 at most). Agent turns get them as tools too. Not through the MCP: a job there takes longer than a lookup may.
+
 ## 1.2.1 — 2026-11-10
 
 - Moved to Pack API 2.0 (dovre#484): needs Dovre with pack contract 2. Nothing changes in what it does.

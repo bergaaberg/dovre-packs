@@ -1,6 +1,7 @@
 /**
  * DuckDB Pack (`duckdb`): zero-row schema exploration, AI query builder,
- * manual/agentic execution, opt-in AI result review, and multi-source routing.
+ * manual/agentic execution, opt-in AI result review, and multi-source routing. Bino may look up
+ * the tables and columns (never a row: the pack is private).
  */
 import { existsSync } from "node:fs";
 import { html } from "hono/html";
@@ -23,7 +24,7 @@ import {
 } from "./data.ts";
 import { exportName, look, open, PAGE_SIZES, slice, toCsv } from "./files.ts";
 import { FILES_STYLES, filePage, filesHome, folderPage, notOpenPage, type Remote, sliceParams, viewable } from "./filesview.ts";
-import { createDuckDbSchemas, type DuckDbSchemas, toAutocomplete } from "./schema.ts";
+import { createDuckDbSchemas, type DuckDbSchemas, tablesLookup, toAutocomplete } from "./schema.ts";
 import { cleanName, MAX_UPLOAD, save, uploadsDir, uploadsSource } from "./uploads.ts";
 import {
   type Asker,
@@ -102,7 +103,7 @@ export function createDuckDbPack(opts: CreateDuckDbPackOpts = {}): Pack & {
 
     manifest: {
       api: "2.0",
-      version: "1.0.4",
+      version: "1.1.0",
       id: "duckdb",
       name: "DuckDB",
       description: "Agentic analytics on local DuckDB databases, Parquet, CSV, and JSON lines files.",
@@ -168,6 +169,22 @@ export function createDuckDbPack(opts: CreateDuckDbPackOpts = {}): Pack & {
         .map((x) => `${x.label}: ${x.tablesCount} tables`)
         .join(", ")}).`;
     },
+
+    /** Table and column names only: query results stay off a model, as the pack's `private` says. */
+    lookups: (ctx) => [
+      {
+        kind: "tables",
+        when: "The tables in my DuckDB sources and their columns with types (names only, never a row). Give a source to read just that one, and words to keep the tables whose table or column names have them.",
+        fields: [
+          { name: "source", about: "a source name, or empty for every source", max: 80 },
+          { name: "find", about: "part of a table or column name, or empty for all", max: 80 },
+        ],
+        run: (a) => {
+          const s = cachedData && cachedSchemas ? { data: cachedData, schemas: cachedSchemas } : initServices(ctx.env, ctx);
+          return tablesLookup(s.data, s.schemas, a.source ?? "", a.find ?? "");
+        },
+      },
+    ],
 
     routes(app, ctx) {
       app.get("/duckdb", async (c) => {

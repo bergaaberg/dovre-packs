@@ -214,3 +214,30 @@ export function toAutocomplete(s: Schema): { from: string; at: number; tables: [
     tables: s.tables.map((t) => [t.name, t.cols]),
   };
 }
+
+/**
+ * Bino's `tables` lookup: each source's tables and their columns (names and types, zero rows),
+ * the ones whose table or column names have `find` when it's given, 4000 characters at most.
+ */
+export async function tablesLookup(data: DuckDbData, schemas: DuckDbSchemas, source: string, find: string): Promise<string> {
+  const all = data.sources();
+  if (!all.length) return "No DuckDB sources are configured.";
+  const want = fold(source.trim());
+  const picked = want ? all.filter((t) => fold(t.id) === want || fold(t.label) === want) : all;
+  if (!picked.length) return `No DuckDB source is called "${source.trim().slice(0, 60)}". Sources: ${all.map((t) => t.label).join(", ")}.`;
+  const f = fold(find.trim());
+  const out: string[] = [];
+  for (const t of picked) {
+    let s: Schema;
+    try {
+      s = await schemas.get(t.id);
+    } catch {
+      out.push(`${t.label}: its schema couldn't be read.`);
+      continue;
+    }
+    const hits = f ? s.tables.filter((tb) => fold(tb.name).includes(f) || tb.cols.some(([c]) => fold(c).includes(f))) : s.tables;
+    out.push(hits.length ? `${t.label} (${hits.length} of ${s.tables.length} tables):\n${hits.map(tableLine).join("\n")}` : `${t.label}: no table${f ? ` or column has "${find.trim().slice(0, 60)}"` : "s"}.`);
+  }
+  const text = out.join("\n\n");
+  return text.length > 4000 ? `${text.slice(0, 3990)}\n…(cut)` : text;
+}

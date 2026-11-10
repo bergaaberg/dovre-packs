@@ -132,3 +132,19 @@ export function lagState(kept: KafkaKept, g: GroupLag, warn: number): { level: "
   if (rising && g.totalLag >= warn / 10) return { level: "warn", why: `growing (${last[0]!.lag} → ${g.totalLag}) on ${g.topic}` };
   return { level: "ok", why: "" };
 }
+
+/** Bino's `lag` lookup: the kept pairs whose group or topic has the words (every pair with none), worst first, 30 at most. */
+export function lagLookup(kept: KafkaKept | undefined, name: string, warn: number): string {
+  if (!kept) return "Kafka hasn't been read yet.";
+  if (!kept.ok) return `The last read failed: ${kept.error ?? "no answer"}.`;
+  const q = cut(name, 200).toLowerCase();
+  const hits = kept.groups.filter((g) => !q || g.group.toLowerCase().includes(q) || g.topic.toLowerCase().includes(q)).sort((a, b) => b.totalLag - a.totalLag);
+  if (!hits.length) return `No consumer group or topic has "${q}" in its name (${kept.groups.length} pairs kept).`;
+  const rows = hits.slice(0, 30).map((g) => {
+    const state = lagState(kept, g, warn);
+    const samples = (kept.history.get(g.key) ?? []).map((s) => s.lag);
+    return `- ${g.group} on ${g.topic}${g.dlq ? " (dead-letter)" : ""}: lag ${g.totalLag}, worst partition ${g.maxLagPartition}${g.partitions ? ` of ${g.partitions}` : ""}${state.level !== "ok" ? `, ${state.level}: ${state.why}` : ""}${samples.length > 1 ? `; last reads ${samples.join(" → ")}` : ""}`;
+  });
+  const more = hits.length > 30 ? `\n(${hits.length - 30} more)` : "";
+  return `Read ${new Date(kept.at).toISOString().slice(0, 16).replace("T", " ")} UTC, warn at ${warn}:\n${rows.join("\n")}${more}`;
+}
