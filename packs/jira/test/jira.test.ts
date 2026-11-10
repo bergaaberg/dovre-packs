@@ -1,7 +1,6 @@
 /** Jira Pack (`jira`) tests: REST with a token, or Claude Code's Atlassian MCP where tokens are locked down. */
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { Kept } from "dovre/kept.ts";
 import { testContext } from "dovre/pack-testing.ts";
 import { viaOf } from "../data.ts";
 import { createJiraPack } from "../index.ts";
@@ -95,10 +94,6 @@ const node = (key: string, f: Record<string, unknown> = {}) => ({
   fields: { summary: `Summary of ${key}`, status: { name: "I arbeid", statusCategory: { key: "indeterminate" } }, issuetype: { name: "Story" }, assignee: { displayName: "Kari" }, updated: "2026-10-22T06:00:00.000+0200", ...f },
 });
 const found = (...nodes: unknown[]) => JSON.stringify({ issues: { nodes, pageInfo: {} } });
-const memory = (): Kept & { all: Record<string, { at: number; value: unknown }> } => {
-  const all: Record<string, { at: number; value: unknown }> = {};
-  return { all, get: (k) => all[k], set: (k, v) => void (all[k] = v) };
-};
 const mcpEnv = { JIRA_SITE: SITE, JIRA_VIA: "mcp", JIRA_PROJECTS: "JSD,FS,x;DROP" };
 
 test("jira (mcp): a read may call the search only; nothing built in; only the Atlassian MCP; every write tool denied", () => {
@@ -123,10 +118,9 @@ test("jira (mcp): both searches in one job; the pack keeps what the tools return
       ],
     }),
   );
-  const kept = memory();
-  const pack = createJiraPack({ agent, kept });
+  const pack = createJiraPack({ agent });
   const ctx = testContext({ env: mcpEnv });
-  pack.init!(ctx);
+  await pack.init!(ctx);
   assert.equal(pack.kept()!.setup, "waiting", "before the first answer: asking");
   await pack.refresh!(ctx);
   assert.equal(jobs.length, 1, "one job for both");
@@ -135,7 +129,7 @@ test("jira (mcp): both searches in one job; the pack keeps what the tools return
   assert.equal(k.mine[1]!.category, "new", "an unknown status category isn't passed on");
   assert.equal(k.mine[0]!.url, `https://${SITE}/browse/DEV-4`, "the link is built here, not taken from the result");
   assert.deepEqual([k.moving[0]!.type, k.moving[0]!.assignee], ["", null]);
-  assert.ok(kept.all.jira, "kept for the next start");
+  assert.equal((await ctx.store.kv.get<{ ok: boolean }>("last"))?.ok, true, "kept for the next start");
   inert(String(await jiraPage(k)));
 });
 
@@ -146,9 +140,9 @@ test("jira (mcp): a changed call, a result that didn't come back whole, or junk 
     stream({ calls: [{ name: SEARCH, input: q.mine, result: "<persisted-output>\nOutput too large (99.3KB)." }] }),
     stream({ calls: [{ name: SEARCH, input: q.mine, result: '{"error":"x"}', error: true }] }),
   ]) {
-    const pack = createJiraPack({ agent: fakeAgent(() => result).agent, kept: memory() });
+    const pack = createJiraPack({ agent: fakeAgent(() => result).agent });
     const ctx = testContext({ env: { JIRA_SITE: SITE, JIRA_VIA: "mcp" } });
-    pack.init!(ctx);
+    await pack.init!(ctx);
     await pack.refresh!(ctx);
     assert.deepEqual([pack.kept()!.ok, pack.kept()!.mine.length], [false, 0]);
     assert.match(pack.kept()!.error!, /searchJiraIssuesUsingJql|Output too large/);
@@ -162,15 +156,15 @@ test("jira (mcp): not signed in, or no Claude Code, says how to fix it", async (
     { answer: () => new Error("spawn claude ENOENT"), setup: "no-claude", says: /Claude Code isn't installed|isn.t installed/ },
   ];
   for (const c of cases) {
-    const pack = createJiraPack({ agent: fakeAgent(c.answer).agent, kept: memory() });
+    const pack = createJiraPack({ agent: fakeAgent(c.answer).agent });
     const ctx = testContext({ env: { JIRA_SITE: SITE, JIRA_VIA: "mcp" } });
-    pack.init!(ctx);
+    await pack.init!(ctx);
     await pack.refresh!(ctx);
     assert.equal(pack.kept()!.setup, c.setup);
     assert.match(String(await jiraPage(pack.kept())), c.says);
   }
-  const waiting = createJiraPack({ kept: memory() });
-  waiting.init!(testContext({ env: { JIRA_SITE: SITE, JIRA_VIA: "mcp" } }));
+  const waiting = createJiraPack();
+  await waiting.init!(testContext({ env: { JIRA_SITE: SITE, JIRA_VIA: "mcp" } }));
   assert.match(String(await jiraPage(waiting.kept())), /fills in by itself/);
 });
 
@@ -179,11 +173,11 @@ test("jira (mcp): once per JIRA_EVERY_MIN, at once on Read now, the last good an
   let fail = false;
   const q = searches(SITE, []);
   const { agent, jobs } = fakeAgent(() => (fail ? stream({ mcp: "failed" }) : stream({ calls: [{ name: SEARCH, input: q.mine, result: found(node(`DEV-${jobs.length}`)) }] })));
-  const kept = memory();
   const env = { JIRA_SITE: SITE, JIRA_VIA: "mcp", JIRA_EVERY_MIN: "10" };
-  const pack = createJiraPack({ agent, kept, now: () => clock.t });
+  const pack = createJiraPack({ agent, now: () => clock.t });
   const ctx = testContext({ env });
-  pack.init!(ctx);
+  const { store } = ctx;
+  await pack.init!(ctx);
   await pack.refresh!(ctx);
   clock.t += 60_000;
   await pack.refresh!(ctx);
@@ -198,12 +192,12 @@ test("jira (mcp): once per JIRA_EVERY_MIN, at once on Read now, the last good an
   assert.equal(jobs.length, 2, "a failure doesn't make it ask every round");
 
   // A restart draws the kept answer at once, before any job.
-  const again = createJiraPack({ agent, kept, now: () => clock.t });
-  again.init!(testContext({ env }));
+  const again = createJiraPack({ agent, now: () => clock.t });
+  await again.init!(testContext({ env, store }));
   assert.deepEqual([again.kept()!.ok, again.kept()!.mine[0]!.key], [true, "DEV-1"]);
   // Another site's answer isn't drawn.
-  const other = createJiraPack({ agent, kept, now: () => clock.t });
-  other.init!(testContext({ env: { ...env, JIRA_SITE: "other.atlassian.net" } }));
+  const other = createJiraPack({ agent, now: () => clock.t });
+  await other.init!(testContext({ env: { ...env, JIRA_SITE: "other.atlassian.net" }, store }));
   assert.equal(other.kept()!.setup, "waiting");
 });
 
@@ -211,9 +205,9 @@ test("jira (mcp): Read now asks at once, past the cadence, and goes back to the 
   const { Hono } = await import("hono");
   const q = searches(SITE, []);
   const { agent, jobs } = fakeAgent(() => stream({ calls: [{ name: SEARCH, input: q.mine, result: found(node("DEV-1")) }] }));
-  const pack = createJiraPack({ agent, kept: memory() });
+  const pack = createJiraPack({ agent });
   const ctx = testContext({ env: { JIRA_SITE: SITE, JIRA_VIA: "mcp" } });
-  pack.init!(ctx);
+  await pack.init!(ctx);
   await pack.refresh!(ctx);
   await pack.refresh!(ctx);
   assert.equal(jobs.length, 1);

@@ -49,6 +49,11 @@ export async function reposFor(ctx: PackContext): Promise<string[]> {
   return [...new Set(all.filter((r) => here.has(r.split("/")[1]?.toLowerCase() ?? "")))].sort((a, b) => a.localeCompare(b));
 }
 
+/** A turn in the pack's store (`ctx.store.kv`), so it's still there after a restart; a month. */
+const turnKey = (key: string) => `turn/${key}`;
+const KEEP_MS = 30 * 86_400_000;
+const keep = (ctx: PackContext, t: Turn) => ctx.store.kv.set(turnKey(t.key), t, { ttlMs: KEEP_MS }).catch((e) => ctx.log(`turn ${t.key} not kept: ${(e as Error)?.message ?? e}`));
+
 /** The pack's turns: start, follow until settled (then publish and ring), land. */
 export function linearAgent(o: { everyMs?: number; now?: () => number } = {}) {
   const now = o.now ?? Date.now;
@@ -67,6 +72,7 @@ export function linearAgent(o: { everyMs?: number; now?: () => number } = {}) {
     if (settled(t, now())) return;
     if (r) t.last = r;
     else t.last = { run: t.run, status: "failed", where: t.where, repo: t.repo, cost: t.last?.cost ?? 0, said: "" };
+    await keep(ctx, t);
     if (!settled(t, now())) return;
     ctx.publish(["linear"]);
     const done = t.last.status === "done";
@@ -102,7 +108,16 @@ export function linearAgent(o: { everyMs?: number; now?: () => number } = {}) {
     },
     /** Asks how the issue's turn stands now (a page about to draw it). */
     async fresh(ctx: PackContext, key: string) {
-      const t = turns.get(key);
+      let t = turns.get(key);
+      if (!t) {
+        // From before a restart (or, hosted, another isolate): picked up where it stood.
+        const was = await ctx.store.kv.get<Turn>(turnKey(key)).catch(() => undefined);
+        t = turns.get(key) ?? (was && was.key === key && typeof was.run === "string" ? was : undefined);
+        if (t && !turns.has(key)) {
+          turns.set(key, t);
+          if (!settled(t, now())) follow(ctx);
+        }
+      }
       if (t) await look(ctx, t);
       return t;
     },
@@ -112,7 +127,9 @@ export function linearAgent(o: { everyMs?: number; now?: () => number } = {}) {
       const size = where === "sandbox" && ai.text && ai.size === "any" ? "large" : "small";
       const r = await ctx.agent.start({ repo, where, size, prompt: promptFor(where, repo, issue.key, text) });
       if ("run" in r) {
-        turns.set(issue.key, { key: issue.key, run: r.run, where, repo, at: now() });
+        const t: Turn = { key: issue.key, run: r.run, where, repo, at: now() };
+        turns.set(issue.key, t);
+        await keep(ctx, t);
         lastRepo.set(issue.team, repo);
         follow(ctx);
         ctx.publish(["linear"]);
@@ -131,6 +148,7 @@ export function linearAgent(o: { everyMs?: number; now?: () => number } = {}) {
         t.pr = r;
         t.error = undefined;
       }
+      await keep(ctx, t);
       ctx.publish(["linear"]);
     },
     tick,
