@@ -1,5 +1,9 @@
 # http
 
+## 1.1.5 — 2026-11-10
+
+- `HTTP_SECRETS` is marked as naming the settings it reads (`namesKeys`), so the secrets it fills in count as its own and the Packs page lists them. Nothing changes in what it sends. Needs core API 1.36.
+
 ## 1.1.4 — 2026-11-09
 
 - Takes `strictOrigin` and core's types from the SDK (`dovre/pack.ts`), not core's internals. Nothing changes in what it does. Needs core API 1.27.

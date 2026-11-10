@@ -81,8 +81,8 @@ export function createHttpPack(opts: CreateHttpPackOpts = {}): Pack & { history(
     // The JSON tools' tree and diff classes, for a response body shown as a tree or compared.
     styles: jsonStyles + quickStyles + storiesStyles,
     manifest: {
-      api: "1.27",
-      version: "1.1.4",
+      api: "1.36",
+      version: "1.1.5",
       id: "http",
       name: "HTTP client",
       description: "Send HTTP requests from this machine; saved per repo as .http files, with environments and secrets bound to hosts.",
@@ -90,7 +90,7 @@ export function createHttpPack(opts: CreateHttpPackOpts = {}): Pack & { history(
       execution: "local-only",
       private: true,
       settings: [
-        { key: "HTTP_SECRETS", label: "Secrets and their hosts", help: "NAME@host entries, comma separated (API_TOKEN@api.example.com, LOCAL_KEY@localhost:3000). {{NAME}} is filled from this machine's setting NAME, and only in a request to one of its hosts." },
+        { key: "HTTP_SECRETS", label: "Secrets and their hosts", namesKeys: true, help: "NAME@host entries, comma separated (API_TOKEN@api.example.com, LOCAL_KEY@localhost:3000). {{NAME}} is filled from this machine's setting NAME, and only in a request to one of its hosts." },
         { key: "HTTP_AGENT_HOSTS", label: "Hosts an agent may send to", help: "Agents Dovre starts can send GET and HEAD requests through this client (its send tool), to this machine (localhost) and the hosts listed here (api.staging.example.com, host:port), comma separated. off: agents can't send." },
         { key: "HTTP_ENVS", label: "Environments", help: 'Your own environments, as JSON: {"local": {"baseUrl": "http://localhost:3000"}}. Public values only; a repo adds its own in .http/http-client.env.json.' },
       ],
