@@ -1,5 +1,9 @@
 # summaries
 
+## 1.1.0 — 2026-11-10
+
+- Its table is a migration core runs before the pack starts (`Pack.migrations`), not a `CREATE TABLE` of its own on first use. Nothing moves: a database that has the table keeps it. Needs core API 1.35.
+
 ## 1.0.2 — 2026-11-09
 
 - Takes the summary keys, `throttle` and `inFiles` and core's types from the SDK (`dovre/pack.ts`), not core's internals. Nothing changes in what it does. Needs core API 1.27.

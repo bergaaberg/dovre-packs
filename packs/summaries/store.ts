@@ -17,6 +17,13 @@ export type Summaries = {
   idle(): Promise<void>;
 };
 
+/**
+ * The pack's table, as core runs it before the pack starts (`Pack.migrations`). Append-only: a
+ * change is another entry. Dovre's core made this table when summaries were core's, so the first
+ * one does nothing on a database from then.
+ */
+export const MIGRATIONS = ["CREATE TABLE IF NOT EXISTS summaries (key TEXT PRIMARY KEY, text TEXT, error TEXT, cost REAL, at TEXT NOT NULL)"];
+
 export function createSummaries(db: D1, complete: Complete, opts: { concurrency?: number; onReady?: (key: string) => void } = {}): Summaries {
   const known = new Map<string, Summary>();
   const queue: { key: string; prompt: () => { system: string; user: string } }[] = [];
@@ -60,8 +67,6 @@ export function createSummaries(db: D1, complete: Complete, opts: { concurrency?
       pump();
     },
     async load() {
-      // Dovre's core made this table when summaries were core's; a new database gets it here.
-      await db.prepare("CREATE TABLE IF NOT EXISTS summaries (key TEXT PRIMARY KEY, text TEXT, error TEXT, cost REAL, at TEXT NOT NULL)").run();
       const rows = (await db.prepare("SELECT key, text FROM summaries WHERE text IS NOT NULL").all<{ key: string; text: string }>()).results;
       for (const r of rows) known.set(r.key, { state: "ready", text: r.text });
     },

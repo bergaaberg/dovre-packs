@@ -1,7 +1,7 @@
 /** AI summaries: what it queues from a snapshot, what it keeps, and that it asks nothing until I allow it. */
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { openDb, testContext, testPr, testSnapshot } from "dovre/pack-testing.ts";
+import { openDb, packApp, testContext, testPr, testSnapshot } from "dovre/pack-testing.ts";
 import { type Changelog, deploySummaryKey, type PackAi, type PackContext, prSummaryKey } from "dovre/pack.ts";
 import { createSummaries } from "../store.ts";
 import { createSummariesPack, wantAll } from "../index.ts";
@@ -76,4 +76,13 @@ test("its manifest asks for text only, and says why", () => {
   const m = createSummariesPack().manifest;
   assert.match(m.ai?.text?.why ?? "", /summary of each open PR/);
   assert.equal(m.execution, "local-only");
+});
+
+test("a database without its table gets it from the pack's migration, before the pack starts", async () => {
+  const { db, ready } = packApp([createSummariesPack()]);
+  // Core's own migrations made the table (summaries were core's once): a database from after that has none.
+  db.raw.exec("DROP TABLE summaries");
+  await ready;
+  assert.deepEqual((await db.DB.prepare("SELECT key FROM summaries").all()).results, []);
+  assert.deepEqual((await db.DB.prepare("SELECT name FROM _migrations WHERE name = 'pack:summaries:1'").all()).results.length, 1);
 });

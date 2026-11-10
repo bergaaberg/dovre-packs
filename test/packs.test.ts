@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Pack } from "dovre/pack.ts";
-import { assertFragment, assertScoped, testContext } from "dovre/pack-testing.ts";
+import { assertFragment, assertScoped, assertTables, testContext } from "dovre/pack-testing.ts";
 import * as index from "../index.ts";
 
 // Each `xxxPack` export; the crates and the createXxxPack factories are the same packs or build them.
@@ -51,6 +51,10 @@ test("each write kind and ring kind is declared once", () => {
 for (const { name, pack } of packs) {
   test(`${name}: styles are scoped to its own classes`, () => {
     assertScoped(pack);
+  });
+
+  test(`${name}: the tables its migrations make are named after it`, () => {
+    assertTables(pack);
   });
 
   test(`${name}: Today cards that render without its app are markup core accepts`, async (t) => {

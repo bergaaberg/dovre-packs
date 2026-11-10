@@ -6,7 +6,7 @@
  * key; core draws the text. Local only. It left Dovre's core in dovre#466.
  */
 import { deploySummaryKey, type Pack, type PackContext, prSummaryKey, type Snapshot, throttle } from "dovre/pack.ts";
-import { createSummaries, deployPrompt, prPrompt, type Summaries } from "./store.ts";
+import { createSummaries, deployPrompt, MIGRATIONS, prPrompt, type Summaries } from "./store.ts";
 
 /** Queues a summary for every open PR at its head commit and every deploy that ships something. */
 export function wantAll(sum: Summaries, s: Snapshot, now: number): void {
@@ -39,8 +39,8 @@ export function createSummariesPack(deps: { now?: () => number } = {}): Pack {
 
   return {
     manifest: {
-      api: "1.27",
-      version: "1.0.2",
+      api: "1.35",
+      version: "1.1.0",
       id: "summaries",
       name: "AI summaries",
       description: "A short summary on each PR and deploy, from the PR's own text",
@@ -50,6 +50,7 @@ export function createSummariesPack(deps: { now?: () => number } = {}): Pack {
       // Picks up a new gather's PRs and deploys within half a minute; what's queued already is skipped.
       everyMs: 30_000,
     },
+    migrations: MIGRATIONS,
     refresh: async (ctx) => {
       // Nothing is asked until I allow it (Settings → Packs → AI summaries); what's kept still shows.
       const got = await ready(ctx);
