@@ -14,7 +14,6 @@
  * server's.
  */
 import { html } from "hono/html";
-import { owns } from "dovre/owners.ts";
 import { Empty, type Html, later, Notice, type Pack, type PackContext, type PackForge, PageHeader, Panel, Reading, safeUrl, strictOrigin } from "dovre/pack.ts";
 import { type Builds, type BuildState, createBuilds, runWith } from "./build.ts";
 import { type Book, bookOf, booksOf, frameUrl, openUrl, originOf, parseStories, STORIES, storyId, touched, urlOf, type Changed } from "./model.ts";
@@ -200,7 +199,7 @@ export function createStorybookPack(d: StorybookDeps = {}): Pack {
   const bookFor = (ctx: PackContext, repo: string): Book | undefined => {
     const book = bookOf(books(ctx.env), repo);
     const forge = ctx.forge();
-    return book && forge && owns(forge.owners, repo.split("/")[0]!) ? book : undefined;
+    return book && forge?.owns?.(repo) ? book : undefined;
   };
   /** The PR's stories, within the page's budget ("reading" past it); `wait`: the whole read. */
   const found = async (forge: PackForge, book: Book, n: number, o: { wait?: boolean } = {}): Promise<FoundAt | "reading"> => {
@@ -212,8 +211,8 @@ export function createStorybookPack(d: StorybookDeps = {}): Pack {
   const toBuild = (book: Book, f: FoundAt) => [!book.head ? f.sha : undefined, !book.base ? f.baseSha : undefined].filter((s): s is string => !!s);
   return {
     manifest: {
-      api: "1.27",
-      version: "1.0.5",
+      api: "1.32",
+      version: "1.0.6",
       id: "storybook",
       name: "Storybook",
       description: "A PR's stories before and after, published by CI or built here",
