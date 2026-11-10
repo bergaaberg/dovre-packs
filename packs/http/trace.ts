@@ -1,12 +1,12 @@
 /**
- * An HTTP span from a trace (otel-sink's waterfall, through core's "span.actions" slot) as a
+ * An HTTP span from a trace (otel-sink's waterfall, its place "otel-sink/span.actions") as a
  * request in the editor, so a failing call can be tried again by hand. Only what the trace kept:
  * the method, the route, and a full URL if `url.full` / `http.url` was allowlisted (already
  * without its query). No headers or body were kept, so none come back. Nothing is sent: the
  * button posts to /http/open, which only fills the editor.
  */
 import { html } from "hono/html";
-import type { Html, SpanSlotArg } from "dovre/pack.ts";
+import type { Html } from "dovre/pack.ts";
 import { blankReq, MAX_URL, METHODS, type Req } from "./model.ts";
 import { varName } from "./openapi.ts";
 import { formFields, noWhere } from "./view.ts";
@@ -23,8 +23,21 @@ export function routeVars(route: string): string {
     .replace(/(^|\/)\*{1,2}(?=\/|$)/g, "$1{{path}}");
 }
 
+/** What this reads of the span otel-sink hands over. */
+export type Span = { service: string; method: string; route: string; attrs: Record<string, unknown> };
+
+/** The span in what another pack handed over (plain data, not ours): its strings, or undefined when it isn't that shape. */
+export function spanOf(a: unknown): Span | undefined {
+  if (!a || typeof a !== "object" || Array.isArray(a)) return undefined;
+  const { service, method, route, attrs } = a as Record<string, unknown>;
+  if (typeof service !== "string" || typeof method !== "string" || typeof route !== "string") return undefined;
+  return { service, method, route, attrs: attrs && typeof attrs === "object" && !Array.isArray(attrs) ? (attrs as Record<string, unknown>) : {} };
+}
+
 /** The request a span stands for, or undefined when it kept too little to say (no method, or no path). */
-export function reqOfSpan(s: SpanSlotArg): Req | undefined {
+export function reqOfSpan(a: unknown): Req | undefined {
+  const s = spanOf(a);
+  if (!s) return undefined;
   const method = s.method.toUpperCase();
   if (!(METHODS as readonly string[]).includes(method)) return undefined;
   const text = (k: string) => (typeof s.attrs[k] === "string" ? (s.attrs[k] as string).trim() : "");
@@ -36,8 +49,8 @@ export function reqOfSpan(s: SpanSlotArg): Req | undefined {
 }
 
 /** The slot's button: the span's request into the editor, with a note that it came from a trace. */
-export function spanActions(s: SpanSlotArg): Html | "" {
-  const r = reqOfSpan(s);
+export function spanActions(a: unknown): Html | "" {
+  const r = reqOfSpan(a);
   if (!r) return "";
   return html`<form method="post" action="/http/open" class="inline">${Object.entries(formFields(r, noWhere())).map(([k, v]) => html`<input type="hidden" name="${k}" value="${v}">`)}<input type="hidden" name="from" value="trace"><button type="submit">Open in HTTP client</button></form>`;
 }

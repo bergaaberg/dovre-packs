@@ -1,5 +1,9 @@
 # otel-sink
 
+## 1.2.0 — 2026-11-10
+
+- The buttons beside an HTTP span are this pack's own place now (`hosts`: `span.actions`, filled by other packs as `"otel-sink/span.actions"`), not core's `span.actions` slot. Needs core API 1.39. Update `http` with it (1.2.0): an older `http` only fills core's slot, so its "Open in HTTP client" button is gone from a trace until it's updated too.
+
 ## 1.1.4 — 2026-11-10
 
 - Needs core API 1.28 (it declared 1.24): It uses the `D1` types (1.27) and its tests `openDb`, `createWorker` and `ingestToken` (1.27, 1.28), so it says so. Nothing changes in what it does.

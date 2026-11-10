@@ -48,14 +48,15 @@ export function createOtelSinkPack(opts: { now?: () => number } = {}): Pack & { 
   return {
     kept: () => kept,
     manifest: {
-      api: "1.28",
-      version: "1.1.4",
+      api: "1.39",
+      version: "1.2.0",
       id: ID,
       name: "OTel sink",
       description: "Receives OTLP/HTTP (traces, metrics, logs) straight from your apps: RED per service, errors with their trace, a waterfall, a log tail.",
       domain: "general",
       execution: "any",
       everyMs: 60_000,
+      hosts: [{ name: "span.actions", about: "Beside an HTTP span on a trace's page: what was kept of it (service, kind, method, route, kept attributes), never a header or a body" }],
       rings: [{ kind: "erroring", label: "A service starts erroring", hint: "Its share of failed requests over 15 minutes crosses 1% (or 5%)" }],
       settings: [
         { key: "OTEL_SINK_SERVICES", label: "Repos for services", help: 'Service names mapped to repos, "api=owner/api,web=owner/web": the version each reports shows beside its repo on /deploys' },
@@ -132,7 +133,7 @@ export function createOtelSinkPack(opts: { now?: () => number } = {}): Pack & { 
         try {
           await ensureSchema(ctx.db);
           const [spans, logs] = await Promise.all([readTrace(ctx.db, id), readLogs(ctx.db, { trace: id }, 100)]);
-          return ctx.page(c, { title: `Trace ${id.slice(0, 12)}`, current: `/${ID}`, body: tracePage(id, spans, logs, (a) => ctx.fill("span.actions", a), (service) => {
+          return ctx.page(c, { title: `Trace ${id.slice(0, 12)}`, current: `/${ID}`, body: tracePage(id, spans, logs, (a) => ctx.fillOwn("span.actions", a), (service) => {
             const s = kept?.ok ? kept.services.find((x) => x.name === service) : undefined;
             return { repo: s?.repo ?? repoMap(ctx.env.OTEL_SINK_SERVICES).get(service), version: s?.version };
           }) });

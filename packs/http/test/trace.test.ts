@@ -1,10 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { SpanSlotArg } from "dovre/pack.ts";
-import { reqOfSpan, routeVars, spanActions } from "../trace.ts";
+import { reqOfSpan, routeVars, type Span, spanActions } from "../trace.ts";
 
 const H = `<script>alert(1)</script><img src=x onerror=alert(1)>`;
-const span = (o: Partial<SpanSlotArg>): SpanSlotArg => ({ service: "api", kind: "server", method: "GET", route: "", attrs: {}, ...o });
+const span = (o: Partial<Span>): Span => ({ service: "api", method: "GET", route: "", attrs: {}, ...o });
 
 test("trace: a route's parameters become variables, in each framework's spelling", () => {
   assert.equal(routeVars("/users/:id/posts/:postId?"), "/users/{{id}}/posts/{{postId}}");
@@ -37,4 +36,14 @@ test("trace: the button posts to /http/open with the request, hostile text inert
   assert.match(out, /Open in HTTP client/);
   assert.ok(!out.includes("<script>") && !out.includes("<img"), "escaped");
   assert.equal(spanActions(span({ method: "" })), "");
+});
+
+test("trace: what another pack hands over is checked, not trusted: a wrong shape is no button", () => {
+  for (const a of [undefined, null, "GET /x", 7, [], {}, { service: "api", method: "GET" }, { service: "api", method: ["GET"], route: "/x" }, { service: { toString: () => "api" }, method: "GET", route: "/x" }, { service: "api", method: "GET", route: 5, attrs: {} }])
+    assert.equal(spanActions(a), "", JSON.stringify(a));
+  assert.equal(reqOfSpan({ service: "api", method: "GET", route: "/x", attrs: "url.full" })!.url, "{{baseUrl}}/x", "attrs that aren't an object: none");
+  assert.equal(reqOfSpan({ service: "api", method: "GET", route: "/x", attrs: { "url.full": { href: "https://a.example" } } })!.url, "{{baseUrl}}/x", "an attribute that isn't text: skipped");
+  const out = String(spanActions({ service: H, method: "GET", route: "", attrs: { "url.path": `/x/${H}`, "http.url": "javascript:alert(1)" }, extra: H }));
+  assert.match(out, /Open in HTTP client/);
+  assert.ok(!out.includes("<script>") && !out.includes("<img") && !out.includes("javascript:"), "escaped");
 });

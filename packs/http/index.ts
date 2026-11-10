@@ -27,7 +27,7 @@
  *  - Running a story (story.ts, runner.ts, stories-routes.ts): GET /http/story shows its steps,
  *    sending nothing; one click runs them with their setups, re-checked against every file as shown.
  *    Logged as `http.run`; the newest runs of each story are kept without values or responses.
- *  - A span on otel-sink's trace page (core's "span.actions" slot, trace.ts) opens in the editor
+ *  - A span on otel-sink's trace page (its place "otel-sink/span.actions", trace.ts) opens in the editor
  *    from what the trace kept (method, route, a query-less URL): nothing is sent.
  *  - Importing curl, an OpenAPI spec or a Postman / Bruno collection (import-routes.ts) only reads
  *    the text: nothing is fetched or sent. Saving the requests adds them to a new file or the end of one (`http.save`, one click).
@@ -81,14 +81,15 @@ export function createHttpPack(opts: CreateHttpPackOpts = {}): Pack & { history(
     // The JSON tools' tree and diff classes, for a response body shown as a tree or compared.
     styles: jsonStyles + quickStyles + storiesStyles,
     manifest: {
-      api: "1.36",
-      version: "1.1.5",
+      api: "1.39",
+      version: "1.2.0",
       id: "http",
       name: "HTTP client",
       description: "Send HTTP requests from this machine; saved per repo as .http files, with environments and secrets bound to hosts.",
       domain: "general",
       execution: "local-only",
       private: true,
+      uses: ["otel-sink"],
       settings: [
         { key: "HTTP_SECRETS", label: "Secrets and their hosts", namesKeys: true, help: "NAME@host entries, comma separated (API_TOKEN@api.example.com, LOCAL_KEY@localhost:3000). {{NAME}} is filled from this machine's setting NAME, and only in a request to one of its hosts." },
         { key: "HTTP_AGENT_HOSTS", label: "Hosts an agent may send to", help: "Agents Dovre starts can send GET and HEAD requests through this client (its send tool), to this machine (localhost) and the hosts listed here (api.staging.example.com, host:port), comma separated. off: agents can't send." },
@@ -113,6 +114,8 @@ export function createHttpPack(opts: CreateHttpPackOpts = {}): Pack & { history(
 
     slots: () => ({
       "actions.what": ({ kind }) => (kind === "http.send" ? "Sent an HTTP request" : kind === "http.run" ? "Ran HTTP requests as a test (cases or a story)" : kind === "http.agentRun" ? "An agent ran an HTTP story" : kind === "http.save" ? "Saved an HTTP request to a repo" : undefined),
+      // otel-sink's own place (API 1.39), and core's old name for it until Pack API 2.0, for an otel-sink copy that still fills that one.
+      "otel-sink/span.actions": spanActions,
       "span.actions": spanActions,
     }),
 

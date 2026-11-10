@@ -4,7 +4,7 @@
  * value from a sender is escaped by `html`, and every link is a path of ours through safeUrl.
  */
 import { html } from "hono/html";
-import { Card, Empty, type Html, Investigate, Item, KeyValues, List, Notice, PageHeader, Panel, Pill, Pulse, safeUrl, type SpanSlotArg, Spark, Stat, Stats } from "dovre/pack.ts";
+import { Card, Empty, type Html, Investigate, Item, KeyValues, List, Notice, PageHeader, Panel, Pill, Pulse, safeUrl, Spark, Stat, Stats } from "dovre/pack.ts";
 import { LEVELS, levelName } from "./otlp.ts";
 import { BAD_ERR, WARN_ERR, type ErrorSpan, type LogEntry, type MetricTrend, type ServiceSum, type SinkKept, type TraceSpan } from "./store.ts";
 
@@ -199,10 +199,16 @@ export function treeOrder(spans: TraceSpan[]): Node[] {
 
 const KIND = ["", "internal", "server", "client", "producer", "consumer"];
 
-/** What the "span.actions" slot sees of an HTTP span (what it kept, read back as untrusted), or undefined for one that isn't. */
-export function spanArg(s: TraceSpan): SpanSlotArg | undefined {
+/**
+ * An HTTP span as this pack's own place "span.actions" hands it to the packs that fill it
+ * (`"otel-sink/span.actions"` in their `slots`): what was kept of it, never a header or a body.
+ */
+export type SpanArg = { service: string; kind: "server" | "client" | "other"; method: string; route: string; attrs: Record<string, string | number | boolean> };
+
+/** What "span.actions" sees of an HTTP span (what it kept, read back as untrusted), or undefined for one that isn't. */
+export function spanArg(s: TraceSpan): SpanArg | undefined {
   if (!s.http_method) return undefined;
-  let attrs: SpanSlotArg["attrs"] = {};
+  let attrs: SpanArg["attrs"] = {};
   try {
     const o = s.attrs ? (JSON.parse(s.attrs) as unknown) : {};
     if (o && typeof o === "object" && !Array.isArray(o))
@@ -213,9 +219,9 @@ export function spanArg(s: TraceSpan): SpanSlotArg | undefined {
   return { service: s.service, kind: s.kind === 2 ? "server" : s.kind === 3 ? "client" : "other", method: s.http_method, route: s.http_route ?? "", attrs };
 }
 
-/** `actions`: what other packs put beside an HTTP span (the "span.actions" slot; http: open it in the editor). */
+/** `actions`: what other packs put beside an HTTP span (this pack's place "span.actions"; http: open it in the editor). */
 /** `repoOf`: a service's repo (OTEL_SINK_SERVICES) and version, for Investigate on a failing trace. */
-export function tracePage(traceId: string, spans: TraceSpan[], logs: LogEntry[], actions: (s: SpanSlotArg) => (Html | "")[] = () => [], repoOf: (service: string) => { repo?: string; version?: string | null } = () => ({})): Html {
+export function tracePage(traceId: string, spans: TraceSpan[], logs: LogEntry[], actions: (s: SpanArg) => (Html | "")[] = () => [], repoOf: (service: string) => { repo?: string; version?: string | null } = () => ({})): Html {
   const crumbs = [{ href: safeUrl(`/${ID}`), label: "OTel sink" }, { label: `Trace ${traceId.slice(0, 12)}` }];
   if (!spans.length)
     return html`${PageHeader({ title: "Trace", crumbs })}${Empty({ title: "No such trace", children: html`<p class="notes">Not here, or older than 24 hours.</p>` })}`;
