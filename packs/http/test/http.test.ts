@@ -52,6 +52,7 @@ function mounted(o: { fetchFn?: typeof fetch; env?: Record<string, string>; time
   const logged: { kind: string; target: string; detail: string | null; ok: number; error: string | null }[] = [];
   const published: string[][] = [];
   const ctx: PackContext = testContext({
+    codeDir: code,
     logged: async (a) => void logged.push({ kind: `http.${a.kind}`, target: a.target, detail: a.detail ?? null, ok: a.ok ? 1 : 0, error: a.error ?? null }),
     env: { CODE_DIR: code, HTTP_SECRETS: "API_TOKEN@api.example.com", API_TOKEN: SECRET, HTTP_ENVS: '{"dev": {"baseUrl": "https://api.example.com"}}', ...o.env },
     db: db.DB,

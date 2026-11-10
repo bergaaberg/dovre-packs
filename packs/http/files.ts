@@ -44,10 +44,10 @@ export function repoRoot(codeDir: string, name: unknown): string | null {
 }
 
 /** The checkouts: core's (API 1.7, narrowed to one in a pack session), else the code folder listed here. */
-export const reposOf = (ctx: Pick<PackContext, "env" | "checkouts">): string[] => (ctx.checkouts ? ctx.checkouts() : listRepos(codeDirOf(ctx.env)));
+export const reposOf = (ctx: Pick<PackContext, "checkouts">): string[] => ctx.checkouts();
 
 /** A checkout's folder by name: core's check (API 1.7), else repoRoot's. */
-export const rootOf = (ctx: Pick<PackContext, "env" | "checkout">, name: unknown): string | null => (ctx.checkout ? ctx.checkout(name) : repoRoot(codeDirOf(ctx.env), name));
+export const rootOf = (ctx: Pick<PackContext, "checkout">, name: unknown): string | null => ctx.checkout(name);
 
 export function listRepos(codeDir: string): string[] {
   try {

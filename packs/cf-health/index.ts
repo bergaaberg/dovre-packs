@@ -11,8 +11,8 @@ export function createCfHealthPack(opts: { fetchFn?: typeof fetch } = {}): Pack 
   return {
     kept: () => kept,
     manifest: {
-      api: "1.24",
-      version: "1.0.2",
+      api: "2.0",
+      version: "1.0.3",
       id: "cf-health",
       name: "Cloudflare Health",
       description: "24h Cloudflare Workers request and error telemetry via GraphQL.",

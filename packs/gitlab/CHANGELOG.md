@@ -1,5 +1,9 @@
 # gitlab
 
+## 1.0.4 — 2026-11-10
+
+- Moved to Pack API 2.0 (dovre#484): needs Dovre with pack contract 2. Nothing changes in what it does.
+
 ## 1.0.3 — 2026-11-10
 
 - Reads the owners setting with the SDK's `owners.of`, not core's `ownersOf`. Nothing changes in what it does. Needs core API 1.32.

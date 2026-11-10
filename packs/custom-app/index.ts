@@ -10,8 +10,8 @@ let kept: Kept | undefined;
 
 export const customAppPack: Pack = {
   manifest: {
-    api: "1.24",
-    version: "1.0.2",
+    api: "2.0",
+    version: "1.0.3",
     id: "custom-app",
     name: "Custom App",
     description: "Starter 3-file pack for your own app, D1 database, or API.",

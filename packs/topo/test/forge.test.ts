@@ -22,7 +22,7 @@ function fakeForge(files: Record<string, Record<string, string>>, o: { id?: stri
     name: "GitHub",
     host: "github.com",
     login: "me",
-    owners: "acme",
+    owners: "acme", owns: () => true,
     repos: async () => Object.keys(files),
     file: async (repo, path) => {
       o.calls?.push(`${repo}:${path}`);

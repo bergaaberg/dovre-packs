@@ -1,5 +1,9 @@
 # slack
 
+## 1.1.5 — 2026-11-10
+
+- Moved to Pack API 2.0 (dovre#484): needs Dovre with pack contract 2. Nothing changes in what it does.
+
 ## 1.1.4 — 2026-11-10
 
 - Needs core API 1.27 (it declared 1.24): It uses the `D1` type, which core's SDK gained at 1.27, so it says so. Nothing changes in what it does.

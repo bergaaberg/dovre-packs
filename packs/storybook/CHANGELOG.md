@@ -1,5 +1,9 @@
 # storybook
 
+## 1.0.7 — 2026-11-10
+
+- Moved to Pack API 2.0 (dovre#484): needs Dovre with pack contract 2. Nothing changes in what it does.
+
 ## 1.0.6 — 2026-11-10
 
 - Asks the forge whether a repo is one of the owners' (`ctx.forge().owns`), not core's `owns`. Nothing changes in what it does. Needs core API 1.32.

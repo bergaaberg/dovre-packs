@@ -57,8 +57,8 @@ export function createLinearPack(
   return {
     kept: () => kept,
     manifest: {
-      api: "1.40",
-      version: "1.3.0",
+      api: "2.0",
+      version: "1.3.1",
       id: "linear",
       name: "Linear",
       description: "Assigned Linear issues, cycle progress, un-triaged team issues and TEAM-123 linking.",

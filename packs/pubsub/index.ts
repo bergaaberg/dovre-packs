@@ -17,8 +17,8 @@ export function createPubsubPack(
   return {
     kept: () => kept,
     manifest: {
-      api: "1.24",
-      version: "1.0.2",
+      api: "2.0",
+      version: "1.0.3",
       id: "pubsub",
       name: "Google Cloud Pub/Sub",
       description: "Subscription backlog, oldest unacked message age, and dead-letter radar.",

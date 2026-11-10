@@ -69,8 +69,8 @@ const script = `${DIFF_GLUE}
 export function createWasmCanaryPack(): Pack {
   return {
     manifest: {
-      api: "1.24",
-      version: "1.0.1",
+      api: "2.0",
+      version: "1.0.2",
       id: "wasm-canary",
       name: "WASM canary",
       description: "A line diff written in Rust, run as WebAssembly in your browser: proves a pack can ship and run WebAssembly. Nothing typed here is sent anywhere.",

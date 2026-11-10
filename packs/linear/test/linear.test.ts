@@ -171,7 +171,7 @@ test("linear: the create act re-checks the team, writes, and logs to the actions
   ]);
   const pack = createLinearPack({ fetchFn });
   const { db, inserts } = fakeDb();
-  const ctx = testContext({ env: { LINEAR_API_KEY: "k" }, db });
+  const ctx = testContext({ env: { LINEAR_API_KEY: "k" }, db }, { id: "linear" });
   const create = pack.acts!(ctx)[0]!;
   assert.equal(create.kind, "create");
   const done = await create.run({ team: "eng", title: "New thing", description: "Body" }, {}, ctx);
@@ -189,7 +189,7 @@ test("linear: the create act re-checks the team, writes, and logs to the actions
   const { fetchFn: noTeam } = fakeLinear([{ match: /DovreLinearTeam/, body: { teams: { nodes: [] } } }]);
   const p2 = createLinearPack({ fetchFn: noTeam });
   const { db: db2, inserts: inserts2 } = fakeDb();
-  const ctx2 = testContext({ env: { LINEAR_API_KEY: "k" }, db: db2 });
+  const ctx2 = testContext({ env: { LINEAR_API_KEY: "k" }, db: db2 }, { id: "linear" });
   const refused = await p2.acts!(ctx2)[0]!.run({ team: "NOPE", title: "x" }, {}, ctx2);
   assert.ok(!refused.ok);
   assert.match(refused.error, /no team "NOPE"/);
@@ -204,7 +204,7 @@ test("linear: the comment act re-checks the issue, refuses closed ones, and logs
   ]);
   const pack = createLinearPack({ fetchFn });
   const { db, inserts } = fakeDb();
-  const ctx = testContext({ env: { LINEAR_API_KEY: "k" }, db });
+  const ctx = testContext({ env: { LINEAR_API_KEY: "k" }, db }, { id: "linear" });
   const comment = pack.acts!(ctx)[1]!;
   assert.equal(comment.kind, "comment");
   // The card posts what it shows: a box per field.
@@ -221,7 +221,7 @@ test("linear: the comment act re-checks the issue, refuses closed ones, and logs
   ]);
   const p2 = createLinearPack({ fetchFn: closed });
   const { db: db2, inserts: inserts2 } = fakeDb();
-  const ctx2 = testContext({ env: { LINEAR_API_KEY: "k" }, db: db2 });
+  const ctx2 = testContext({ env: { LINEAR_API_KEY: "k" }, db: db2 }, { id: "linear" });
   const refused = await p2.acts!(ctx2)[1]!.run({ issue: "ENG-8", text: "hi" }, {}, ctx2);
   assert.ok(!refused.ok);
   assert.match(String(refused.error), /Done/);
@@ -229,7 +229,7 @@ test("linear: the comment act re-checks the issue, refuses closed ones, and logs
   // A missing issue too.
   const { fetchFn: gone } = fakeLinear([{ match: /DovreLinearIssue/, body: {} }]);
   const p3 = createLinearPack({ fetchFn: gone });
-  const r3 = await p3.acts!(testContext({ env: { LINEAR_API_KEY: "k" }, db: fakeDb().db }))[1]!.run({ issue: "ENG-99", text: "hi" }, {}, testContext({ env: { LINEAR_API_KEY: "k" }, db: fakeDb().db }));
+  const r3 = await p3.acts!(testContext({ env: { LINEAR_API_KEY: "k" }, db: fakeDb().db }, { id: "linear" }))[1]!.run({ issue: "ENG-99", text: "hi" }, {}, testContext({ env: { LINEAR_API_KEY: "k" }, db: fakeDb().db }, { id: "linear" }));
   assert.ok(!r3.ok);
   assert.match(String(r3.error), /ENG-99/);
 });

@@ -42,7 +42,7 @@ test("release moves Unreleased under the bumped version; tags tags it; the guard
     mkdirSync(join(root, "packs", "foo", "test"), { recursive: true });
     mkdirSync(join(root, "scripts"));
     for (const f of ["versions.ts", "release.ts", "tags.ts"]) writeFileSync(join(root, "scripts", f), readFileSync(join(import.meta.dirname, "..", "scripts", f)));
-    writeFileSync(join(root, "packs", "foo", "index.ts"), `export const fooPack = { manifest: { api: "1.6", version: "1.0.0", id: "foo" } };\n`);
+    writeFileSync(join(root, "packs", "foo", "index.ts"), `export const fooPack = { manifest: { api: "2.0", version: "1.0.0", id: "foo" } };\n`);
     writeFileSync(join(root, "packs", "foo", "CHANGELOG.md"), "# foo\n\n## 1.0.0 — 2026-11-01\n\n- First.\n");
     // release.ts loads the pack through index.ts and core's check through this repo's node_modules.
     writeFileSync(join(root, "index.ts"), `export { fooPack } from "./packs/foo/index.ts";\n`);
@@ -65,11 +65,13 @@ test("release moves Unreleased under the bumped version; tags tags it; the guard
     assert.notEqual(early.status, 0);
     assert.match(early.stderr, /no lines under "## Unreleased"/);
 
-    // dovre#482: a pack using something newer than its manifest's api isn't released.
+    // dovre#482: a pack using something newer than its manifest's api isn't released. A 2.0 pack
+    // may use all of 1.x (dovre#484), so ctx.viewer (1.31) passes the floor; 2.1 brings it back.
     writeFileSync(join(root, "packs", "foo", "data.ts"), "export const who = (ctx: { viewer(): string }) => ctx.viewer();\n");
     const old = spawnSync("node", ["scripts/release.ts", "foo", "minor"], { cwd: root, encoding: "utf8" });
     assert.notEqual(old.status, 0);
-    assert.match(old.stderr, /declares too old an api: uses ctx\.viewer \(1\.31\), declares 1\.6/);
+    assert.doesNotMatch(old.stderr, /declares too old an api/);
+    assert.match(old.stderr, /no lines under "## Unreleased"/);
     writeFileSync(join(root, "packs", "foo", "data.ts"), "export const x = 1;\n");
 
     writeFileSync(join(root, "packs", "foo", "CHANGELOG.md"), "# foo\n\n## Unreleased\n\n- Adds x.\n\n## 1.0.0 — 2026-11-01\n\n- First.\n");

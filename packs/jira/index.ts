@@ -133,8 +133,8 @@ export function createJiraPack(
   return {
     kept: () => kept,
     manifest: {
-      api: "1.34",
-      version: "1.2.0",
+      api: "2.0",
+      version: "1.2.1",
       id: "jira",
       name: "Jira",
       description: "Jira issues assigned to me, what moved in my projects, ticket keys as links, and filing tickets.",

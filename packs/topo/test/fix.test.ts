@@ -83,7 +83,7 @@ function forgeOf(files: Record<string, string>, asked: PackProposal[] = [], o: {
     name: "GitHub",
     host: "github.com",
     login: "me",
-    owners: "ACME",
+    owners: "ACME", owns: () => true,
     repos: async () => [...new Set(Object.keys(files).map((k) => k.split(":")[0]!))],
     file: async (repo, path) => files[`${repo}:${path}`],
     ...(o.propose === false ? {} : { propose: async (p: PackProposal) => (asked.push(p), { ok: true as const, number: 7, url: `https://github.com/${p.repo}/pull/7` }) }),

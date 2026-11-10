@@ -1,5 +1,9 @@
 # summaries
 
+## 1.1.1 — 2026-11-10
+
+- Moved to Pack API 2.0 (dovre#484): needs Dovre with pack contract 2. Nothing changes in what it does.
+
 ## 1.1.0 — 2026-11-10
 
 - Its table is a migration core runs before the pack starts (`Pack.migrations`), not a `CREATE TABLE` of its own on first use. Nothing moves: a database that has the table keeps it. Needs core API 1.35.
