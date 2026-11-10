@@ -1,5 +1,9 @@
 # linear
 
+## 1.2.0 — 2026-11-10
+
+- An issue's agent turn (its plan, its try and the draft PR) is kept in the pack's store (`ctx.store.kv`) for a month, so it is still on the issue's page after a restart. Before, a restart forgot it. Needs core API 1.33.
+
 ## 1.1.2 — 2026-11-09
 
 - Its tests take core's types from the SDK (`dovre/pack.ts`), not core's internals. Nothing changes in what it does.

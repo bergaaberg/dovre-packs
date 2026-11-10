@@ -79,7 +79,7 @@ function mounted(o: { env?: Record<string, string>; fetchFn?: typeof fetch; agen
     publish: (t) => void published.push(t),
     page: async (c, p) => c.html(html`${p.head ?? ""}${p.body}`),
   });
-  const pack = createJiraPack({ fetchFn: o.fetchFn, agent: o.agent, kept: { get: () => undefined, set: () => {} } });
+  const pack = createJiraPack({ fetchFn: o.fetchFn, agent: o.agent });
   pack.init?.(ctx);
   const app = new Hono();
   pack.routes!(app as never, ctx);
@@ -385,7 +385,7 @@ test("tickets: Bino's card asks before it creates, files through the same checks
 });
 
 test("tickets: the pack lists its write kind; the preview's Create is one click by default and asks twice when Settings says so (#104)", async () => {
-  const pack = createJiraPack({ fetchFn: fakeRest(devRest({})).fetchFn, kept: { get: () => undefined, set: () => {} } });
+  const pack = createJiraPack({ fetchFn: fakeRest(devRest({})).fetchFn });
   assert.deepEqual(pack.writes, [{ kind: "ticket-create", label: "File a Jira ticket" }]);
   const { get, post } = packApp([pack], { env: { JIRA_SITE: SITE, TICKET_PROJECTS: "DEV", ...restOn } });
   assert.match(await (await get("/settings/writes")).text(), /value="jira.ticket-create"/);

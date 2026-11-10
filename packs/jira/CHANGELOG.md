@@ -1,5 +1,9 @@
 # jira
 
+## 1.1.6 — 2026-11-10
+
+- Keeps its last answer over MCP in the pack's store (`ctx.store.kv`), not a file of its own through core's `keptFile`. `data/jira-kept.json` is no longer read and can be deleted: the first start after this shows "waiting" until the first read. Needs core API 1.33.
+
 ## 1.1.5 — 2026-11-09
 
 - Takes core's types from the SDK (`dovre/pack.ts`), not core's internals. Nothing changes in what it does.

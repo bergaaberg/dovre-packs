@@ -53,12 +53,13 @@ function fakeAgent(o: { ok?: boolean; where?: ("read" | "sandbox")[] } = {}) {
   return { agent, starts, lands, s };
 }
 
-async function setup(o: Parameters<typeof fakeAgent>[0] = {}) {
+async function setup(o: Parameters<typeof fakeAgent>[0] & { store?: PackContext["store"] } = {}) {
   const f = fakeAgent(o);
   const rings: PackNote[] = [];
   const published: string[][] = [];
   const ctx: PackContext = testContext({
     env: { LINEAR_API_KEY: "k" },
+    ...(o.store ? { store: o.store } : {}),
     agent: f.agent,
     ai: () => ({ text: true, size: "any", dayUsd: 5 }),
     checkouts: () => ["shop", "other"],
@@ -76,7 +77,7 @@ async function setup(o: Parameters<typeof fakeAgent>[0] = {}) {
     return { status: r.status, text: await r.text() };
   };
   const post = (path: string, form: Record<string, string>) => app.request(path, { method: "POST", body: new URLSearchParams(form) });
-  return { ...f, rings, published, pack, get, post };
+  return { ...f, rings, published, pack, get, post, store: ctx.store };
 }
 
 const done = (o: Partial<PackAgentRun> = {}): PackAgentRun => ({ run: "r1", status: "done", where: "read", repo: "acme/shop", cost: 0.12, said: "", ...o });
@@ -140,6 +141,32 @@ test("linear agent: Plan it starts a read turn in an offered repo, then shows th
   assert.equal(k.rings[0]!.href, "/linear/issue/ENG-7");
   assert.match(k.rings[0]!.title, /Plan for ENG-7 is ready/);
   k.pack.dispose?.();
+});
+
+test("linear agent: a turn is still there after a restart, picked up where it stood and rung once", async () => {
+  const k = await setup();
+  await k.post("/linear/issue/ENG-7/start", { repo: "acme/shop", where: "read" });
+  k.s.next = done({ status: "running" });
+  assert.match((await k.get("/linear/issue/ENG-7")).text, /Planning in acme\/shop/);
+  assert.deepEqual(await k.store.kv.list("turn/"), ["turn/ENG-7"]);
+  k.pack.dispose?.();
+
+  // A new process: the same store, nothing in memory.
+  const again = await setup({ store: k.store });
+  again.s.next = done({ status: "running" });
+  assert.match((await again.get("/linear/issue/ENG-7")).text, /Planning in acme\/shop/);
+  assert.equal(again.starts.length, 0, "followed, not started again");
+  again.s.next = done({ said: "## Plan\n- change `x.ts`" });
+  assert.match((await again.get("/linear/issue/ENG-7")).text, /<code>x\.ts<\/code>/);
+  assert.equal(again.rings.length, 1);
+  again.pack.dispose?.();
+
+  // And once it has ended, a later start draws it without ringing again.
+  const later = await setup({ store: k.store });
+  assert.match((await later.get("/linear/issue/ENG-7")).text, /<code>x\.ts<\/code>/);
+  assert.equal(later.rings.length, 0);
+  assert.match((await later.get("/linear/issue/ENG-8")).text, /Plan it/, "an issue with no turn has none");
+  later.pack.dispose?.();
 });
 
 test("linear agent: Try it runs in the sandbox on the large model; its commits land as a draft PR from a Confirm", async () => {

@@ -6,12 +6,11 @@
  * Two ways to Jira (JIRA_VIA): `rest` with an API token, or `mcp` through Claude Code's Atlassian
  * MCP where tokens are locked down (mcp.ts; local only). A job through the MCP takes ~15 s and a
  * little money, so it runs every JIRA_EVERY_MIN (10) or on "Read now", never per page; a job that
- * fails keeps the last good answer, which is also kept on disk so a restart has something to draw.
+ * fails keeps the last good answer, which is also kept in the pack's store so a restart has something to draw.
  */
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
-import { keptFile, type Kept } from "dovre/kept.ts";
+import { join } from "node:path";
 import type { Context } from "hono";
 import { html } from "hono/html";
 import { type ActKind, type AppEnv, type FindItem, type Html, Notice, type Pack, type PackContext } from "dovre/pack.ts";
@@ -21,6 +20,10 @@ import { createFiling, type Filed, SCREEN_MS } from "./filing.ts";
 import { draftPrompt, emptyTicket, first, MAX_SUMMARY, nameOf, ticketFields, ticketProjectsOf, ticketValid, validateTicket } from "./tickets.ts";
 import { doneBody, failedBody, formBody, loadingBody, NEW, newHref, noProjectsBody, pickProjectBody, previewBody, problemBody, projectsPanel, workingBody } from "./tickets.view.ts";
 import { jiraCard, jiraPage, prFacts, prLead } from "./view.ts";
+
+/** The last good answer over MCP, in the pack's store (`ctx.store.kv`), for a week. */
+const LAST = "last";
+const KEEP_MS = 7 * 86_400_000;
 
 const everyMsOf = (env: Record<string, string | undefined>) => {
   const min = Number(env.JIRA_EVERY_MIN);
@@ -40,15 +43,12 @@ export function createJiraPack(
     fetchFn?: typeof fetch;
     /** For tests: the MCP agent (default: claude on the PATH, off the main thread). */
     agent?: Agent;
-    /** For tests: where the last answer is kept (default: data/jira-kept.json beside Dovre's database). */
-    kept?: Kept;
     now?: () => number;
   } = {},
 ): Pack & { kept(): JiraKept | undefined } {
   const now = opts.now ?? Date.now;
   let kept: JiraKept | undefined;
   let agent: Agent | undefined;
-  let store: Kept | undefined;
   /** When the last MCP job started: the cadence counts from attempts, so a signed-out MCP isn't asked every round. */
   let triedAt = Number.NEGATIVE_INFINITY;
   let force = false;
@@ -87,7 +87,8 @@ export function createJiraPack(
       const r = await loadViaMcp(agent, site, projectsOf(ctx.env), ctx.env.JIRA_JQL?.trim() || undefined);
       ctx.log(`via mcp: ${r.mine.length} mine, ${r.moving.length} moving, $${r.cost.toFixed(4)}`);
       kept = { at: now(), ok: true, site, via: "mcp", mine: r.mine, moving: r.moving };
-      store?.set("jira", { at: kept.at, value: kept });
+      // For the next start; one that can't be kept (too big) is still the answer now.
+      await ctx.store.kv.set(LAST, kept, { ttlMs: KEEP_MS }).catch((e) => ctx.log(`not kept: ${(e as Error)?.message ?? e}`));
     } catch (e) {
       const error = String((e as Error)?.message ?? e).slice(0, 200);
       ctx.log(`via mcp: ${error}`);
@@ -147,8 +148,8 @@ export function createJiraPack(
   return {
     kept: () => kept,
     manifest: {
-      api: "1.25",
-      version: "1.1.5",
+      api: "1.33",
+      version: "1.1.6",
       id: "jira",
       name: "Jira",
       description: "Jira issues assigned to me, what moved in my projects, ticket keys as links, and filing tickets.",
@@ -174,11 +175,13 @@ export function createJiraPack(
       if (via === "off" || !siteOk(siteOf(ctx.env))) return false;
       return via === "rest" ? !!ctx.env.JIRA_TOKEN?.trim() : !ctx.hosted;
     },
-    init(ctx) {
+    async init(ctx) {
       if (viaOf(ctx.env) !== "mcp") return;
-      store = opts.kept ?? keptFile(join(dirname(resolve(ctx.env.U_DB || "data/dovre.sqlite")), "jira-kept.json"));
-      const last = store.get("jira")?.value as JiraKept | undefined;
-      kept = last?.ok && last.site === siteOf(ctx.env) ? last : { at: now(), ok: false, site: siteOf(ctx.env), via: "mcp", setup: "waiting", error: "", mine: [], moving: [] };
+      const waiting: JiraKept = { at: now(), ok: false, site: siteOf(ctx.env), via: "mcp", setup: "waiting", error: "", mine: [], moving: [] };
+      kept = waiting;
+      const last = await ctx.store.kv.get<JiraKept>(LAST).catch(() => undefined);
+      // Unless a read answered meanwhile.
+      if (kept === waiting && last?.ok && last.site === siteOf(ctx.env)) kept = last;
     },
     refresh,
     nav: () => [{ href: "/jira", title: "Jira", icon: "ticket", group: "Plan" }],
