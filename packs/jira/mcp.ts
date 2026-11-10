@@ -1,136 +1,61 @@
 /**
  * Jira through Claude Code and its Atlassian MCP (JIRA_VIA=mcp), for where API tokens are locked
- * down: a headless `claude -p` that may call only the Atlassian tools a job needs, nothing built in
- * (no Bash, no files), no settings, no other MCP servers, no session kept. It runs off the main
- * thread (core's `runOff`): starting claude.exe stalls whoever starts it for about a second.
- *
- * The model only makes the calls; what the pack keeps comes from the tools' own results, read out
- * of the stream (`--output-format stream-json`) and parsed strictly. Each result is matched to a
- * call with exactly the arguments asked for, so the model can't change what's read.
+ * down. The calls go through core's `ctx.mcp` (dovre#488): the pack lists exact calls to the tools
+ * its manifest names, core has a headless Claude Code make them, and what the pack keeps comes
+ * from the tools' own results, matched to a call with exactly the arguments asked for, so the
+ * model can't change what's read. Each result is parsed strictly here.
  *
  * Results over ~45k characters don't come back whole (Claude Code saves them to a file and shows
  * a preview), so searches ask for few fields: the moving list goes without type and assignee.
  */
-import { type JiraIssue, safeProjects, typesOf } from "./data.ts";
+import type { PackMcp, PackMcpAsk, PackMcpResult } from "dovre/pack.ts";
+import { type JiraIssue, type JiraSetup, safeProjects, typesOf } from "./data.ts";
 import { type RawCreateField, type Screen, TICKET_KEY } from "./tickets.ts";
 
-/** How a program ended, as core's `runOff` says it. */
-export type Ran = { code: number | null; stdout: string; stderr: string };
-export type RunOff = (bin: string, args: string[], opts: { cwd?: string; timeoutMs?: number; input?: string; maxBuffer?: number }) => Promise<Ran>;
-
-export const ATLASSIAN_MCP = { mcpServers: { atlassian: { type: "http", url: "https://mcp.atlassian.com/v1/mcp" } } };
-const tool = (name: string) => `mcp__atlassian__${name}`;
-export const SEARCH = tool("searchJiraIssuesUsingJql");
-export const TYPES = tool("getJiraProjectIssueTypesMetadata");
-export const FIELDS = tool("getJiraIssueTypeMetaWithFields");
-export const CREATE = tool("createJiraIssue");
-/** Everything in the Atlassian MCP that changes something: denied outright unless a job is allowed it. */
-export const WRITES = [
-  "createJiraIssue", "editJiraIssue", "transitionJiraIssue", "addCommentToJiraIssue", "addWorklogToJiraIssue", "createIssueLink",
-  "createConfluencePage", "updateConfluencePage", "createConfluenceFooterComment", "createConfluenceInlineComment",
-].map(tool);
-
-const SYSTEM = "You are a transport between a program and Jira. Make exactly the tool calls the user lists, with exactly the arguments given, nothing else. Then answer with the single word: done.";
-
-/** The arguments for one job: only `allowed` may be called; built-in tools are off; only the Atlassian MCP loads. */
-export function agentArgs(allowed: string[], model = "haiku"): string[] {
-  const denied = WRITES.filter((t) => !allowed.includes(t));
-  return [
-    "-p",
-    "--model", model,
-    "--output-format", "stream-json",
-    "--verbose",
-    "--no-session-persistence",
-    "--setting-sources", "",
-    "--tools", "",
-    "--strict-mcp-config",
-    "--mcp-config", JSON.stringify(ATLASSIAN_MCP),
-    "--allowedTools", allowed.join(","),
-    ...(denied.length ? ["--disallowedTools", denied.join(",")] : []),
-    "--disable-slash-commands",
-    "--system-prompt", SYSTEM,
-  ];
-}
-
-export type Call = { name: string; input: Record<string, unknown>; result?: string; error: boolean };
-export type Stream = { mcp?: string; calls: Call[]; cost: number; isError: boolean; final?: string };
+export const SEARCH = "searchJiraIssuesUsingJql";
+export const TYPES = "getJiraProjectIssueTypesMetadata";
+export const FIELDS = "getJiraIssueTypeMetaWithFields";
+export const CREATE = "createJiraIssue";
+/** The write kind a create goes under (the pack's `writes`). */
+export const CREATE_KIND = "ticket-create";
+/** What the manifest asks of core: the one server, the tools that read, and the one that writes. */
+export const MCP_ASK: PackMcpAsk = {
+  why: "Reads my Jira issues and files tickets through Claude Code's Atlassian MCP, where API tokens are locked down (JIRA_VIA=mcp).",
+  server: { name: "atlassian", url: "https://mcp.atlassian.com/v1/mcp" },
+  reads: [SEARCH, TYPES, FIELDS],
+  writes: { [CREATE]: CREATE_KIND },
+};
 
 const obj = (v: unknown): Record<string, unknown> => (v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {});
 const str = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
 
-/** The stream's lines, as calls and their results. A line that isn't JSON is skipped. */
-export function readStream(stdout: string): Stream {
-  const out: Stream = { calls: [], cost: 0, isError: false };
-  const byId = new Map<string, Call>();
-  for (const line of stdout.split(/\r?\n/)) {
-    if (!line.trim()) continue;
-    let m: Record<string, unknown>;
-    try {
-      m = obj(JSON.parse(line));
-    } catch {
-      continue;
-    }
-    if (m.type === "system" && m.subtype === "init" && Array.isArray(m.mcp_servers)) out.mcp = str(obj(m.mcp_servers.find((s) => obj(s).name === "atlassian")).status);
-    const content = Array.isArray(obj(m.message).content) ? (obj(m.message).content as unknown[]) : [];
-    if (m.type === "assistant")
-      for (const c of content.map(obj))
-        if (c.type === "tool_use" && typeof c.id === "string" && typeof c.name === "string") {
-          const call: Call = { name: c.name, input: obj(c.input), error: false };
-          byId.set(c.id, call);
-          out.calls.push(call);
-        }
-    if (m.type === "user")
-      for (const c of content.map(obj)) {
-        const call = typeof c.tool_use_id === "string" ? byId.get(c.tool_use_id) : undefined;
-        if (!call || c.type !== "tool_result") continue;
-        call.result = typeof c.content === "string" ? c.content : Array.isArray(c.content) ? c.content.map((x) => str(obj(x).text) ?? "").join("") : "";
-        call.error = c.is_error === true;
-      }
-    if (m.type === "result") {
-      out.cost = typeof m.total_cost_usd === "number" ? m.total_cost_usd : 0;
-      out.isError = m.is_error === true;
-      out.final = str(m.result);
-    }
-  }
-  return out;
-}
-
-/** Claude Code isn't there, or its Atlassian MCP isn't signed in: the page says how, instead of failing. */
+/** MCP calls aren't allowed yet, Claude Code isn't there, or its Atlassian MCP isn't signed in: the page says how, instead of failing. */
 export class JiraSetupError extends Error {
-  readonly setup: "no-claude" | "sign-in";
-  constructor(setup: "no-claude" | "sign-in", message: string) {
+  readonly setup: Exclude<JiraSetup, "waiting">;
+  constructor(setup: Exclude<JiraSetup, "waiting">, message: string) {
     super(message);
     this.setup = setup;
   }
 }
 
-export type Agent = { run: RunOff; cwd: string; bin?: string; timeoutMs?: number };
-
-/** Runs one job and reads its stream; a Jira that can't be reached says why. */
-export async function runJob(a: Agent, prompt: string, allowed: string[]): Promise<Stream> {
-  let r: Ran;
+/** Runs one job; what stands in its way (not allowed, no Claude Code, not signed in) comes out as setup to do. */
+async function job<T>(mcp: PackMcp, run: () => Promise<T>): Promise<T> {
+  const can = mcp.can();
+  if (!can.ok) throw /Claude Code isn't/.test(can.why) ? new JiraSetupError("no-claude", can.why) : new JiraSetupError("allow", can.why);
   try {
-    r = await a.run(a.bin ?? "claude", agentArgs(allowed), { cwd: a.cwd, input: prompt, timeoutMs: a.timeoutMs ?? 120_000, maxBuffer: 16 * 1024 * 1024 });
+    return await run();
   } catch (e) {
-    const m = String((e as Error)?.message ?? e);
-    if (/ENOENT/.test(m)) throw new JiraSetupError("no-claude", "Claude Code isn't installed here (no `claude` on the PATH).");
-    throw new Error(`Jira via Claude Code: ${m.slice(0, 200)}`);
+    const setup = (e as { setup?: unknown })?.setup;
+    if (setup === "no-claude" || setup === "sign-in") throw new JiraSetupError(setup, String((e as Error).message));
+    throw new Error(`Jira via Claude Code: ${String((e as Error)?.message ?? e).slice(0, 200)}`);
   }
-  const s = readStream(r.stdout);
-  if (s.mcp && s.mcp !== "connected") throw new JiraSetupError("sign-in", `Claude Code's Atlassian MCP is ${s.mcp}.`);
-  if (!s.mcp) throw new Error(`Jira via Claude Code: no answer (exit ${r.code}) ${r.stderr.slice(0, 160)}`);
-  return s;
 }
 
-/** The result of the call to `name` made with exactly these arguments; throws when there's none or it failed. */
-export function resultOf(s: Stream, name: string, input: Record<string, unknown>): string {
-  const want = JSON.stringify(input, Object.keys(input).sort());
-  const call = s.calls.find((c) => c.name === name && JSON.stringify(c.input, Object.keys(c.input).sort()) === want);
-  const short = name.replace("mcp__atlassian__", "");
-  if (!call) throw new Error(`the agent didn't make the ${short} call`);
-  if (call.result === undefined) throw new Error(`${short} gave no result`);
-  if (call.error || !/^\s*[{[]/.test(call.result)) throw new Error(`${short}: ${call.result.split("\n")[0]!.slice(0, 160)}`);
-  return call.result;
+/** A call's result as the JSON text the tool gave; throws when there's none, it failed, or it isn't whole. */
+export function textOf(r: PackMcpResult, tool: string): string {
+  if (!r.ok) throw new Error(r.why);
+  if (!/^\s*[{[]/.test(r.text)) throw new Error(`${tool}: ${r.text.split("\n")[0]!.slice(0, 160)}`);
+  return r.text;
 }
 
 export const KEY = /^[A-Z][A-Z0-9_]{0,20}-\d{1,9}$/;
@@ -173,40 +98,36 @@ export function searches(site: string, projects: string[], jql?: string) {
   return { mine, moving };
 }
 
-export const callLine = (n: number, name: string, input: Record<string, unknown>) => `${n}) ${name.replace("mcp__atlassian__", "")} ${JSON.stringify(input)}`;
-
-export async function loadViaMcp(a: Agent, site: string, projects: string[], jql?: string): Promise<{ mine: JiraIssue[]; moving: JiraIssue[]; cost: number }> {
+export async function loadViaMcp(mcp: PackMcp, site: string, projects: string[], jql?: string): Promise<{ mine: JiraIssue[]; moving: JiraIssue[]; cost: number }> {
   const q = searches(site, projects, jql);
-  const lines = [callLine(1, SEARCH, q.mine), ...(q.moving ? [callLine(2, SEARCH, q.moving)] : [])];
-  const s = await runJob(a, `Make these calls now, in parallel:\n${lines.join("\n")}`, [SEARCH]);
-  const mine = issuesOf(site, resultOf(s, SEARCH, q.mine));
-  const moving = q.moving ? issuesOf(site, resultOf(s, SEARCH, q.moving)) : [];
-  return { mine, moving, cost: s.cost };
+  const r = await job(mcp, () => mcp.call([{ tool: SEARCH, input: q.mine }, ...(q.moving ? [{ tool: SEARCH, input: q.moving }] : [])]));
+  const mine = issuesOf(site, textOf(r.results[0]!, SEARCH));
+  const moving = q.moving ? issuesOf(site, textOf(r.results[1]!, SEARCH)) : [];
+  return { mine, moving, cost: r.cost };
 }
 
 // ── Filing a ticket through the MCP ──
 
-const bare = (name: string) => name.replace("mcp__atlassian__", "");
-
-/** A project's create screen, in one job: its work types, and the fields of each one. */
-export async function loadScreenViaMcp(a: Agent, site: string, project: string): Promise<Screen & { cost: number }> {
+/** A project's create screen, in two jobs: its work types, then the fields of each one (at most 20). */
+export async function loadScreenViaMcp(mcp: PackMcp, site: string, project: string): Promise<Screen & { cost: number }> {
   const [p] = safeProjects([project]);
   if (!p) throw new Error(`«${project}» isn't a Jira project key`);
-  const typesIn = { cloudId: site, projectIdOrKey: p };
-  const prompt = `First call ${bare(TYPES)} ${JSON.stringify(typesIn)}. Then, for every issue type in its answer that isn't a subtask, call ${bare(FIELDS)} with {"cloudId":${JSON.stringify(site)},"projectIdOrKey":${JSON.stringify(p)},"issueTypeId":"<its id>","requiredFieldsOnly":false}, all in parallel.`;
-  const s = await runJob(a, prompt, [TYPES, FIELDS]);
-  const raw = obj(JSON.parse(resultOf(s, TYPES, typesIn)));
+  const first = await job(mcp, () => mcp.call([{ tool: TYPES, input: { cloudId: site, projectIdOrKey: p } }]));
+  const raw = obj(JSON.parse(textOf(first.results[0]!, TYPES)));
   const types = typesOf((Array.isArray(raw.issueTypes) ? raw.issueTypes : Array.isArray(raw.values) ? raw.values : []).map(obj));
   const fields: Record<string, RawCreateField[]> = {};
-  for (const t of types) {
+  const asked = types.slice(0, 20);
+  if (!asked.length) return { types, fields, cost: first.cost };
+  const second = await job(mcp, () => mcp.call(asked.map((t) => ({ tool: FIELDS, input: { cloudId: site, projectIdOrKey: p, issueTypeId: t.id, requiredFieldsOnly: false } }))));
+  asked.forEach((t, i) => {
     try {
-      const r = obj(JSON.parse(resultOf(s, FIELDS, { cloudId: site, projectIdOrKey: p, issueTypeId: t.id, requiredFieldsOnly: false })));
+      const r = obj(JSON.parse(textOf(second.results[i]!, FIELDS)));
       fields[t.id] = (Array.isArray(r.fields) ? r.fields : Array.isArray(r.values) ? r.values : []) as RawCreateField[];
     } catch {
       // A type whose fields didn't come: its form says so when it's picked.
     }
-  }
-  return { types, fields, cost: s.cost };
+  });
+  return { types, fields, cost: first.cost + second.cost };
 }
 
 /** What createJiraIssue gets, from the create payload the pack builds (tickets.ts). */
@@ -218,11 +139,12 @@ export function createInput(site: string, payload: { fields: Record<string, unkn
   return input;
 }
 
-/** Files one ticket: a job that may call createJiraIssue only, with exactly these arguments. The key comes from Jira's answer. */
-export async function createViaMcp(a: Agent, site: string, input: Record<string, unknown>): Promise<{ key: string; url: string; cost: number; warning?: string }> {
-  const s = await runJob(a, `Make this one call now:\n${callLine(1, CREATE, input)}`, [CREATE]);
-  const creates = s.calls.filter((x) => x.name === CREATE);
-  const key = str(obj(JSON.parse(resultOf(s, CREATE, input))).key);
+/** Files one ticket: one job that may call createJiraIssue only, with exactly these arguments. The key comes from Jira's answer. */
+export async function createViaMcp(mcp: PackMcp, site: string, input: Record<string, unknown>): Promise<{ key: string; url: string; cost: number; warning?: string }> {
+  const r = await job(mcp, () => mcp.write(CREATE_KIND, { tool: CREATE, input }));
+  // Called, but not as asked: something may be there.
+  if (!r.result.ok) throw new Error(r.times ? `${r.result.why}: check ${site} before trying again` : r.result.why);
+  const key = str(obj(JSON.parse(textOf(r.result, CREATE))).key);
   if (!key || !TICKET_KEY.test(key)) throw new Error("Jira's answer has no ticket key: check Jira before trying again");
-  return { key, url: `https://${site}/browse/${encodeURIComponent(key)}`, cost: s.cost, warning: creates.length > 1 ? `The agent called createJiraIssue ${creates.length} times: check ${site} for duplicates.` : undefined };
+  return { key, url: `https://${site}/browse/${encodeURIComponent(key)}`, cost: r.cost, warning: r.times > 1 ? `The agent called createJiraIssue ${r.times} times: check ${site} for duplicates.` : undefined };
 }

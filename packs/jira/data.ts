@@ -22,7 +22,7 @@ export type JiraIssue = {
 };
 
 /** Why Jira through the MCP isn't answering yet: the page says how to fix it. */
-export type JiraSetup = "no-claude" | "sign-in" | "waiting";
+export type JiraSetup = "allow" | "no-claude" | "sign-in" | "waiting";
 
 export type JiraVia = "rest" | "mcp" | "off";
 

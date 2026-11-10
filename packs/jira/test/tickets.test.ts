@@ -6,13 +6,14 @@ import { html } from "hono/html";
 import { openDb, packApp, testContext, testList } from "dovre/pack-testing.ts";
 import type { PackContext } from "dovre/pack.ts";
 import { createJiraPack } from "../index.ts";
-import { type Agent, CREATE, createInput, FIELDS, type RunOff, TYPES } from "../mcp.ts";
+import type { PackMcp } from "dovre/pack.ts";
+import { CREATE, createInput, FIELDS, TYPES } from "../mcp.ts";
+import { fakeMcp } from "./fakemcp.ts";
 import { adf, readTicket, ticketFields, ticketPayload, validateTicket } from "../tickets.ts";
 
 const SITE = "example.atlassian.net";
 const H = `<script>alert(1)</script><img src=x onerror=alert(1)>`;
 const inert = (out: string) => assert.ok(!out.includes("<script>") && !out.includes("<img") && !out.includes('href="javascript:'), out.slice(0, 300));
-const argOf = (args: string[], flag: string) => args[args.indexOf(flag) + 1] ?? "";
 
 // ── Jira's createmeta for DEV, as read 2026-10-22 (from the old Dovre's tests) ──
 const STORY_FIELDS = [
@@ -65,7 +66,7 @@ const devRest = (extra: Record<string, unknown> = {}) => ({
   ...extra,
 });
 
-function mounted(o: { env?: Record<string, string>; fetchFn?: typeof fetch; agent?: Agent; hosted?: boolean; /** The todo pack is on (default). */ todo?: boolean } = {}) {
+function mounted(o: { env?: Record<string, string>; fetchFn?: typeof fetch; mcp?: PackMcp; hosted?: boolean; /** The todo pack is on (default). */ todo?: boolean } = {}) {
   const db = openDb();
   const published: string[][] = [];
   const logged: Parameters<PackContext["logged"]>[0][] = [];
@@ -78,8 +79,9 @@ function mounted(o: { env?: Record<string, string>; fetchFn?: typeof fetch; agen
     hosted: o.hosted ?? false,
     publish: (t) => void published.push(t),
     page: async (c, p) => c.html(html`${p.head ?? ""}${p.body}`),
+    ...(o.mcp ? { mcp: o.mcp } : {}),
   });
-  const pack = createJiraPack({ fetchFn: o.fetchFn, agent: o.agent });
+  const pack = createJiraPack({ fetchFn: o.fetchFn });
   pack.init?.(ctx);
   const app = new Hono();
   pack.routes!(app as never, ctx);
@@ -277,59 +279,44 @@ test("tickets: an agent drafts it from a note, its prompt shown on /agents/new b
 
 // ── Through Claude Code's Atlassian MCP ──
 
-/** A stream as `claude -p --output-format stream-json` writes it. */
-function stream(calls: { name: string; input: Record<string, unknown>; result: string }[]): string {
-  const lines: unknown[] = [{ type: "system", subtype: "init", mcp_servers: [{ name: "atlassian", status: "connected" }], tools: [] }];
-  calls.forEach((c, i) => {
-    lines.push({ type: "assistant", message: { content: [{ type: "tool_use", id: `t${i}`, name: c.name, input: c.input }] } });
-    lines.push({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: `t${i}`, content: [{ type: "text", text: c.result }] }] } });
-  });
-  lines.push({ type: "result", subtype: "success", is_error: false, total_cost_usd: 0.01, result: "done" });
-  return lines.map((l) => JSON.stringify(l)).join("\n");
-}
-
+/** Jira behind the MCP: DEV's types, the Story's fields, and `answerCreate` for a create. */
 function mcpJira(answerCreate: (input: Record<string, unknown>) => string) {
-  const jobs: { args: string[]; prompt: string }[] = [];
-  const typesIn = { cloudId: SITE, projectIdOrKey: "DEV" };
-  const fieldsIn = { cloudId: SITE, projectIdOrKey: "DEV", issueTypeId: "10255", requiredFieldsOnly: false };
-  const run: RunOff = async (_bin, args, o) => {
-    const prompt = o.input ?? "";
-    jobs.push({ args, prompt });
-    if (argOf(args, "--allowedTools") === CREATE) {
-      const input = JSON.parse(prompt.slice(prompt.indexOf("{")));
-      return { code: 0, stdout: stream([{ name: CREATE, input, result: answerCreate(input) }]), stderr: "" };
-    }
-    return { code: 0, stdout: stream([{ name: TYPES, input: typesIn, result: JSON.stringify(DEV_TYPES) }, { name: FIELDS, input: fieldsIn, result: JSON.stringify({ fields: STORY_FIELDS }) }]), stderr: "" };
-  };
-  return { agent: { run, cwd: "x" } as Agent, jobs };
+  return fakeMcp((job) =>
+    job.write
+      ? [{ tool: CREATE, input: job.calls[0]!.input, result: answerCreate(job.calls[0]!.input) }]
+      : job.calls.map((c) => ({ tool: c.tool, input: c.input, result: c.tool === TYPES ? JSON.stringify(DEV_TYPES) : c.input.issueTypeId === "10255" ? JSON.stringify({ fields: STORY_FIELDS }) : "no such type", error: c.tool === FIELDS && c.input.issueTypeId !== "10255" })),
+  );
 }
+const toolsOf = (j: { calls: { tool: string }[] }) => [...new Set(j.calls.map((c) => c.tool))].join(",");
 
-test("tickets (mcp): the create screen from one job, a preview, a fresh check, then one job allowed createJiraIssue only, with exactly the preview's fields", async () => {
-  const { agent, jobs } = mcpJira(() => JSON.stringify({ key: "DEV-14", id: "1" }));
-  const { get, post, logged } = mounted({ env: { JIRA_VIA: "mcp" }, agent });
+test("tickets (mcp): the create screen from two jobs that only read, a preview, a fresh check, then one job allowed createJiraIssue only, with exactly the preview's fields", async () => {
+  const { mcp, jobs } = mcpJira(() => JSON.stringify({ key: "DEV-14", id: "1" }));
+  const { get, post, logged } = mounted({ env: { JIRA_VIA: "mcp" }, mcp });
   const form = await landed(get, "/jira/new?project=DEV&type=10255");
   assert.match(form, />Story</);
   assert.match(form, /<option value="10602" selected>Ikke valgt<\/option>/);
-  assert.equal(argOf(jobs[0]!.args, "--allowedTools"), `${TYPES},${FIELDS}`, "reading the screen may only read");
+  assert.deepEqual(jobs.map((j) => [toolsOf(j), j.write]), [[TYPES, false], [FIELDS, false]], "reading the screen only reads: the types, then each type's fields");
+  assert.deepEqual(jobs[0]!.calls, [{ tool: TYPES, input: { cloudId: SITE, projectIdOrKey: "DEV" } }]);
   const sent = { project: "DEV", type: "10255", j_summary: "Se bilene mine", j_description: "Kunden vil se bilene.", j_customfield_10476: "10597" };
   const preview = await (await post("/jira/new/preview", sent)).text();
-  assert.ok(!jobs.some((j) => argOf(j.args, "--allowedTools").includes(CREATE)), "the preview creates nothing");
+  assert.ok(!jobs.some((j) => j.write), "the preview creates nothing");
   const done = await landed(get, (await post("/jira/new/create", hiddenOf(preview, "/jira/new/create"))).headers.get("location")!);
   assert.match(done, /DEV-14/);
-  const creates = jobs.filter((j) => argOf(j.args, "--allowedTools") === CREATE);
+  const creates = jobs.filter((j) => j.write);
   assert.equal(creates.length, 1);
-  assert.deepEqual(JSON.parse(creates[0]!.prompt.slice(creates[0]!.prompt.indexOf("{"))), {
+  assert.equal(creates[0]!.calls[0]!.tool, CREATE);
+  assert.deepEqual(creates[0]!.calls[0]!.input, {
     cloudId: SITE, projectKey: "DEV", issueTypeName: "Story", summary: "Se bilene mine",
     description: { type: "doc", version: 1, content: [{ type: "paragraph", content: [{ type: "text", text: "Kunden vil se bilene." }] }] }, contentFormat: "adf",
     additional_fields: { priority: { id: "10008" }, customfield_10476: { id: "10597" } },
   }, "a select the form didn't post goes as Jira's default");
-  assert.equal(jobs.filter((j) => argOf(j.args, "--allowedTools") === `${TYPES},${FIELDS}`).length, 2, "the create screen, then a fresh check right before the write");
+  assert.equal(jobs.filter((j) => toolsOf(j) === TYPES).length, 2, "the create screen, then a fresh check right before the write");
   assert.deepEqual(logged.map((a) => [a.kind, a.target, a.ok]), [["ticket-create", "DEV-14", true]]);
 });
 
 test("tickets (mcp): a create whose answer has no ticket key is a failure, logged, not a made-up key", async () => {
-  const { agent } = mcpJira(() => JSON.stringify({ errorMessages: ["Område is required"] }));
-  const { get, post, logged } = mounted({ env: { JIRA_VIA: "mcp" }, agent });
+  const { mcp } = mcpJira(() => JSON.stringify({ errorMessages: ["Område is required"] }));
+  const { get, post, logged } = mounted({ env: { JIRA_VIA: "mcp" }, mcp });
   await landed(get, "/jira/new");
   const preview = await (await post("/jira/new/preview", { project: "DEV", type: "10255", j_summary: "x", j_customfield_10476: "10597" })).text();
   const out = await landed(get, (await post("/jira/new/create", hiddenOf(preview, "/jira/new/create"))).headers.get("location")!);

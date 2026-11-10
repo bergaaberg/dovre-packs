@@ -1,5 +1,12 @@
 # jira
 
+## 1.2.0 — 2026-11-10
+
+- `JIRA_VIA=mcp` goes through core's MCP calls (`ctx.mcp`), not a Claude Code the pack starts itself. **After updating, tick "MCP calls" on Settings → Packs → Jira**: until then the page says so and nothing is read. Each job now counts against the pack's dollars a day there.
+- A project's create screen is read in two jobs (its work types, then their fields), so the first form of a project takes a little longer.
+- A create the agent made with other arguments than asked says to check Jira before trying again.
+- Needs core API 1.34. With this, the pack imports core only through the SDK.
+
 ## 1.1.6 — 2026-11-10
 
 - Keeps its last answer over MCP in the pack's store (`ctx.store.kv`), not a file of its own through core's `keptFile`. `data/jira-kept.json` is no longer read and can be deleted: the first start after this shows "waiting" until the first read. Needs core API 1.33.

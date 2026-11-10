@@ -17,7 +17,9 @@ const issueItem = (i: JiraIssue, showAssignee: boolean) =>
 export function setupNote(setup: JiraSetup, error: string) {
   if (setup === "waiting") return html`<p class="t2">Asking Jira through Claude Code's Atlassian MCP. It takes about 15 seconds, and fills in by itself.</p>`;
   const how =
-    setup === "no-claude"
+    setup === "allow"
+      ? html`Jira goes through Claude Code's Atlassian MCP here (<code>JIRA_VIA=mcp</code>), and this pack isn't allowed MCP calls yet: tick it on <a href="/settings/packs/jira#ai">Settings → Packs → Jira</a>.`
+      : setup === "no-claude"
       ? html`Jira goes through Claude Code's Atlassian MCP here (<code>JIRA_VIA=mcp</code>), and Claude Code isn't installed. Install it, or set <code>JIRA_VIA=off</code>.`
       : html`Claude Code's Atlassian MCP isn't signed in. Run <code>claude</code> in a terminal, type <code>/mcp</code>, pick <strong>atlassian</strong> and sign in; Dovre asks again on its next round, or at once with Read now.`;
   return Notice({ tone: "warn", children: html`<strong>Jira isn't reachable yet.</strong> ${how} <span class="t3">(${error})</span>` });
