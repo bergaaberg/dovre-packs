@@ -22,3 +22,5 @@ export const DIFF_GLUE = ${JSON.stringify(glue)};
 `);
 console.log(`diff.wasm: ${wasm.length} bytes (sha256 ${sha}); glue ${glue.length}`);
 ' "$out/wasm_canary.js"
+# The server script: the glue above, then server.handler.js.
+node --experimental-strip-types server.build.ts

@@ -2,16 +2,28 @@
  * WASM canary (`wasm-canary`): a line diff written in Rust (rust/, built by build.sh), compiled to
  * WebAssembly (no `unsafe`; wasm-bindgen carries the strings) and run in the browser. It proves the path a heavier pack takes (a syntax-aware
  * diff, tree-sitter, a formatter): core serves the module (`Pack.wasm`), the page's script
- * compiles it, and the server never runs it. The module is a file (diff.wasm) kept out of the Worker
- * bundle: core serves it locally from `load`, hosted from the static assets its build step writes. Nothing typed here leaves the browser.
+ * compiles it. The module is a file (diff.wasm) kept out of the Worker bundle: core serves it
+ * locally from `load`, hosted from the static assets its build step writes. Nothing typed here leaves the browser.
+ *
+ * It also proves Rust on the server (core's Pack.server, API 2.1): `refresh` diffs the page's
+ * sample through `ctx.call`, in a thread of its own locally and in a Worker of its own hosted
+ * (server.js: the same glue, then server.handler.js), and the page says how that went.
  */
 import { readFileSync } from "node:fs";
 import { html } from "hono/html";
 import type { Pack } from "dovre/pack.ts";
 import { DIFF_GLUE, DIFF_SHA256 } from "./diff.wasm.ts";
+import { SERVER_SHA256 } from "./server.sha.ts";
 
 /** The module's bytes, from diff.wasm beside this file. Under Node only: the Worker never reads it. */
 export const diffWasm = (): Uint8Array => new Uint8Array(readFileSync(new URL("./diff.wasm", import.meta.url)));
+
+/** server.js's bytes, for core's Pack.server. Under Node only, like diffWasm. */
+export const serverJs = (): Uint8Array => new Uint8Array(readFileSync(new URL("./server.js", import.meta.url)));
+
+/** What the last server diff of the sample came to, kept for the page. */
+type ServerRun = { ok: true; lines: number; hosted: boolean; at: number } | { ok: false; error: string; at: number };
+const RUN_KEY = "server-run";
 
 const OLD = `name: dovre
 compatibility_date: 2026-10-06
@@ -30,6 +42,7 @@ const styles = `
 .wc-pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin: 12px 0; }
 .wc-pair label { display: grid; gap: 4px; font-size: var(--fs-s); color: var(--text-2); }
 .wc-pair textarea { min-height: 160px; font: var(--fs-s) / 1.45 var(--mono); }
+.wc-server { font-size: var(--fs-s); color: var(--text-2); }
 .wc-status { font-size: var(--fs-s); color: var(--text-2); }
 .wc-out { margin: 8px 0 0; padding: 8px 0; border: 1px solid var(--border); border-radius: var(--r-s); font: var(--fs-s) / 1.45 var(--mono); overflow-x: auto; }
 .wc-out span { display: block; padding: 0 10px; white-space: pre; }
@@ -69,11 +82,11 @@ const script = `${DIFF_GLUE}
 export function createWasmCanaryPack(): Pack {
   return {
     manifest: {
-      api: "2.0",
-      version: "1.0.2",
+      api: "2.1",
+      version: "1.1.0",
       id: "wasm-canary",
       name: "WASM canary",
-      description: "A line diff written in Rust, run as WebAssembly in your browser: proves a pack can ship and run WebAssembly. Nothing typed here is sent anywhere.",
+      description: "A line diff written in Rust, run as WebAssembly in your browser and, on a fixed sample, on the server: proves a pack can ship and run WebAssembly in both. Nothing typed here is sent anywhere.",
       domain: "general",
       execution: "any",
       private: true,
@@ -81,11 +94,25 @@ export function createWasmCanaryPack(): Pack {
     styles,
     script,
     wasm: { diff: { sha256: DIFF_SHA256, load: diffWasm } },
+    server: { script: { sha256: SERVER_SHA256, load: serverJs }, wasm: ["diff"], calls: ["diff"], ms: 5000 },
+    // The sample only, never what's typed on the page.
+    async refresh(ctx) {
+      const r = await ctx.call("diff", { old: OLD, new: NEW });
+      const lines = r.ok ? (r.value as { lines?: unknown })?.lines : undefined;
+      const run: ServerRun = Array.isArray(lines) ? { ok: true, lines: lines.length, hosted: ctx.hosted, at: Date.now() } : { ok: false, error: r.ok ? "it answered without lines" : r.error, at: Date.now() };
+      await ctx.store.kv.set(RUN_KEY, run);
+    },
     pages: () => [{ title: "WASM canary", href: "/wasm-canary", icon: "±", about: "A line diff in Rust, run as WebAssembly in your browser", also: ["wasm", "webassembly", "rust", "diff"] }],
     about: (_ctx, path) => (path.startsWith("/wasm-canary") ? "The WASM canary (what's typed here stays in the browser)" : undefined),
     routes(app, ctx) {
-      app.get("/wasm-canary", (c) =>
-        ctx.page(c, {
+      app.get("/wasm-canary", async (c) => {
+        const run = await ctx.store.kv.get<ServerRun>(RUN_KEY).catch(() => undefined);
+        const server = !run
+          ? "On the server: not run yet (it runs with the pack's refresh)."
+          : run.ok
+            ? `On the server: the sample above, diffed by the same Rust in ${run.hosted ? "a Worker" : "a thread"} of its own: ${run.lines} lines.`
+            : `On the server: didn't run: ${run.error}`;
+        return ctx.page(c, {
           title: "WASM canary",
           current: "/wasm-canary",
           body: html`<section id="wc-root" data-wasm="${ctx.wasm("diff") ?? ""}">
@@ -97,9 +124,10 @@ export function createWasmCanaryPack(): Pack {
             </div>
             <p class="wc-status" role="status">This page needs script: the diff runs in your browser.</p>
             <pre class="wc-out" aria-label="Diff"></pre>
+            <p class="wc-server">${server}</p>
           </section>`,
-        }),
-      );
+        });
+      });
     },
   };
 }

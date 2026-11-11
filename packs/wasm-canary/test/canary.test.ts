@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { assertInert, packApp } from "dovre/pack-testing.ts";
+import { readFileSync } from "node:fs";
+import { assertInert, packApp, serverOf, testContext } from "dovre/pack-testing.ts";
 import { createWasmCanaryPack, diffWasm } from "../index.ts";
+import { serverText } from "../server.build.ts";
 import { DIFF_GLUE, DIFF_SHA256 } from "../diff.wasm.ts";
 
 /** What the page's script does, under Node: the same glue, the same module. */
@@ -30,4 +32,27 @@ test("the canary's page: its module is served as WebAssembly, the page names it,
   const wasm = await get(path!);
   assert.equal(wasm.headers.get("Content-Type"), "application/wasm");
   assert.ok(WebAssembly.validate(new Uint8Array(await wasm.arrayBuffer())));
+});
+
+test("on the server: the same Rust diff through ctx.call, in a thread of its own; server.js is its glue and handler as built", async () => {
+  assert.equal(readFileSync(new URL("../server.js", import.meta.url), "utf8"), serverText(), "run server.build.ts after changing server.handler.js");
+  const pack = createWasmCanaryPack();
+  const call = serverOf(pack);
+  try {
+    assert.deepEqual(await call("diff", { old: "a\nb\n", new: "a\nc\n" }), { ok: true, value: { lines: [" a", "-b", "+c"] } });
+    const ctx = testContext({ call });
+    await pack.refresh!(ctx);
+    assert.deepEqual({ ...((await ctx.store.kv.get("server-run")) as object), at: 0 }, { ok: true, lines: 6, hosted: false, at: 0 }, "the sample: 4 lines kept, 2 added");
+  } finally {
+    await call.stop();
+  }
+});
+
+test("the page says how the server diff went: not yet, or its error", async () => {
+  const { get } = packApp([createWasmCanaryPack()]);
+  assert.match(await (await get("/wasm-canary")).text(), /On the server: not run yet/);
+  const pack = createWasmCanaryPack();
+  const ctx = testContext({ call: async () => ({ ok: false, error: "spin took over 5 s; stopped" }) });
+  await pack.refresh!(ctx);
+  assert.equal(((await ctx.store.kv.get("server-run")) as { error: string }).error, "spin took over 5 s; stopped");
 });
