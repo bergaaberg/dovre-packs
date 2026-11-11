@@ -1,0 +1,1 @@
+@dprint/markdown@0.28.2: MIT (its package.json). Source: https://github.com/dprint/dprint-plugin-markdown

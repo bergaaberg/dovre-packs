@@ -210,6 +210,103 @@ function merge(marks) {
   return out;
 }
 
+// ── Only formatting (dovre#301) ─────────────────────────────────────────────
+// A file whose two sides come out the same from one formatter changed only formatting. The
+// formatter (dprint) is a normaliser here, never the repo's style: its settings below only make
+// more layouts agree. The old side isn't read: it's rebuilt from the new one and the diff's hunks.
+
+/** File extension → dprint plugin. */
+export const FMT = {
+  ts: "typescript", mts: "typescript", cts: "typescript", tsx: "typescript",
+  js: "typescript", mjs: "typescript", cjs: "typescript", jsx: "typescript",
+  json: "json", jsonc: "json", toml: "toml", md: "markdown", markdown: "markdown",
+  css: "css", scss: "css", less: "css",
+};
+
+export function fmtOf(path) {
+  const m = /\.([A-Za-z0-9]+)$/.exec(path || "");
+  return m ? FMT[m[1].toLowerCase()] : undefined;
+}
+
+/** dprint's settings: one quote style, always semicolons, and a line kept to one when it fits, so two layouts of the same code agree. */
+export const FMT_GLOBAL = { indentWidth: 2, lineWidth: 100, useTabs: false, newLineKind: "lf" };
+export const FMT_CONFIG = {
+  typescript: { quoteStyle: "alwaysDouble", semiColons: "always", trailingCommas: "onlyMultiLine", preferSingleLine: true, "arrowFunction.useParentheses": "force", "module.sortImportDeclarations": "maintain", "importDeclaration.sortNamedImports": "maintain", "exportDeclaration.sortNamedExports": "maintain" },
+  json: { preferSingleLine: true, trailingCommas: "never" },
+  toml: {},
+  markdown: {},
+  css: {},
+};
+
+/**
+ * A file's old side from its new side and its diff's lines (linesOf: hunk headers, then ctx, del
+ * and add lines in order). Undefined when they don't agree: a line the diff shows isn't where its
+ * hunk says, the hunks go backwards, or a header doesn't read.
+ */
+export function rebuildOld(newText, lines) {
+  const neu = newText.replace(/\r\n/g, "\n").split("\n");
+  const out = [];
+  let at = 0;
+  let seen = false;
+  for (let i = 0; i < lines.length; ) {
+    const l = lines[i++];
+    if (l.kind !== "hunk") {
+      if (l.kind === "ctx" || l.kind === "add" || l.kind === "del") return undefined;
+      continue;
+    }
+    const m = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/.exec(l.text);
+    if (!m) return undefined;
+    seen = true;
+    // A hunk with no lines on the new side names the line before it.
+    const from = m[2] === "0" ? Number(m[1]) : Number(m[1]) - 1;
+    if (from < at || from > neu.length) return undefined;
+    for (; at < from; at++) out.push(neu[at]);
+    for (; i < lines.length && lines[i].kind !== "hunk"; i++) {
+      const x = lines[i];
+      if (x.kind === "ctx" || x.kind === "add") {
+        if (neu[at] !== x.text) return undefined;
+        at++;
+      }
+      if (x.kind === "ctx" || x.kind === "del") out.push(x.text);
+    }
+  }
+  if (!seen) return undefined;
+  for (; at < neu.length; at++) out.push(neu[at]);
+  return out.join("\n");
+}
+
+/** Whether two texts are the same once formatted. `format(text)` throws on what it can't parse; so does this. Blank lines count only in Markdown. */
+export function sameFormatted(format, kind, oldText, newText) {
+  const norm = (t) => {
+    const s = format(t.replace(/\r\n/g, "\n")).replace(/\r\n/g, "\n");
+    return kind === "markdown" ? s.trimEnd() : s.split("\n").filter((l) => l.trim()).join("\n");
+  };
+  return norm(oldText) === norm(newText);
+}
+
+/**
+ * Whether one file of a diff changed only formatting: "same", "more" (it changed more), or
+ * "unknown" with why. `newText`: the file's new side; `format(kind)`: a promise of (text, path)
+ * => formatted, for a dprint plugin.
+ */
+export async function onlyFormatting(path, newText, lines, format) {
+  const kind = fmtOf(path);
+  if (!kind) return { verdict: "unknown", why: "No formatter for this kind of file." };
+  const old = rebuildOld(newText, lines);
+  if (old === undefined) return { verdict: "unknown", why: "The diff doesn't match the file as it is now." };
+  let fmt;
+  try {
+    fmt = await format(kind);
+  } catch {
+    return { verdict: "unknown", why: "The formatter didn't load." };
+  }
+  try {
+    return { verdict: sameFormatted((t) => fmt(t, path), kind, old, newText) ? "same" : "more" };
+  } catch {
+    return { verdict: "unknown", why: "The formatter couldn't read one of its sides." };
+  }
+}
+
 // ── In the browser ──────────────────────────────────────────────────────────
 
 const kindOf = (el) => (el.classList.contains("d-add") ? "add" : el.classList.contains("d-del") ? "del" : el.classList.contains("d-ctx") ? "ctx" : undefined);
@@ -229,7 +326,8 @@ export function linesOf(table) {
   for (let r = 0; r < rows.length; ) {
     const tr = rows[r];
     if (tr.classList.contains("d-hunk")) {
-      lines.push({ kind: "hunk", text: "", els: [], rows: [tr] });
+      // Its header ("@@ -1,4 +1,5 @@"): where the hunk sits, for rebuilding a file's old side.
+      lines.push({ kind: "hunk", text: tr.querySelector("td.code > code")?.textContent ?? "", els: [], rows: [tr] });
       r++;
       continue;
     }
@@ -377,22 +475,108 @@ function loader(manifest) {
   };
 }
 
-/** Upgrades every diff table on the page as it comes into view, and those a live update brings. */
+/** dprint's host, loaded once, and each plugin when a file first needs it: kind → a promise of (text, path) => formatted. */
+function formatters(fmt) {
+  let host;
+  const made = new Map();
+  return (kind) => {
+    if (!fmt?.plugins?.[kind]) return Promise.reject(new Error(`no formatter for ${kind}`));
+    if (!made.has(kind))
+      made.set(kind, (host ??= import(fmt.js)).then(async (m) => {
+        const f = await m.createStreaming(fetch(fmt.plugins[kind]));
+        f.setConfig(FMT_GLOBAL, FMT_CONFIG[kind] ?? {});
+        return (text, path) => f.formatText({ filePath: path, fileText: text });
+      }));
+    return made.get(kind);
+  };
+}
+
+/** A file's status as core's pill says it ("added", "removed", "modified", "renamed"). */
+const statusOf = (details) => details.querySelector(".dfile-name .pill")?.textContent?.trim() ?? "";
+
+/** Says on a file that it changed only formatting, and closes it unless someone has said something on it. */
+function markSame(doc, details) {
+  const meta = details.querySelector(".dfile-meta");
+  if (meta && !meta.querySelector(".cr-only")) {
+    const s = doc.createElement("span");
+    s.className = "cr-only";
+    s.textContent = "formatting only";
+    meta.prepend(s);
+  }
+  if (!details.querySelector(".pr-thread, summary .spark")) details.open = false;
+}
+
+/** Checks one file against its new side at `src` (the pack's /code-review/src). */
+async function check(doc, details, src, fmtFor) {
+  const table = details.querySelector("table.diff");
+  if (!table) return { verdict: "unknown", why: "This file's changes aren't shown." };
+  const r = await fetch(src, { credentials: "same-origin" }).catch(() => undefined);
+  if (!r?.ok) return { verdict: "unknown", why: "The file didn't load." };
+  const res = await onlyFormatting(details.dataset.stopLabel ?? "", await r.text(), linesOf(table), fmtFor);
+  if (res.verdict === "same") markSame(doc, details);
+  return res;
+}
+
+/** On a checkout's own diff (core's /code/<dir>/diff), where a file's new side is read locally: its source, else undefined. */
+export function localSrc(loc, path) {
+  const m = /^\/code\/([^/]+)\/diff$/.exec(loc.pathname);
+  if (!m) return undefined;
+  const q = new URLSearchParams(loc.search);
+  // The working tree when no head or commit is named.
+  const ref = q.get("commit") || q.get("head") || "";
+  return `/code-review/src?${new URLSearchParams({ dir: decodeURIComponent(m[1]), ref, path })}`;
+}
+
+const BUTTON = { same: "Only formatting", more: "More than formatting", unknown: "Couldn't tell" };
+
+/**
+ * Upgrades every diff table on the page as it comes into view, and those a live update brings. On
+ * a checkout's own diff, each file a formatter knows is checked for formatting only; on a PR's,
+ * when its button ("Only formatting?", the pr.file slot) is pressed, since that reads the forge.
+ */
 export function start(doc, manifestUrl) {
+  const manifest = fetch(manifestUrl).then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status))))).catch(() => undefined);
   let ts;
-  const tsOf = () => (ts ??= fetch(manifestUrl).then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status))))).then(loader, () => undefined));
+  const tsOf = () => (ts ??= manifest.then((m) => (m ? loader(m) : undefined)));
+  let fmts;
+  const fmtOfPage = () => (fmts ??= manifest.then((m) => formatters(m?.fmt)));
   const seen = new WeakSet();
   const io = new IntersectionObserver(
     (entries) => {
       for (const e of entries) {
         if (!e.isIntersecting) continue;
         io.unobserve(e.target);
-        const path = e.target.closest("details.dfile")?.dataset.stopLabel ?? "";
-        tsOf().then((t) => upgrade(doc, e.target, path, t)).catch(() => undefined);
+        const details = e.target.closest("details.dfile");
+        const path = details?.dataset.stopLabel ?? "";
+        tsOf()
+          .then((t) => upgrade(doc, e.target, path, t))
+          .then(async () => {
+            const src = details && fmtOf(path) && !/^(added|removed)$/.test(statusOf(details)) && !details.querySelector(".cr-only") ? localSrc(doc.location, path) : undefined;
+            if (src) await check(doc, details, src, await fmtOfPage());
+          })
+          .catch(() => undefined);
       }
     },
     { rootMargin: "600px 0px" },
   );
+  doc.addEventListener("click", (e) => {
+    const b = e.target instanceof Element ? e.target.closest("button.cr-fmt") : null;
+    if (!b) return;
+    // It sits in the file's <summary>: pressing it mustn't open or close the file.
+    e.preventDefault();
+    const details = b.closest("details.dfile");
+    if (!details || b.disabled || !b.dataset.crSrc?.startsWith("/code-review/src?")) return;
+    b.disabled = true;
+    b.textContent = "Checking…";
+    fmtOfPage()
+      .then((f) => check(doc, details, b.dataset.crSrc, f))
+      .catch(() => ({ verdict: "unknown", why: "Something went wrong." }))
+      .then((res) => {
+        b.textContent = BUTTON[res.verdict];
+        b.title = res.why ?? "";
+        if (res.verdict === "unknown") b.disabled = false;
+      });
+  });
   const scan = () => {
     for (const t of doc.querySelectorAll("table.diff:not([data-cr])")) {
       if (seen.has(t)) continue;
@@ -403,4 +587,3 @@ export function start(doc, manifestUrl) {
   scan();
   new MutationObserver(scan).observe(doc.body, { childList: true, subtree: true });
 }
-

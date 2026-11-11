@@ -6,7 +6,7 @@ import { packApp } from "dovre/pack-testing.ts";
 import { codeReviewPack, ENGINE_PATH } from "../index.ts";
 import { ENGINE_JS, QUERIES, RUNTIME_JS_SHA, SHA } from "../gen.ts";
 // @ts-expect-error: plain JS, no types
-import { GRAMMARS, genSource } from "../gen.mjs";
+import { FORMATTERS, GRAMMARS, genSource } from "../gen.mjs";
 
 test("gen.ts is what build.sh writes from vendor/ and engine.js now (run build.sh after editing either)", () => {
   assert.equal(readFileSync(new URL("../gen.ts", import.meta.url), "utf8"), genSource());
@@ -15,7 +15,7 @@ test("gen.ts is what build.sh writes from vendor/ and engine.js now (run build.s
 
 test("each module is a file kept out of the bundle, its declared hash its bytes'; load reads it", async () => {
   const wasm = codeReviewPack.wasm!;
-  assert.deepEqual(Object.keys(wasm).sort(), ["runtime", ...GRAMMARS].sort());
+  assert.deepEqual(Object.keys(wasm).sort(), ["runtime", ...GRAMMARS, ...FORMATTERS.map((f: string) => `fmt-${f}`)].sort());
   for (const [name, mod] of Object.entries(wasm)) {
     assert.ok(!(mod instanceof Uint8Array), `${name}: a file, not bytes in the bundle`);
     const bytes = await mod.load();

@@ -2,8 +2,9 @@
 # Rebuilds vendor/ and gen.ts. Needs Node and npm (nothing else).
 # - vendor/: web-tree-sitter (its runtime .wasm and ES module) and one grammar .wasm plus its
 #   highlight queries per language, from the npm packages pinned below (npm checks each tarball
-#   against the registry's integrity hash). All MIT; their licences are copied beside them.
-# - gen.ts: the first 16 hex digits of each .wasm's and of web-tree-sitter.js's SHA-256 (core's
+#   against the registry's integrity hash); dprint's host (bundled by esbuild) and one formatter
+#   plugin .wasm per language. All MIT; their licences are copied beside them.
+# - gen.ts: the first 16 hex digits of each .wasm's and of each script's SHA-256 (core's
 #   WasmFile and Pack.files), and the queries and engine.js as strings (the Worker can't read files).
 # Everything it writes is committed: installing or testing the pack needs neither npm nor network.
 set -eu
@@ -52,4 +53,23 @@ cp "$work/css/package/queries/highlights.scm" vendor/css.scm
 fetch tree-sitter-c-sharp@0.23.5 csharp
 cp "$work/csharp/package/tree-sitter-c_sharp.wasm" vendor/csharp.wasm
 cp "$work/csharp/package/queries/highlights.scm" vendor/csharp.scm
+# Formatters (dovre#301): dprint's host bundled into one ES module (core serves each pack file on
+# its own, so its imports have to be inside it), and one plugin .wasm per language. A plugin whose
+# package has no LICENSE file says its licence in package.json: that and its source are written down.
+fetch @dprint/formatter@0.6.0 dprint
+out="$PWD/vendor/dprint.js"
+(cd "$work" && npx --yes esbuild@0.28.2 dprint/package/esm/mod.js --bundle --format=esm --log-level=warning --outfile="$out")
+plugin() { # <package@version> <name> <source repo>
+  fetch "$1" "fmt-$2"
+  cp "$work/fmt-$2/package/plugin.wasm" "vendor/fmt-$2.wasm"
+  if [ ! -f "vendor/licenses/fmt-$2.txt" ]; then
+    lic=$(node -p 'require(process.argv[1]).license' "$work/fmt-$2/package/package.json")
+    echo "$1: $lic (its package.json). Source: $3" > "vendor/licenses/fmt-$2.txt"
+  fi
+}
+plugin @dprint/typescript@0.96.1 typescript https://github.com/dprint/dprint-plugin-typescript
+plugin @dprint/json@0.25.2 json https://github.com/dprint/dprint-plugin-json
+plugin @dprint/toml@0.9.0 toml https://github.com/dprint/dprint-plugin-toml
+plugin @dprint/markdown@0.28.2 markdown https://github.com/dprint/dprint-plugin-markdown
+plugin dprint-plugin-malva@0.16.0 css https://github.com/g-plane/malva
 node gen.mjs

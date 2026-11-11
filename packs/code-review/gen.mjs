@@ -3,6 +3,8 @@ import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 
 export const GRAMMARS = ["typescript", "tsx", "javascript", "go", "rust", "python", "json", "yaml", "toml", "css", "csharp"];
+/** dprint plugins (vendor/fmt-<name>.wasm), served as `fmt-<name>`. */
+export const FORMATTERS = ["typescript", "json", "toml", "markdown", "css"];
 
 const here = (f) => new URL(f, import.meta.url);
 const sha16 = (b) => createHash("sha256").update(b).digest("hex").slice(0, 16);
@@ -14,12 +16,15 @@ export function genSource() {
     sha[g] = sha16(readFileSync(here(`vendor/${g}.wasm`)));
     queries[g] = readFileSync(here(`vendor/${g}.scm`), "utf8");
   }
+  for (const f of FORMATTERS) sha[`fmt-${f}`] = sha16(readFileSync(here(`vendor/fmt-${f}.wasm`)));
   const engine = readFileSync(here("engine.js"), "utf8");
   return `// Built by build.sh (gen.mjs) from vendor/ and engine.js. Don't edit.
 /** The first 16 hex digits of each module's SHA-256 (core's WasmFile). */
 export const SHA: Record<string, string> = ${JSON.stringify(sha, null, 2)};
 /** The first 16 hex digits of web-tree-sitter.js's SHA-256 (core's Pack.files). */
 export const RUNTIME_JS_SHA = ${JSON.stringify(sha16(readFileSync(here("vendor/web-tree-sitter.js"))))};
+/** The first 16 hex digits of dprint.js's SHA-256 (dprint's host, bundled). */
+export const DPRINT_JS_SHA = ${JSON.stringify(sha16(readFileSync(here("vendor/dprint.js"))))};
 /** Each grammar's highlight queries (tree-sitter's highlights.scm). */
 export const QUERIES: Record<string, string> = ${JSON.stringify(queries)};
 /** engine.js, served to the page. */
