@@ -9,10 +9,17 @@
  * The grammars and the runtime are files beside the pack (vendor/, built by build.sh), kept out of
  * the Worker bundle: core serves them (the .wasm as Pack.wasm WasmFiles, web-tree-sitter.js as a
  * Pack.files script). Without script, the diff is core's.
+ *
+ * Only formatting (dovre#301): a file whose two sides come out the same from dprint (WebAssembly,
+ * one plugin per language, in the browser too) is marked and closed. On a checkout's own diff every
+ * file a formatter knows is checked; on a PR's, when its "Only formatting?" button is pressed, since
+ * that reads the file at the PR's head from the forge (src.ts).
  */
 import { readFileSync } from "node:fs";
+import { html } from "hono/html";
 import type { Pack, WasmFile } from "dovre/pack.ts";
-import { ENGINE_JS, QUERIES, RUNTIME_JS_SHA, SHA } from "./gen.ts";
+import { DPRINT_JS_SHA, ENGINE_JS, QUERIES, RUNTIME_JS_SHA, SHA } from "./gen.ts";
+import { formattable, MAX_SRC, prSrc, readSrc, srcAsk } from "./src.ts";
 
 /** A file from vendor/ (under Node only: hosted, core serves the built copy). */
 const vendored = (sha256: string, name: string): WasmFile => ({ sha256, load: () => new Uint8Array(readFileSync(new URL(`./vendor/${name}`, import.meta.url))) });
@@ -28,6 +35,8 @@ const hashOf = (s: string) => {
 export const ENGINE_PATH = `/code-review/js/engine.${hashOf(ENGINE_JS)}.js`;
 const queryPath = (lang: string) => `/code-review/q/${lang}.${hashOf(QUERIES[lang]!)}.scm`;
 const MANIFEST = "/code-review/langs.json";
+/** dprint plugins, served as `fmt-<name>`. */
+const FORMATTERS = Object.keys(SHA).filter((n) => n.startsWith("fmt-")).map((n) => n.slice(4));
 
 const styles = `
 .cr-k, .cr-v { color: var(--accent); }
@@ -67,17 +76,26 @@ export function createCodeReviewPack(): Pack {
   return {
     manifest: {
       api: "2.0",
-      version: "1.0.2",
+      version: "1.1.0",
       id: "code-review",
       name: "Code review",
-      description: "Diffs read as a reviewer does: highlighting, changes marked by token, whitespace and layout changes folded. Runs in your browser (tree-sitter, as WebAssembly).",
+      description: "Diffs read as a reviewer does: highlighting, changes marked by token, whitespace and layout changes folded, files that only changed formatting marked. Runs in your browser (tree-sitter and dprint, as WebAssembly).",
       domain: "general",
       execution: "any",
+      // Reads a file at a ref in a checkout, for the formatting check (local).
+      binaries: ["git"],
     },
     styles,
     script,
-    wasm: Object.fromEntries(["runtime", ...Object.keys(QUERIES)].map((n) => [n, file(n)])),
-    files: { "web-tree-sitter.js": vendored(RUNTIME_JS_SHA, "web-tree-sitter.js") },
+    wasm: Object.fromEntries(["runtime", ...Object.keys(QUERIES), ...FORMATTERS.map((f) => `fmt-${f}`)].map((n) => [n, file(n)])),
+    files: { "web-tree-sitter.js": vendored(RUNTIME_JS_SHA, "web-tree-sitter.js"), "dprint.js": vendored(DPRINT_JS_SHA, "dprint.js") },
+    slots: (ctx) => ({
+      // A PR's file: whether it changed only formatting, when asked (one forge read).
+      "pr.file": (f) =>
+        formattable(f.path) && !/^(added|removed)$/.test(f.status) && /^[0-9a-f]{40}$/.test(f.sha) && ctx.forge()?.file
+          ? html`<button type="button" class="btn sm ghost cr-fmt" data-cr-src="${prSrc(f.repo, f.sha, f.path)}" title="Reads this file at the PR's head and checks whether its changes are only formatting">Only formatting?</button>`
+          : "",
+    }),
     routes(app, ctx) {
       app.get("/code-review/langs.json", (c) => {
         const langs: Record<string, { wasm: string; query: string }> = {};
@@ -85,8 +103,21 @@ export function createCodeReviewPack(): Pack {
           const wasm = ctx.wasm(lang);
           if (wasm) langs[lang] = { wasm, query: queryPath(lang) };
         }
+        const plugins: Record<string, string> = {};
+        for (const f of FORMATTERS) {
+          const wasm = ctx.wasm(`fmt-${f}`);
+          if (wasm) plugins[f] = wasm;
+        }
+        const dprint = ctx.file("dprint.js");
         c.header("Cache-Control", "private, max-age=300");
-        return c.json({ runtimeJs: ctx.file("web-tree-sitter.js") ?? "", runtimeWasm: ctx.wasm("runtime") ?? "", langs });
+        return c.json({ runtimeJs: ctx.file("web-tree-sitter.js") ?? "", runtimeWasm: ctx.wasm("runtime") ?? "", langs, ...(dprint ? { fmt: { js: dprint, plugins } } : {}) });
+      });
+      // A file's new side for the formatting check: at a PR's head (the forge) or in a checkout (local).
+      app.get("/code-review/src", async (c) => {
+        const ask = srcAsk(c.req.query());
+        const text = ask ? await readSrc(ctx, ask) : undefined;
+        if (text === undefined || text.length > MAX_SRC) return c.notFound();
+        return new Response(text, { headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff" } });
       });
       app.get("/code-review/js/:file", (c) => {
         const at = `/code-review/js/${c.req.param("file")}`;
