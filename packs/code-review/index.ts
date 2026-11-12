@@ -76,7 +76,7 @@ export function createCodeReviewPack(): Pack {
   return {
     manifest: {
       api: "2.0",
-      version: "1.2.0",
+      version: "1.3.0",
       id: "code-review",
       name: "Code review",
       description: "Diffs read as a reviewer does: highlighting, changes marked by token, whitespace and layout changes folded, files that only changed formatting marked. Runs in your browser (tree-sitter, dprint and Ruff, as WebAssembly).",

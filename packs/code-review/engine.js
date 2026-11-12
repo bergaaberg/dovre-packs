@@ -278,18 +278,68 @@ export function rebuildOld(newText, lines) {
   return out.join("\n");
 }
 
-/** Whether two texts are the same once formatted. `format(text)` throws on what it can't parse; so does this. Blank lines count only in Markdown. */
+/** A text as the formatter prints it, line ends as LF. `format(text)` throws on what it can't parse; so does this. */
+const formatted = (format, t) => format(t.replace(/\r\n/g, "\n")).replace(/\r\n/g, "\n");
+/** What two formatted texts are compared on: blank lines count only in Markdown. */
+const normal = (kind, s) => (kind === "markdown" ? s.trimEnd() : s.split("\n").filter((l) => l.trim()).join("\n"));
+
+/** Whether two texts are the same once formatted. Throws on what the formatter can't parse. */
 export function sameFormatted(format, kind, oldText, newText) {
-  const norm = (t) => {
-    const s = format(t.replace(/\r\n/g, "\n")).replace(/\r\n/g, "\n");
-    return kind === "markdown" ? s.trimEnd() : s.split("\n").filter((l) => l.trim()).join("\n");
-  };
-  return norm(oldText) === norm(newText);
+  return normal(kind, formatted(format, oldText)) === normal(kind, formatted(format, newText));
+}
+
+/**
+ * The diff of two formatted texts, as diff lines (hunk headers, then ctx, del and add lines, three
+ * lines of context): what changed besides formatting. Outside Markdown a blank line is never a
+ * change: one removed is dropped, one added is shown as context. Undefined when the two are too far
+ * apart to compare.
+ */
+export function logicDiff(kind, oldText, newText, context = 3, cap = 2_000_000) {
+  const linesIn = (t) => (t ? t.replace(/\n$/, "").split("\n") : []);
+  const a = linesIn(oldText);
+  const b = linesIn(newText);
+  let lo = 0;
+  while (lo < a.length && lo < b.length && a[lo] === b[lo]) lo++;
+  let ha = a.length;
+  let hb = b.length;
+  while (ha > lo && hb > lo && a[ha - 1] === b[hb - 1]) ha--, hb--;
+  if ((ha - lo) * (hb - lo) > cap) return undefined;
+  const [keepA, keepB] = lcs(a, b, cap);
+  const blank = (t) => kind !== "markdown" && !t.trim();
+  // Removed lines before the added ones that replace them, each run where it sits in both sides.
+  const all = [];
+  for (let i = 0, j = 0; i < a.length || j < b.length; ) {
+    if (i < a.length && j < b.length && keepA[i] && keepB[j]) {
+      all.push({ kind: "ctx", text: b[j], o: i++, n: j++ });
+      continue;
+    }
+    for (; i < a.length && !keepA[i]; i++) if (!blank(a[i])) all.push({ kind: "del", text: a[i], o: i, n: j });
+    for (; j < b.length && !keepB[j]; j++) all.push(blank(b[j]) ? { kind: "ctx", text: b[j], o: i, n: j, onlyNew: true } : { kind: "add", text: b[j], o: i, n: j });
+  }
+  const changed = all.map((l, k) => (l.kind !== "ctx" ? k : -1)).filter((k) => k >= 0);
+  const out = [];
+  for (let c = 0; c < changed.length; ) {
+    const from = Math.max(0, changed[c] - context);
+    let to = changed[c];
+    for (; c < changed.length && changed[c] <= to + 2 * context; c++) to = changed[c];
+    to = Math.min(all.length - 1, to + context);
+    const run = all.slice(from, to + 1);
+    const inOld = (l) => l.kind !== "add" && !l.onlyNew;
+    const olds = run.filter(inOld).length;
+    const news = run.filter((l) => l.kind !== "del").length;
+    // A side with no lines in the hunk names the line before it.
+    const o = olds ? run.find(inOld).o + 1 : run[0].o;
+    const n = news ? run.find((l) => l.kind !== "del").n + 1 : run[0].n;
+    out.push({ kind: "hunk", text: `@@ -${o},${olds} +${n},${news} @@` });
+    for (const l of run) out.push({ kind: l.kind, text: l.text });
+  }
+  return out;
 }
 
 /**
  * Whether one file of a diff changed only formatting: "same", "more" (it changed more), or
- * "unknown" with why. `newText`: the file's new side; `format(kind)`: a promise of (text, path)
+ * "unknown" with why. With "more", `logic`: the diff of the two sides formatted (logicDiff), when
+ * it has fewer changed lines than the diff itself. `newText`: the file's new side; `format(kind)`: a promise of (text, path)
  * => formatted, for a dprint plugin.
  */
 export async function onlyFormatting(path, newText, lines, format) {
@@ -303,11 +353,19 @@ export async function onlyFormatting(path, newText, lines, format) {
   } catch {
     return { verdict: "unknown", why: "The formatter didn't load." };
   }
+  let a;
+  let b;
   try {
-    return { verdict: sameFormatted((t) => fmt(t, path), kind, old, newText) ? "same" : "more" };
+    a = formatted((t) => fmt(t, path), old);
+    b = formatted((t) => fmt(t, path), newText);
   } catch {
     return { verdict: "unknown", why: "The formatter couldn't read one of its sides." };
   }
+  if (normal(kind, a) === normal(kind, b)) return { verdict: "same" };
+  // What changed besides formatting, when that's less than the diff shows.
+  const logic = logicDiff(kind, a, b);
+  const count = (ls) => ls.filter((l) => l.kind === "add" || l.kind === "del").length;
+  return logic && count(logic) < count(lines) ? { verdict: "more", logic } : { verdict: "more" };
 }
 
 // ── In the browser ──────────────────────────────────────────────────────────
@@ -517,14 +575,85 @@ function markSame(doc, details) {
   if (!details.querySelector(".pr-thread, summary .spark")) details.open = false;
 }
 
+/**
+ * A unified diff table, as core draws one, of diff lines (logicDiff's). No line numbers: they'd be
+ * of the formatted text, not the file.
+ */
+export function logicTable(doc, lines) {
+  const table = doc.createElement("table");
+  table.className = "diff cr-logic";
+  const body = doc.createElement("tbody");
+  const row = (cls, ...cells) => {
+    const tr = doc.createElement("tr");
+    tr.className = cls;
+    tr.append(doc.createElement("td"), doc.createElement("td"), ...cells);
+    for (const td of tr.children) if (td.tagName === "TD" && !td.className) td.className = "ln";
+    body.append(tr);
+    return tr;
+  };
+  const cell = (text, sign) => {
+    const td = doc.createElement("td");
+    td.className = "code";
+    const code = doc.createElement("code");
+    if (sign !== undefined) {
+      const s = doc.createElement("span");
+      s.className = "d-sign";
+      s.setAttribute("aria-hidden", "true");
+      s.textContent = sign;
+      code.append(s);
+    }
+    code.append(text);
+    td.append(code);
+    return td;
+  };
+  const note = cell("Both sides run through the formatter: only what changed besides formatting.");
+  note.classList.add("t3");
+  row("d-note", note);
+  const SIGN = { ctx: " ", add: "+", del: "-" };
+  for (const l of lines) row(l.kind === "hunk" ? "d-hunk" : `d-${l.kind}`, cell(l.text, l.kind === "hunk" ? undefined : SIGN[l.kind]));
+  table.append(body);
+  return table;
+}
+
+/** Puts a "Logic only" button on a file that changed more than formatting: it swaps its diff for the formatted one. */
+function offerLogic(doc, details, table, logic) {
+  const meta = details.querySelector(".dfile-meta");
+  const wrap = table.closest(".diff-wrap") ?? table;
+  if (!meta || meta.querySelector(".cr-logic-btn")) return;
+  const b = doc.createElement("button");
+  b.type = "button";
+  b.className = "btn sm ghost cr-logic-btn";
+  b.textContent = "Logic only";
+  b.title = "Shows the diff of the two sides once both are formatted, without the formatting changes";
+  let alt;
+  b.addEventListener("click", (e) => {
+    // It sits in the file's <summary>: pressing it mustn't open or close the file.
+    e.preventDefault();
+    if (!alt) {
+      alt = doc.createElement("div");
+      alt.className = "diff-wrap";
+      alt.append(logicTable(doc, logic));
+      alt.hidden = true;
+      wrap.after(alt);
+    }
+    const on = alt.hidden;
+    alt.hidden = !on;
+    wrap.hidden = on;
+    b.textContent = on ? "All changes" : "Logic only";
+    if (on) details.open = true;
+  });
+  meta.append(b);
+}
+
 /** Checks one file against its new side at `src` (the pack's /code-review/src). */
 async function check(doc, details, src, fmtFor) {
-  const table = details.querySelector("table.diff");
+  const table = details.querySelector("table.diff:not(.cr-logic)");
   if (!table) return { verdict: "unknown", why: "This file's changes aren't shown." };
   const r = await fetch(src, { credentials: "same-origin" }).catch(() => undefined);
   if (!r?.ok) return { verdict: "unknown", why: "The file didn't load." };
   const res = await onlyFormatting(details.dataset.stopLabel ?? "", await r.text(), linesOf(table), fmtFor);
   if (res.verdict === "same") markSame(doc, details);
+  if (res.logic) offerLogic(doc, details, table, res.logic);
   return res;
 }
 
@@ -562,7 +691,7 @@ export function start(doc, manifestUrl) {
         tsOf()
           .then((t) => upgrade(doc, e.target, path, t))
           .then(async () => {
-            const src = details && fmtOf(path) && !/^(added|removed)$/.test(statusOf(details)) && !details.querySelector(".cr-only") ? localSrc(doc.location, path) : undefined;
+            const src = details && !e.target.classList.contains("cr-logic") && fmtOf(path) && !/^(added|removed)$/.test(statusOf(details)) && !details.querySelector(".cr-only") ? localSrc(doc.location, path) : undefined;
             if (src) await check(doc, details, src, await fmtOfPage());
           })
           .catch(() => undefined);
