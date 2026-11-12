@@ -1,5 +1,9 @@
 # code-review
 
+## 1.3.0 — 2026-11-12
+
+- A file that changed more than formatting, where formatting is part of its diff, gets a "Logic only" button (dovre#301). It shows the diff of the two sides once both are formatted: only what changed besides formatting, highlighted as usual, without line numbers (they'd be of the formatted text). "All changes" brings the diff back. On a PR it comes with the "Only formatting?" check.
+
 ## 1.2.0 — 2026-11-12
 
 - Python files (`.py`, `.pyi`) are checked for formatting only too, through Ruff's formatter (WebAssembly, 10 MB, loaded the first time a Python file is checked; dovre#301). A trailing comma doesn't keep a list open, so two layouts of the same code agree.

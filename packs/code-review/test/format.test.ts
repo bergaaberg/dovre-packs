@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { packApp, testContext } from "dovre/pack-testing.ts";
 // @ts-expect-error: plain JS, no types
-import { FMT, FMT_CONFIG, FMT_GLOBAL, localSrc, onlyFormatting, rebuildOld } from "../engine.js";
+import { FMT, FMT_CONFIG, FMT_GLOBAL, localSrc, logicDiff, logicTable, onlyFormatting, rebuildOld } from "../engine.js";
 import { codeReviewPack } from "../index.ts";
 import { DPRINT_JS_SHA, RUFF_JS_SHA, SHA } from "../gen.ts";
 import { FMT_EXTS, MAX_SRC, prSrc, readSrc, srcAsk } from "../src.ts";
@@ -60,11 +60,63 @@ test("onlyFormatting: reflowed TypeScript is the same, a changed value is more, 
   assert.deepEqual(await onlyFormatting("src/a.ts", neu, lines, format), { verdict: "same" });
   const changed = neu.replace("c: 1", "c: 2");
   const changedLines = [L("hunk", "@@ -1,4 +1,4 @@"), ...old.trimEnd().split("\n").map((t) => L("del", t)), ...changed.trimEnd().split("\n").map((t) => L("add", t))];
-  assert.deepEqual(await onlyFormatting("src/a.ts", changed, changedLines, format), { verdict: "more" });
+  // Eight lines changed in the diff; besides formatting, one value. The blank line it added is context.
+  assert.deepEqual(await onlyFormatting("src/a.ts", changed, changedLines, format), {
+    verdict: "more",
+    logic: [L("hunk", "@@ -1,3 +1,4 @@"), L("del", 'const x = { a: "b", c: 1 };'), L("add", 'const x = { a: "b", c: 2 };'), L("ctx", ""), L("ctx", "foo(a, b);"), L("ctx", "const f = (x) => x * 2;")],
+  });
+  // Nothing but a value changed: the formatted diff is no smaller, so none is offered.
+  const plain = [L("hunk", "@@ -1 +1 @@"), L("del", "const x = 1;"), L("add", "const x = 2;")];
+  assert.deepEqual(await onlyFormatting("src/a.ts", "const x = 2;\n", plain, format), { verdict: "more" });
   const broken = "const = = ;\n";
   assert.equal((await onlyFormatting("src/a.ts", broken, [L("hunk", "@@ -1 +1 @@"), L("del", "const x = 1;"), L("add", "const = = ;")], format)).verdict, "unknown");
   assert.equal((await onlyFormatting("src/a.rs", neu, lines, format)).verdict, "unknown", "no formatter for Rust");
   assert.equal((await onlyFormatting("src/a.ts", "something else\n", lines, format)).verdict, "unknown", "the diff isn't of this file");
+});
+
+test("logicDiff: hunks with three lines of context, far changes apart; blank lines never a change outside Markdown", () => {
+  const a = Array.from({ length: 20 }, (_, i) => `line ${i}`);
+  const b = a.map((l, i) => (i === 2 ? "two" : i === 17 ? "seventeen" : l));
+  b.splice(10, 0, "");
+  const d = logicDiff("typescript", a.join("\n") + "\n", b.join("\n") + "\n");
+  assert.deepEqual(d.filter((l: any) => l.kind === "hunk").map((l: any) => l.text), ["@@ -1,6 +1,6 @@", "@@ -15,6 +16,6 @@"]);
+  assert.deepEqual(d.filter((l: any) => l.kind !== "ctx" && l.kind !== "hunk").map((l: any) => `${l.kind} ${l.text}`), ["del line 2", "add two", "del line 17", "add seventeen"]);
+  assert.deepEqual(logicDiff("typescript", "a\n\nb\n", "a\nb\n"), [], "a removed blank line isn't a change");
+  assert.deepEqual(logicDiff("markdown", "a\nb\n", "a\n\nb\n"), [L("hunk", "@@ -1,2 +1,3 @@"), L("ctx", "a"), L("add", ""), L("ctx", "b")]);
+  assert.deepEqual(logicDiff("typescript", "", "x\n"), [L("hunk", "@@ -0,0 +1,1 @@"), L("add", "x")]);
+  assert.equal(logicDiff("typescript", "a\nb\nc\n", "x\ny\nz\n", 3, 4), undefined, "too far apart to compare");
+});
+
+/** Just enough of a document for logicTable: elements print as HTML, strings as escaped text. */
+function fakeDoc() {
+  const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const el = (tag: string): any => {
+    const e: any = { tagName: tag.toUpperCase(), className: "", attrs: {} as Record<string, string>, kids: [] as any[] };
+    e.append = (...xs: any[]) => e.kids.push(...xs);
+    e.setAttribute = (k: string, v: string) => (e.attrs[k] = v);
+    e.classList = { add: (c: string) => (e.className += ` ${c}`) };
+    Object.defineProperty(e, "children", { get: () => e.kids.filter((k: any) => typeof k !== "string") });
+    Object.defineProperty(e, "textContent", { set: (t: string) => (e.kids = [t]) });
+    e.html = (): string => {
+      const at = [e.className && ` class="${e.className}"`, ...Object.entries(e.attrs).map(([k, v]) => ` ${k}="${v}"`)].join("");
+      return `<${tag}${at}>${e.kids.map((k: any) => (typeof k === "string" ? esc(k) : k.html())).join("")}</${tag}>`;
+    };
+    return e;
+  };
+  return { createElement: el };
+}
+
+test("logicTable: core's unified rows, no line numbers, the file's text set as text", () => {
+  const t = logicTable(fakeDoc(), [L("hunk", "@@ -1 +1 @@"), L("del", "<img src=x onerror=alert(1)>"), L("add", "b")]).html();
+  assert.equal(
+    t,
+    '<table class="diff cr-logic"><tbody>' +
+      '<tr class="d-note"><td class="ln"></td><td class="ln"></td><td class="code t3"><code>Both sides run through the formatter: only what changed besides formatting.</code></td></tr>' +
+      '<tr class="d-hunk"><td class="ln"></td><td class="ln"></td><td class="code"><code>@@ -1 +1 @@</code></td></tr>' +
+      '<tr class="d-del"><td class="ln"></td><td class="ln"></td><td class="code"><code><span class="d-sign" aria-hidden="true">-</span>&lt;img src=x onerror=alert(1)&gt;</code></td></tr>' +
+      '<tr class="d-add"><td class="ln"></td><td class="ln"></td><td class="code"><code><span class="d-sign" aria-hidden="true">+</span>b</code></td></tr>' +
+      "</tbody></table>",
+  );
 });
 
 test("onlyFormatting: JSON, TOML and CSS normalise; in Markdown a blank line still counts", async () => {
