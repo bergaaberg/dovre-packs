@@ -56,3 +56,19 @@ test("the page says how the server diff went: not yet, or its error", async () =
   await pack.refresh!(ctx);
   assert.equal(((await ctx.store.kv.get("server-run")) as { error: string }).error, "spin took over 5 s; stopped");
 });
+
+test("DuckDB: the page names its module (over 25 MB, a pinned release) and its files; duckdb.js is the bundle duck.build.sh hashed", async () => {
+  const { createHash } = await import("node:crypto");
+  const { DUCK_JS_SHA256, DUCK_WASM_SHA256, DUCK_WASM_URL, DUCK_WORKER_URL } = await import("../duck.ts");
+  const { duckJs } = await import("../index.ts");
+  assert.equal(createHash("sha256").update(duckJs()).digest("hex").slice(0, 16), DUCK_JS_SHA256, "run duck.build.sh");
+  for (const u of [DUCK_WASM_URL, DUCK_WORKER_URL]) assert.match(u, /^https:\/\/cdn\.jsdelivr\.net\/npm\/@duckdb\/duckdb-wasm@\d+\.\d+\.\d+-dev\d+\.0\/dist\//, "a pinned version");
+  const { get } = packApp([createWasmCanaryPack()]);
+  const page = await (await get("/wasm-canary")).text();
+  assertInert("canary page", page);
+  assert.match(page, new RegExp(`id="wc-duck" class="wc-duck" data-wasm="/assets/wasm/wasm-canary\\.duckdb\\.${DUCK_WASM_SHA256}\\.wasm"`));
+  assert.match(page, /<button type="button" class="btn sm wc-run" disabled>Run<\/button>/, "off until its script runs");
+  const js = await get(`/assets/files/wasm-canary.duckdb.${DUCK_JS_SHA256}.js`);
+  assert.equal(js.status, 200);
+  assert.match(await js.text(), /^\/\* @duckdb\/duckdb-wasm .*\(MIT\)/);
+});
