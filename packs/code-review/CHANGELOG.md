@@ -1,5 +1,9 @@
 # code-review
 
+## 1.2.0 — 2026-11-12
+
+- Python files (`.py`, `.pyi`) are checked for formatting only too, through Ruff's formatter (WebAssembly, 10 MB, loaded the first time a Python file is checked; dovre#301). A trailing comma doesn't keep a list open, so two layouts of the same code agree.
+
 ## 1.1.0 — 2026-11-11
 
 - Files that changed only formatting are marked "formatting only" and closed (dovre#301). Both sides go through dprint (WebAssembly, in your browser: TypeScript and JavaScript, JSON, TOML, Markdown, CSS) and come out the same. The old side isn't read: it's rebuilt from the new one and the diff.

@@ -215,12 +215,13 @@ function merge(marks) {
 // formatter (dprint) is a normaliser here, never the repo's style: its settings below only make
 // more layouts agree. The old side isn't read: it's rebuilt from the new one and the diff's hunks.
 
-/** File extension → dprint plugin. */
+/** File extension → formatter: a dprint plugin, or Ruff (python). */
 export const FMT = {
   ts: "typescript", mts: "typescript", cts: "typescript", tsx: "typescript",
   js: "typescript", mjs: "typescript", cjs: "typescript", jsx: "typescript",
   json: "json", jsonc: "json", toml: "toml", md: "markdown", markdown: "markdown",
   css: "css", scss: "css", less: "css",
+  py: "python", pyi: "python",
 };
 
 export function fmtOf(path) {
@@ -236,6 +237,8 @@ export const FMT_CONFIG = {
   toml: {},
   markdown: {},
   css: {},
+  // Ruff's settings (ruff.toml's, as JSON): a trailing comma doesn't keep a list open.
+  python: { "line-length": 100, format: { "skip-magic-trailing-comma": true, "quote-style": "double", "indent-style": "space" } },
 };
 
 /**
@@ -475,12 +478,20 @@ function loader(manifest) {
   };
 }
 
-/** dprint's host, loaded once, and each plugin when a file first needs it: kind → a promise of (text, path) => formatted. */
+/** dprint's host, loaded once, and each plugin (or Ruff) when a file first needs it: kind → a promise of (text, path) => formatted. */
 function formatters(fmt) {
   let host;
   const made = new Map();
   return (kind) => {
     if (!fmt?.plugins?.[kind]) return Promise.reject(new Error(`no formatter for ${kind}`));
+    if (kind === "python" && !made.has(kind)) {
+      if (!fmt.ruff) return Promise.reject(new Error("no formatter for python"));
+      made.set(kind, import(fmt.ruff).then(async (m) => {
+        await m.default({ module_or_path: fmt.plugins.python });
+        const w = new m.Workspace(FMT_CONFIG.python);
+        return (text) => w.format(text);
+      }));
+    }
     if (!made.has(kind))
       made.set(kind, (host ??= import(fmt.js)).then(async (m) => {
         const f = await m.createStreaming(fetch(fmt.plugins[kind]));

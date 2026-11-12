@@ -3,8 +3,8 @@ import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 
 export const GRAMMARS = ["typescript", "tsx", "javascript", "go", "rust", "python", "json", "yaml", "toml", "css", "csharp"];
-/** dprint plugins (vendor/fmt-<name>.wasm), served as `fmt-<name>`. */
-export const FORMATTERS = ["typescript", "json", "toml", "markdown", "css"];
+/** Formatters (vendor/fmt-<name>.wasm), served as `fmt-<name>`: dprint plugins, and Ruff for Python. */
+export const FORMATTERS = ["typescript", "json", "toml", "markdown", "css", "python"];
 
 const here = (f) => new URL(f, import.meta.url);
 const sha16 = (b) => createHash("sha256").update(b).digest("hex").slice(0, 16);
@@ -25,6 +25,8 @@ export const SHA: Record<string, string> = ${JSON.stringify(sha, null, 2)};
 export const RUNTIME_JS_SHA = ${JSON.stringify(sha16(readFileSync(here("vendor/web-tree-sitter.js"))))};
 /** The first 16 hex digits of dprint.js's SHA-256 (dprint's host, bundled). */
 export const DPRINT_JS_SHA = ${JSON.stringify(sha16(readFileSync(here("vendor/dprint.js"))))};
+/** The first 16 hex digits of ruff.js's SHA-256 (Ruff's wasm-bindgen glue). */
+export const RUFF_JS_SHA = ${JSON.stringify(sha16(readFileSync(here("vendor/ruff.js"))))};
 /** Each grammar's highlight queries (tree-sitter's highlights.scm). */
 export const QUERIES: Record<string, string> = ${JSON.stringify(queries)};
 /** engine.js, served to the page. */
