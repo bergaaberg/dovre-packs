@@ -11,14 +11,14 @@
  * Pack.files script). Without script, the diff is core's.
  *
  * Only formatting (dovre#301): a file whose two sides come out the same from dprint (WebAssembly,
- * one plugin per language, in the browser too) is marked and closed. On a checkout's own diff every
+ * one plugin per language, in the browser too; Ruff for Python) is marked and closed. On a checkout's own diff every
  * file a formatter knows is checked; on a PR's, when its "Only formatting?" button is pressed, since
  * that reads the file at the PR's head from the forge (src.ts).
  */
 import { readFileSync } from "node:fs";
 import { html } from "hono/html";
 import type { Pack, WasmFile } from "dovre/pack.ts";
-import { DPRINT_JS_SHA, ENGINE_JS, QUERIES, RUNTIME_JS_SHA, SHA } from "./gen.ts";
+import { DPRINT_JS_SHA, ENGINE_JS, QUERIES, RUFF_JS_SHA, RUNTIME_JS_SHA, SHA } from "./gen.ts";
 import { formattable, MAX_SRC, prSrc, readSrc, srcAsk } from "./src.ts";
 
 /** A file from vendor/ (under Node only: hosted, core serves the built copy). */
@@ -35,7 +35,7 @@ const hashOf = (s: string) => {
 export const ENGINE_PATH = `/code-review/js/engine.${hashOf(ENGINE_JS)}.js`;
 const queryPath = (lang: string) => `/code-review/q/${lang}.${hashOf(QUERIES[lang]!)}.scm`;
 const MANIFEST = "/code-review/langs.json";
-/** dprint plugins, served as `fmt-<name>`. */
+/** Formatters, served as `fmt-<name>`: dprint plugins, and Ruff (python). */
 const FORMATTERS = Object.keys(SHA).filter((n) => n.startsWith("fmt-")).map((n) => n.slice(4));
 
 const styles = `
@@ -76,10 +76,10 @@ export function createCodeReviewPack(): Pack {
   return {
     manifest: {
       api: "2.0",
-      version: "1.1.0",
+      version: "1.2.0",
       id: "code-review",
       name: "Code review",
-      description: "Diffs read as a reviewer does: highlighting, changes marked by token, whitespace and layout changes folded, files that only changed formatting marked. Runs in your browser (tree-sitter and dprint, as WebAssembly).",
+      description: "Diffs read as a reviewer does: highlighting, changes marked by token, whitespace and layout changes folded, files that only changed formatting marked. Runs in your browser (tree-sitter, dprint and Ruff, as WebAssembly).",
       domain: "general",
       execution: "any",
       // Reads a file at a ref in a checkout, for the formatting check (local).
@@ -88,7 +88,7 @@ export function createCodeReviewPack(): Pack {
     styles,
     script,
     wasm: Object.fromEntries(["runtime", ...Object.keys(QUERIES), ...FORMATTERS.map((f) => `fmt-${f}`)].map((n) => [n, file(n)])),
-    files: { "web-tree-sitter.js": vendored(RUNTIME_JS_SHA, "web-tree-sitter.js"), "dprint.js": vendored(DPRINT_JS_SHA, "dprint.js") },
+    files: { "web-tree-sitter.js": vendored(RUNTIME_JS_SHA, "web-tree-sitter.js"), "dprint.js": vendored(DPRINT_JS_SHA, "dprint.js"), "ruff.js": vendored(RUFF_JS_SHA, "ruff.js") },
     slots: (ctx) => ({
       // A PR's file: whether it changed only formatting, when asked (one forge read).
       "pr.file": (f) =>
@@ -109,8 +109,9 @@ export function createCodeReviewPack(): Pack {
           if (wasm) plugins[f] = wasm;
         }
         const dprint = ctx.file("dprint.js");
+        const ruff = ctx.file("ruff.js");
         c.header("Cache-Control", "private, max-age=300");
-        return c.json({ runtimeJs: ctx.file("web-tree-sitter.js") ?? "", runtimeWasm: ctx.wasm("runtime") ?? "", langs, ...(dprint ? { fmt: { js: dprint, plugins } } : {}) });
+        return c.json({ runtimeJs: ctx.file("web-tree-sitter.js") ?? "", runtimeWasm: ctx.wasm("runtime") ?? "", langs, ...(dprint ? { fmt: { js: dprint, ...(ruff ? { ruff } : {}), plugins } } : {}) });
       });
       // A file's new side for the formatting check: at a PR's head (the forge) or in a checkout (local).
       app.get("/code-review/src", async (c) => {

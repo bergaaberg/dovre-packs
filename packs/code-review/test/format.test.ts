@@ -10,7 +10,7 @@ import { packApp, testContext } from "dovre/pack-testing.ts";
 // @ts-expect-error: plain JS, no types
 import { FMT, FMT_CONFIG, FMT_GLOBAL, localSrc, onlyFormatting, rebuildOld } from "../engine.js";
 import { codeReviewPack } from "../index.ts";
-import { DPRINT_JS_SHA, SHA } from "../gen.ts";
+import { DPRINT_JS_SHA, RUFF_JS_SHA, SHA } from "../gen.ts";
 import { FMT_EXTS, MAX_SRC, prSrc, readSrc, srcAsk } from "../src.ts";
 
 const vendor = (f: string) => new URL(`../vendor/${f}`, import.meta.url);
@@ -18,6 +18,12 @@ const dprint: any = await import(vendor("dprint.js").href);
 const made = new Map<string, (text: string, path: string) => string>();
 /** As the browser's loader: the plugin, set up as the engine sets it. */
 async function format(kind: string) {
+  if (kind === "python" && !made.has(kind)) {
+    const ruff: any = await import(vendor("ruff.js").href);
+    ruff.initSync({ module: readFileSync(vendor("fmt-python.wasm")) });
+    const w = new ruff.Workspace(FMT_CONFIG.python);
+    made.set(kind, (text) => w.format(text));
+  }
   if (!made.has(kind)) {
     const f = dprint.createFromBuffer(readFileSync(vendor(`fmt-${kind}.wasm`)));
     f.setConfig(FMT_GLOBAL, FMT_CONFIG[kind]);
@@ -68,6 +74,14 @@ test("onlyFormatting: JSON, TOML and CSS normalise; in Markdown a blank line sti
   assert.equal((await one("a.toml", 'a="x"', 'a = "x"')).verdict, "same");
   assert.equal((await one("a.css", "a{color:red}", "a {\n  color: red;\n}")).verdict, "same");
   assert.equal((await one("a.md", "one\ntwo", "one\n\ntwo")).verdict, "more", "a blank line splits a paragraph");
+});
+
+test("onlyFormatting: Python through Ruff, a trailing comma not keeping a list open", async () => {
+  const one = (path: string, a: string, b: string) => onlyFormatting(path, b, [L("hunk", "@@ -1 +1 @@"), ...a.split("\n").map((t) => L("del", t)), ...b.split("\n").map((t) => L("add", t))], format);
+  assert.equal((await one("a.py", "x = {'a':1}\ndef f( a,b ):\n  return a+b", 'x = {"a": 1}\n\n\ndef f(a, b):\n    return a + b')).verdict, "same");
+  assert.equal((await one("a.pyi", "xs = [\n    1,\n    2,\n]", "xs = [1, 2]")).verdict, "same");
+  assert.equal((await one("a.py", "x = 1", "x = 2")).verdict, "more");
+  assert.equal((await one("a.py", "x = 1", "def (:")).verdict, "unknown", "doesn't parse");
 });
 
 test("localSrc: only on a checkout's own diff, with the head or commit it compares", () => {
@@ -149,14 +163,16 @@ test("readSrc: a checkout's working tree and refs; nothing through a link, outsi
   assert.equal(await readSrc(testContext({ codeDir: code, run, hosted: true }), { kind: "local", dir: "web", ref: "", path: "src/a.ts" }), undefined, "hosted");
 });
 
-test("/code-review/src: hostile queries are 404; the manifest names dprint and its plugins", async () => {
+test("/code-review/src: hostile queries are 404; the manifest names dprint, its plugins and Ruff", async () => {
   const { get } = packApp([codeReviewPack]);
   for (const q of ["", "?path=a.ts", "?repo=acme/web&sha=x&path=a.ts", "?dir=..&path=etc/passwd", "?dir=web&ref=--output%3D%2Ftmp%2Fx&path=a.ts", "?repo=acme/web&sha=" + "a".repeat(40) + "&path=..%2F..%2Fa.ts"]) {
     assert.equal((await get(`/code-review/src${q}`)).status, 404, q);
   }
-  const m = (await (await get("/code-review/langs.json")).json()) as { fmt?: { js: string; plugins: Record<string, string> } };
+  const m = (await (await get("/code-review/langs.json")).json()) as { fmt?: { js: string; ruff?: string; plugins: Record<string, string> } };
   assert.match(m.fmt?.js ?? "", new RegExp(`code-review\\.dprint\\.${DPRINT_JS_SHA}\\.js$`));
-  assert.deepEqual(Object.keys(m.fmt!.plugins).sort(), ["css", "json", "markdown", "toml", "typescript"]);
+  assert.deepEqual(Object.keys(m.fmt!.plugins).sort(), ["css", "json", "markdown", "python", "toml", "typescript"]);
+  assert.match(m.fmt?.ruff ?? "", new RegExp(`code-review\\.ruff\\.${RUFF_JS_SHA}\\.js$`));
+  assert.equal((await get(m.fmt!.ruff!)).status, 200);
   const wasm = await get(m.fmt!.plugins.typescript!);
   assert.equal(wasm.headers.get("Content-Type"), "application/wasm");
   assert.ok(WebAssembly.validate(new Uint8Array(await wasm.arrayBuffer())));

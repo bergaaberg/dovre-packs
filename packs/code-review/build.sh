@@ -72,4 +72,8 @@ plugin @dprint/json@0.25.2 json https://github.com/dprint/dprint-plugin-json
 plugin @dprint/toml@0.9.0 toml https://github.com/dprint/dprint-plugin-toml
 plugin @dprint/markdown@0.28.2 markdown https://github.com/dprint/dprint-plugin-markdown
 plugin dprint-plugin-malva@0.16.0 css https://github.com/g-plane/malva
+# Python: Ruff's formatter (wasm-bindgen, its own glue and module, not a dprint plugin).
+fetch @astral-sh/ruff-wasm-web@0.17.2 fmt-python
+cp "$work/fmt-python/package/ruff_wasm_bg.wasm" vendor/fmt-python.wasm
+sed '/^\/\/# sourceMappingURL=/d' "$work/fmt-python/package/ruff_wasm.js" > vendor/ruff.js
 node gen.mjs

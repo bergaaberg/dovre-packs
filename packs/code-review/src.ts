@@ -11,7 +11,7 @@ import type { PackContext } from "dovre/pack.ts";
 export const MAX_SRC = 2 * 1024 * 1024;
 
 /** Extensions a formatter knows (engine.js's FMT; a test keeps them the same). */
-export const FMT_EXTS = ["ts", "mts", "cts", "tsx", "js", "mjs", "cjs", "jsx", "json", "jsonc", "toml", "md", "markdown", "css", "scss", "less"];
+export const FMT_EXTS = ["ts", "mts", "cts", "tsx", "js", "mjs", "cjs", "jsx", "json", "jsonc", "toml", "md", "markdown", "css", "scss", "less", "py", "pyi"];
 export const formattable = (path: string) => FMT_EXTS.includes(/\.([A-Za-z0-9]+)$/.exec(path)?.[1]?.toLowerCase() ?? "");
 
 const REPO = /^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9._-]{1,100}$/;
