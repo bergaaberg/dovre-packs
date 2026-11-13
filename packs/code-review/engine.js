@@ -615,34 +615,54 @@ export function logicTable(doc, lines) {
   return table;
 }
 
-/** Puts a "Logic only" button on a file that changed more than formatting: it swaps its diff for the formatted one. */
-function offerLogic(doc, details, table, logic) {
+/**
+ * Puts an "All changes | Logic only" switch on a file that changed more than formatting: it swaps
+ * its diff for the formatted one. It sits in the file's sticky header, so the view shown stays in sight.
+ */
+export function offerLogic(doc, details, table, logic) {
   const meta = details.querySelector(".dfile-meta");
   const wrap = table.closest(".diff-wrap") ?? table;
-  if (!meta || meta.querySelector(".cr-logic-btn")) return;
-  const b = doc.createElement("button");
-  b.type = "button";
-  b.className = "btn sm ghost cr-logic-btn";
-  b.textContent = "Logic only";
-  b.title = "Shows the diff of the two sides once both are formatted, without the formatting changes";
+  if (!meta || meta.querySelector(".cr-view")) return;
+  const group = doc.createElement("span");
+  group.className = "cr-view";
+  group.setAttribute("role", "group");
+  group.setAttribute("aria-label", "Which changes this file shows");
+  const make = (label, title, logicOn) => {
+    const b = doc.createElement("button");
+    b.type = "button";
+    b.className = "btn sm ghost";
+    b.textContent = label;
+    b.title = title;
+    b.setAttribute("aria-pressed", String(!logicOn));
+    b.addEventListener("click", (e) => {
+      // It sits in the file's <summary>: pressing it mustn't open or close the file.
+      e.preventDefault();
+      show(logicOn);
+    });
+    return b;
+  };
+  const all = make("All changes", "Shows the diff as it is", false);
+  const only = make("Logic only", "Shows the diff of the two sides once both are formatted, without the formatting changes", true);
+  all.setAttribute("aria-pressed", "true");
+  only.setAttribute("aria-pressed", "false");
   let alt;
-  b.addEventListener("click", (e) => {
-    // It sits in the file's <summary>: pressing it mustn't open or close the file.
-    e.preventDefault();
-    if (!alt) {
+  const show = (on) => {
+    if (on && !alt) {
       alt = doc.createElement("div");
       alt.className = "diff-wrap";
       alt.append(logicTable(doc, logic));
       alt.hidden = true;
       wrap.after(alt);
     }
-    const on = alt.hidden;
-    alt.hidden = !on;
+    if (alt) alt.hidden = !on;
     wrap.hidden = on;
-    b.textContent = on ? "All changes" : "Logic only";
+    all.setAttribute("aria-pressed", String(!on));
+    only.setAttribute("aria-pressed", String(on));
+    details.classList.toggle("cr-logic-on", on);
     if (on) details.open = true;
-  });
-  meta.append(b);
+  };
+  group.append(all, only);
+  meta.append(group);
 }
 
 /** Checks one file against its new side at `src` (the pack's /code-review/src). */

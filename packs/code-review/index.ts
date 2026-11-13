@@ -53,6 +53,9 @@ mark.cr-x { color: inherit; border-radius: 2px; background: transparent; }
 tr.cr-fold td { padding: 2px 8px; background: var(--surface-2, transparent); }
 tr.cr-fold button { font-size: var(--fs-s); }
 .cr-only { font-size: var(--fs-s); color: var(--text-2); margin-right: 6px; }
+.cr-view { display: inline-flex; border: 1px solid var(--line); border-radius: var(--r-s); overflow: hidden; }
+.cr-view button { border-radius: 0; }
+.cr-view button[aria-pressed="true"] { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); font-weight: 600; }
 `;
 
 // On every page; does something only where a diff is (now, or once a live update brings one).
@@ -76,7 +79,7 @@ export function createCodeReviewPack(): Pack {
   return {
     manifest: {
       api: "2.0",
-      version: "1.3.0",
+      version: "1.3.1",
       id: "code-review",
       name: "Code review",
       description: "Diffs read as a reviewer does: highlighting, changes marked by token, whitespace and layout changes folded, files that only changed formatting marked. Runs in your browser (tree-sitter, dprint and Ruff, as WebAssembly).",

@@ -1,5 +1,9 @@
 # code-review
 
+## 1.3.1 — 2026-11-13
+
+- "Logic only" is now a switch, "All changes | Logic only", with the view shown pressed. It sits in the file's header, which stays at the top as you scroll, so which diff you're reading stays in sight.
+
 ## 1.3.0 — 2026-11-12
 
 - A file that changed more than formatting, where formatting is part of its diff, gets a "Logic only" button (dovre#301). It shows the diff of the two sides once both are formatted: only what changed besides formatting, highlighted as usual, without line numbers (they'd be of the formatted text). "All changes" brings the diff back. On a PR it comes with the "Only formatting?" check.
