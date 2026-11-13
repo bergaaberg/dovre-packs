@@ -1,5 +1,9 @@
 # wasm-canary
 
+## 1.3.0 — 2026-11-13
+
+- DuckDB runs on several threads (dovre#304). The page is cross-origin isolated (core's `isolated`, pack API 2.2), so it loads DuckDB's threads build (`duckdb-coi.wasm`, 36 MB, R2's hosted too, with its worker and the worker each thread runs) and opens it with up to 8 threads. Where the page isn't isolated it falls back to the one-thread build, and the status line says which ran. Needs core API 2.2.
+
 ## 1.2.0 — 2026-11-12
 
 - DuckDB on the page (dovre#304): 36 MB of WebAssembly, over the static assets' 25 MB, so hosted it's served from R2. It loads when Run is pressed and runs the query in your browser. The module and its worker are fetched from jsDelivr at a pinned version (@duckdb/duckdb-wasm 1.33.1-dev57.0) and checked by hash; `duckdb.js` (its browser API with Apache Arrow) is bundled by duck.build.sh. Hosted, needs core's R2 path: an R2 binding `PACK_FILES` and `node ../dovre/src/packs/assets.ts --r2 <bucket>` before deploying.

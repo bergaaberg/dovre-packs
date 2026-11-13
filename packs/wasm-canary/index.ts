@@ -13,13 +13,16 @@
  * typed on the page, in the browser, loaded only when Run is pressed. The module and its worker
  * aren't committed: `load` fetches them from jsDelivr at the version duck.build.sh pinned, and core
  * serves them only if their SHA-256 matches. Hosted, the module is read from R2.
+ *
+ * And threads (core's `isolated`, API 2.2): the page is cross-origin isolated, so DuckDB runs its
+ * threads build (SharedArrayBuffer, a worker per thread); where it isn't, the one-thread build.
  */
 import { readFileSync } from "node:fs";
 import { html } from "hono/html";
 import type { Pack } from "dovre/pack.ts";
 import { DIFF_GLUE, DIFF_SHA256 } from "./diff.wasm.ts";
 import { SERVER_SHA256 } from "./server.sha.ts";
-import { DUCK_JS_SHA256, DUCK_WASM_SHA256, DUCK_WASM_URL, DUCK_WORKER_SHA256, DUCK_WORKER_URL } from "./duck.ts";
+import { COI_PTHREAD_SHA256, COI_PTHREAD_URL, COI_WASM_SHA256, COI_WASM_URL, COI_WORKER_SHA256, COI_WORKER_URL, DUCK_JS_SHA256, DUCK_WASM_SHA256, DUCK_WASM_URL, DUCK_WORKER_SHA256, DUCK_WORKER_URL } from "./duck.ts";
 
 /** The module's bytes, from diff.wasm beside this file. Under Node only: the Worker never reads it. */
 export const diffWasm = (): Uint8Array => new Uint8Array(readFileSync(new URL("./diff.wasm", import.meta.url)));
@@ -112,10 +115,17 @@ const script = `${DIFF_GLUE}
   const status = root.querySelector(".wc-status");
   const out = root.querySelector(".wc-table");
   let db;
+  // Threads when the page is cross-origin isolated (core's \`isolated\`): the coi build, a worker per thread.
+  const coi = self.crossOriginIsolated === true && typeof SharedArrayBuffer === "function" && !!root.dataset.wasmCoi;
+  const threads = coi ? Math.max(1, Math.min(8, navigator.hardwareConcurrency || 1)) : 1;
   const open = async () => {
     const m = await import(dovreFiles["duckdb.js"]);
-    const d = new m.AsyncDuckDB(new m.VoidLogger(), new Worker(dovreFiles["duckdb-worker.js"]));
-    await d.instantiate(new URL(root.dataset.wasm, location.href).href);
+    const url = (p) => new URL(p, location.href).href;
+    const d = new m.AsyncDuckDB(new m.VoidLogger(), new Worker(dovreFiles[coi ? "duckdb-coi-worker.js" : "duckdb-worker.js"]));
+    if (coi) {
+      await d.instantiate(url(root.dataset.wasmCoi), url(dovreFiles["duckdb-coi-pthread.js"]));
+      await d.open({ maximumThreads: threads });
+    } else await d.instantiate(url(root.dataset.wasm));
     return d;
   };
   // Arrow's big numbers (HUGEINT, DECIMAL) are objects that print as numbers; lists and structs as JSON.
@@ -156,7 +166,7 @@ const script = `${DIFF_GLUE}
       try {
         const rows = draw(await c.query(sql.value));
         const t2 = performance.now();
-        status.textContent = "DuckDB, in your browser: " + rows + (rows === 1 ? " row" : " rows") + (rows > 100 ? " (the first 100 shown)" : "") + " in " + (t2 - t1).toFixed(0) + " ms" + (t1 - t0 > 50 ? ", after " + ((t1 - t0) / 1000).toFixed(1) + " s loading" : "") + ".";
+        status.textContent = "DuckDB, in your browser: " + rows + (rows === 1 ? " row" : " rows") + (rows > 100 ? " (the first 100 shown)" : "") + " in " + (t2 - t1).toFixed(0) + " ms" + (t1 - t0 > 50 ? ", after " + ((t1 - t0) / 1000).toFixed(1) + " s loading" : "") + ", " + (coi ? "up to " + threads + " threads" : "one thread (the page isn't cross-origin isolated)") + ".";
       } finally {
         await c.close();
       }
@@ -171,8 +181,8 @@ const script = `${DIFF_GLUE}
 export function createWasmCanaryPack(): Pack {
   return {
     manifest: {
-      api: "2.1",
-      version: "1.2.0",
+      api: "2.2",
+      version: "1.3.0",
       id: "wasm-canary",
       name: "WASM canary",
       description: "A line diff written in Rust, run as WebAssembly in your browser and, on a fixed sample, on the server, and DuckDB (36 MB) in your browser: proves a pack can ship and run WebAssembly, big modules too. Nothing typed here is sent anywhere.",
@@ -182,9 +192,14 @@ export function createWasmCanaryPack(): Pack {
     },
     styles,
     script,
-    // duckdb: 36 MB, over the static assets' limit: R2's hosted (core's assets.ts --r2).
-    wasm: { diff: { sha256: DIFF_SHA256, load: diffWasm }, duckdb: { sha256: DUCK_WASM_SHA256, load: pinned(DUCK_WASM_URL) } },
-    files: { "duckdb.js": { sha256: DUCK_JS_SHA256, load: duckJs }, "duckdb-worker.js": { sha256: DUCK_WORKER_SHA256, load: pinned(DUCK_WORKER_URL) } },
+    // Cross-origin isolated pages (COEP): SharedArrayBuffer, so DuckDB's threads build runs.
+    isolated: true,
+    // duckdb, duckdb-coi: 36 MB each, over the static assets' limit: R2's hosted (core's assets.ts --r2).
+    wasm: { diff: { sha256: DIFF_SHA256, load: diffWasm }, duckdb: { sha256: DUCK_WASM_SHA256, load: pinned(DUCK_WASM_URL) }, "duckdb-coi": { sha256: COI_WASM_SHA256, load: pinned(COI_WASM_URL) } },
+    files: { "duckdb.js": { sha256: DUCK_JS_SHA256, load: duckJs }, "duckdb-worker.js": { sha256: DUCK_WORKER_SHA256, load: pinned(DUCK_WORKER_URL) },
+      "duckdb-coi-worker.js": { sha256: COI_WORKER_SHA256, load: pinned(COI_WORKER_URL) },
+      "duckdb-coi-pthread.js": { sha256: COI_PTHREAD_SHA256, load: pinned(COI_PTHREAD_URL) },
+    },
     server: { script: { sha256: SERVER_SHA256, load: serverJs }, wasm: ["diff"], calls: ["diff"], ms: 5000 },
     // The sample only, never what's typed on the page.
     async refresh(ctx) {
@@ -217,9 +232,9 @@ export function createWasmCanaryPack(): Pack {
             <pre class="wc-out" aria-label="Diff"></pre>
             <p class="wc-server">${server}</p>
           </section>
-          <section id="wc-duck" class="wc-duck" data-wasm="${ctx.wasm("duckdb") ?? ""}">
+          <section id="wc-duck" class="wc-duck" data-wasm="${ctx.wasm("duckdb") ?? ""}" data-wasm-coi="${ctx.wasm("duckdb-coi") ?? ""}">
             <h2>DuckDB</h2>
-            <p>36 MB of WebAssembly, more than a Worker's static assets take for a file, so the hosted app serves it from R2. It loads when you press Run, and the query runs in your browser.</p>
+            <p>36 MB of WebAssembly, more than a Worker's static assets take for a file, so the hosted app serves it from R2. It loads when you press Run, and the query runs in your browser, on several threads where the page allows it.</p>
             <textarea class="wc-sql" spellcheck="false" aria-label="SQL">${SQL}</textarea>
             <button type="button" class="btn sm wc-run" disabled>Run</button>
             <p class="wc-status" role="status">This needs script: DuckDB runs in your browser.</p>
