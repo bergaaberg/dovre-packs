@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 // @ts-expect-error: plain JS, no types
-import { analyse, headerSymbol, langOf, lcs, symbolLabel, symbols, tokensOf } from "../engine.js";
+import { analyse, changedRows, EXT, headerSymbol, langOf, lcs, markChanged, outline, symbolLabel, symbols, tokensOf } from "../engine.js";
 // @ts-expect-error: plain JS, no types
 import { GRAMMARS } from "../gen.mjs";
 
@@ -198,4 +198,42 @@ test("symbolLabel: calls get (), types say what they are", () => {
   assert.equal(symbolLabel({ name: "Shelf", kind: "class" }), "class Shelf");
   assert.equal(symbolLabel({ name: "MAX", kind: "constant" }), "MAX");
   assert.equal(symbolLabel({ name: "vec", kind: "macro" }), "vec!");
+});
+
+// ── Outline (dovre#300) ──
+
+async function outlineOf(lang: string, text: string) {
+  const g = await grammar(lang);
+  return outline(text, (t: string) => g.parser.parse(t), g.tags).map((d: { name: string; kind: string; from: number; depth: number }) => `${"  ".repeat(d.depth)}${symbolLabel(d)}@${d.from}`);
+}
+
+test("outline: top-level definitions and class members in order, with their rows; not helpers inside a function", async () => {
+  const text = ["export const MAX = 1;", "export class Shelf {", "  load(n: number) {", "    const inner = () => n;", "    return inner();", "  }", "}", "", "export function start() {", "  function helper() {}", "}", "const f = () => 1;", "interface Box { a: number }"].join("\n");
+  assert.deepEqual(await outlineOf("typescript", text), ["MAX@0", "class Shelf@1", "  load()@2", "start()@8", "f()@11", "interface Box@12"]);
+});
+
+test("outline: Go, Rust, Python and C# by their own queries; CRLF reads the same", async () => {
+  assert.deepEqual(await outlineOf("python", "class Shelf:\r\n    def load(self):\r\n        def inner():\r\n            pass\r\n\r\ndef top():\r\n    pass\r\n"), ["class Shelf@0", "  load()@1", "top()@5"]);
+  assert.deepEqual(await outlineOf("go", "package a\n\nfunc Load() int {\n\treturn 1\n}\n"), ["Load()@2"]);
+  assert.deepEqual(await outlineOf("rust", "fn load() -> u8 {\n    2\n}\n"), ["load()@0"]);
+  assert.deepEqual(await outlineOf("csharp", "class Shelf {\n  int Load() { return 2; }\n}\n"), ["class Shelf@0", "  Load()@1"]);
+});
+
+test("changedRows: each change's row on the new side, a removal at the row after it; layout-only lines skipped", () => {
+  const lines = [L("hunk", "@@ -1,3 +1,3 @@"), L("ctx", "a"), L("del", "b"), L("add", "B"), L("ctx", "c"), L("hunk", "@@ -10,2 +10,0 @@"), L("del", "x"), L("hunk", "@@ -20 +19,2 @@ f()"), L("add", "y"), L("add", "z")];
+  assert.deepEqual(changedRows(lines), [{ row: 1, line: 2 }, { row: 1, line: 3 }, { row: 10, line: 6 }, { row: 18, line: 8 }, { row: 19, line: 9 }]);
+  assert.deepEqual(changedRows(lines, new Set([2, 3])).map((c: { line: number }) => c.line), [6, 8, 9]);
+  assert.deepEqual(changedRows([L("hunk", "not a header"), L("add", "a")]), [], "a header that doesn't read places nothing");
+});
+
+test("markChanged: a definition with a change inside it goes to its first; a class around a changed method is changed too", () => {
+  const defs = [{ name: "A", kind: "class", from: 0, to: 9, depth: 0 }, { name: "m", kind: "method", from: 2, to: 4, depth: 1 }, { name: "n", kind: "method", from: 5, to: 8, depth: 1 }];
+  const out = markChanged(defs, [{ row: 3, line: 7 }, { row: 4, line: 8 }]);
+  assert.deepEqual(out.map((d: { change?: number }) => d.change), [7, 7, undefined]);
+});
+
+test("the outline's extensions are the engine's grammars that have definition queries", async () => {
+  const { OUTLINE_EXTS } = await import("../src.ts");
+  const { TAGS } = await import("../gen.ts");
+  assert.deepEqual([...OUTLINE_EXTS].sort(), Object.keys(EXT).filter((e) => Object.hasOwn(TAGS, EXT[e])).sort());
 });

@@ -14,6 +14,10 @@ export const MAX_SRC = 2 * 1024 * 1024;
 export const FMT_EXTS = ["ts", "mts", "cts", "tsx", "js", "mjs", "cjs", "jsx", "json", "jsonc", "toml", "md", "markdown", "css", "scss", "less", "py", "pyi"];
 export const formattable = (path: string) => FMT_EXTS.includes(/\.([A-Za-z0-9]+)$/.exec(path)?.[1]?.toLowerCase() ?? "");
 
+/** Extensions whose grammar has definition queries, for the outline (engine.js's EXT and gen.ts's TAGS; a test keeps them the same). */
+export const OUTLINE_EXTS = ["ts", "mts", "cts", "tsx", "js", "mjs", "cjs", "jsx", "go", "rs", "py", "pyi", "cs"];
+export const outlined = (path: string) => OUTLINE_EXTS.includes(/\.([A-Za-z0-9]+)$/.exec(path)?.[1]?.toLowerCase() ?? "");
+
 const REPO = /^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9._-]{1,100}$/;
 const SHA = /^[0-9a-f]{40}$/;
 /** A ref as git reads one, never an option or a range. */
