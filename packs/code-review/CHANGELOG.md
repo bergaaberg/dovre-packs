@@ -1,5 +1,9 @@
 # code-review
 
+## 1.4.0 — 2026-11-13
+
+- A file's header names the functions, classes and methods its changes touch ("in start() · class Shelf · MAX"), four of them and the rest counted (dovre#300). Pressing one goes to its first change. They come from tree-sitter's definition queries (tags.scm) in the same parse of each hunk, and from the definition git names in a hunk's header, so nothing more is read. TypeScript, JavaScript, Go, Rust, Python and C#; changes that are only layout don't count.
+
 ## 1.3.1 — 2026-11-13
 
 - "Logic only" is now a switch, "All changes | Logic only", with the view shown pressed. It sits in the file's header, which stays at the top as you scroll, so which diff you're reading stays in sight.

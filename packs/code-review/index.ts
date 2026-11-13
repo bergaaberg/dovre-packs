@@ -6,6 +6,10 @@
  * parsed on its own, so nothing more is read from the forge. The comments, threads and Viewed
  * boxes core draws stay as they are: only the code's text is redrawn (engine.js).
  *
+ * Changed symbols (dovre#300): a file's header names the functions, classes and methods its changes
+ * touch, found with each grammar's definition queries (tags.scm) in the same parse of each hunk,
+ * and with the definition git names in a hunk's header. Nothing more is read from the forge.
+ *
  * The grammars and the runtime are files beside the pack (vendor/, built by build.sh), kept out of
  * the Worker bundle: core serves them (the .wasm as Pack.wasm WasmFiles, web-tree-sitter.js as a
  * Pack.files script). Without script, the diff is core's.
@@ -18,7 +22,7 @@
 import { readFileSync } from "node:fs";
 import { html } from "hono/html";
 import type { Pack, WasmFile } from "dovre/pack.ts";
-import { DPRINT_JS_SHA, ENGINE_JS, QUERIES, RUFF_JS_SHA, RUNTIME_JS_SHA, SHA } from "./gen.ts";
+import { DPRINT_JS_SHA, ENGINE_JS, QUERIES, RUFF_JS_SHA, RUNTIME_JS_SHA, SHA, TAGS } from "./gen.ts";
 import { formattable, MAX_SRC, prSrc, readSrc, srcAsk } from "./src.ts";
 
 /** A file from vendor/ (under Node only: hosted, core serves the built copy). */
@@ -34,6 +38,7 @@ const hashOf = (s: string) => {
 
 export const ENGINE_PATH = `/code-review/js/engine.${hashOf(ENGINE_JS)}.js`;
 const queryPath = (lang: string) => `/code-review/q/${lang}.${hashOf(QUERIES[lang]!)}.scm`;
+const tagsPath = (lang: string) => `/code-review/t/${lang}.${hashOf(TAGS[lang]!)}.scm`;
 const MANIFEST = "/code-review/langs.json";
 /** Formatters, served as `fmt-<name>`: dprint plugins, and Ruff (python). */
 const FORMATTERS = Object.keys(SHA).filter((n) => n.startsWith("fmt-")).map((n) => n.slice(4));
@@ -56,6 +61,11 @@ tr.cr-fold button { font-size: var(--fs-s); }
 .cr-view { display: inline-flex; border: 1px solid var(--line); border-radius: var(--r-s); overflow: hidden; }
 .cr-view button { border-radius: 0; }
 .cr-view button[aria-pressed="true"] { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); font-weight: 600; }
+.cr-syms { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; margin-right: 8px; font-size: var(--fs-s); min-width: 0; }
+.cr-syms-in { color: var(--text-3); }
+.cr-sym { font: inherit; font-family: var(--mono, monospace); color: var(--text-2); background: none; border: 0; padding: 0; cursor: pointer; max-width: 24ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cr-sym:hover, .cr-sym:focus-visible { color: var(--accent); text-decoration: underline; }
+tr.cr-here > td { box-shadow: inset 3px 0 0 var(--accent); }
 `;
 
 // On every page; does something only where a diff is (now, or once a live update brings one).
@@ -79,10 +89,10 @@ export function createCodeReviewPack(): Pack {
   return {
     manifest: {
       api: "2.0",
-      version: "1.3.1",
+      version: "1.4.0",
       id: "code-review",
       name: "Code review",
-      description: "Diffs read as a reviewer does: highlighting, changes marked by token, whitespace and layout changes folded, files that only changed formatting marked. Runs in your browser (tree-sitter, dprint and Ruff, as WebAssembly).",
+      description: "Diffs read as a reviewer does: highlighting, changes marked by token, the functions and classes they touch named, whitespace and layout changes folded, files that only changed formatting marked. Runs in your browser (tree-sitter, dprint and Ruff, as WebAssembly).",
       domain: "general",
       execution: "any",
       // Reads a file at a ref in a checkout, for the formatting check (local).
@@ -101,10 +111,10 @@ export function createCodeReviewPack(): Pack {
     }),
     routes(app, ctx) {
       app.get("/code-review/langs.json", (c) => {
-        const langs: Record<string, { wasm: string; query: string }> = {};
+        const langs: Record<string, { wasm: string; query: string; tags?: string }> = {};
         for (const lang of Object.keys(QUERIES)) {
           const wasm = ctx.wasm(lang);
-          if (wasm) langs[lang] = { wasm, query: queryPath(lang) };
+          if (wasm) langs[lang] = { wasm, query: queryPath(lang), ...(Object.hasOwn(TAGS, lang) ? { tags: tagsPath(lang) } : {}) };
         }
         const plugins: Record<string, string> = {};
         for (const f of FORMATTERS) {
@@ -131,6 +141,11 @@ export function createCodeReviewPack(): Pack {
         const lang = c.req.param("file").split(".")[0] ?? "";
         if (!Object.hasOwn(QUERIES, lang) || `/code-review/q/${c.req.param("file")}` !== queryPath(lang)) return c.notFound();
         return new Response(QUERIES[lang], { headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "private, max-age=31536000, immutable" } });
+      });
+      app.get("/code-review/t/:file", (c) => {
+        const lang = c.req.param("file").split(".")[0] ?? "";
+        if (!Object.hasOwn(TAGS, lang) || `/code-review/t/${c.req.param("file")}` !== tagsPath(lang)) return c.notFound();
+        return new Response(TAGS[lang], { headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "private, max-age=31536000, immutable" } });
       });
     },
   };

@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 // @ts-expect-error: plain JS, no types
-import { analyse, langOf, lcs, tokensOf } from "../engine.js";
+import { analyse, headerSymbol, langOf, lcs, symbolLabel, symbols, tokensOf } from "../engine.js";
 // @ts-expect-error: plain JS, no types
 import { GRAMMARS } from "../gen.mjs";
 
@@ -10,13 +10,14 @@ const vendor = (f: string) => new URL(`../vendor/${f}`, import.meta.url);
 const ts: any = await import(vendor("web-tree-sitter.js").href);
 await ts.Parser.init({ locateFile: () => vendor("runtime.wasm").pathname });
 
-const langs = new Map<string, { parser: any; query: any }>();
+const langs = new Map<string, { parser: any; query: any; tags: any }>();
 async function grammar(name: string) {
   if (!langs.has(name)) {
     const l = await ts.Language.load(new Uint8Array(readFileSync(vendor(`${name}.wasm`))));
     const parser = new ts.Parser();
     parser.setLanguage(l);
-    langs.set(name, { parser, query: new ts.Query(l, readFileSync(vendor(`${name}.scm`), "utf8")) });
+    const tags = existsSync(vendor(`${name}.tags.scm`)) ? new ts.Query(l, readFileSync(vendor(`${name}.tags.scm`), "utf8")) : undefined;
+    langs.set(name, { parser, query: new ts.Query(l, readFileSync(vendor(`${name}.scm`), "utf8")), tags });
   }
   return langs.get(name)!;
 }
@@ -107,4 +108,94 @@ test("lcs: keeps the longest common run, trims shared ends, gives up past the ca
 
 test("tokens without a tree: words and single punctuation, never whitespace", () => {
   assert.deepEqual(tokensOf(undefined, "a.b  = c1;").map((t: { t: string }) => t.t), ["a", ".", "b", "=", "c1", ";"]);
+});
+
+// ── Changed symbols (dovre#300) ──
+
+async function touched(lang: string, lines: { kind: string; text: string }[], skip?: Set<number>) {
+  const g = await grammar(lang);
+  return symbols(lines, (t: string) => g.parser.parse(t), g.tags, skip).map((s: { name: string; kind: string; line: number }) => `${symbolLabel(s)}@${s.line}`);
+}
+
+test("every grammar with definition queries compiles them in this runtime; JSON, YAML, TOML and CSS have none", async () => {
+  const withTags = [];
+  for (const name of GRAMMARS) if ((await grammar(name)).tags) withTags.push(name);
+  assert.deepEqual(withTags.sort(), ["csharp", "go", "javascript", "python", "rust", "tsx", "typescript"]);
+});
+
+test("symbols: a change belongs to the innermost definition around it, on either side, named once, in order", async () => {
+  const lines = [
+    L("hunk", "@@ -1,9 +1,9 @@"),
+    L("ctx", "export class Shelf {"),
+    L("ctx", "  load(n: number) {"),
+    L("del", "    return n;"),
+    L("add", "    return n + 1;"),
+    L("ctx", "  }"),
+    L("del", "  get size() { return 1; }"),
+    L("ctx", "}"),
+    L("ctx", "function top() {"),
+    L("add", "  log();"),
+    L("ctx", "}"),
+  ];
+  assert.deepEqual(await touched("typescript", lines), ["load()@3", "size()@6", "top()@9"]);
+});
+
+test("symbols: a change below the hunk's first lines belongs to the definition git names in its header", async () => {
+  const lines = [L("hunk", "@@ -40,6 +40,7 @@ export function start(doc, manifestUrl) {"), L("ctx", "  const a = 1;"), L("add", "  const b = 2;"), L("ctx", "  return a;")];
+  assert.deepEqual(await touched("typescript", lines), ["start()@2"]);
+  const arrow = [L("hunk", "@@ -4,3 +4,3 @@ const go = () => {"), L("del", "  if (on) return;"), L("add", "  if (on || off) return;")];
+  assert.deepEqual(await touched("javascript", arrow), ["go()@1"], "a header that doesn't close on its own line still reads");
+});
+
+test("symbols: once a hunk reaches code at the top level, the header's definition no longer owns its changes", async () => {
+  const lines = [L("hunk", "@@ -10,6 +10,8 @@ function load() {"), L("ctx", "  return 1;"), L("ctx", "}"), L("ctx", ""), L("add", 'import { x } from "y";'), L("add", "x();")];
+  assert.deepEqual(await touched("typescript", lines), []);
+  // A header that opens a template string is closed so it reads.
+  const css = [L("hunk", "@@ -40,6 +40,7 @@ const styles = `"), L("ctx", "  .a {"), L("add", "    color: blue;"), L("ctx", "  }")];
+  assert.deepEqual(await touched("typescript", css), ["styles@2"]);
+});
+
+test("symbols: constants, types and enums in TypeScript; a function kept as const is a function", async () => {
+  const lines = [L("hunk", "@@ -1,5 +1,5 @@"), L("del", "export const MAX = 1;"), L("add", "export const MAX = 2;"), L("add", "type Id = string;"), L("add", "enum Tone { Ok }"), L("add", "const f = () => 1;"), L("add", "interface Box { a: Id }")];
+  assert.deepEqual(await touched("typescript", lines), ["MAX@1", "type Id@3", "enum Tone@4", "f()@5", "interface Box@6"]);
+});
+
+test("symbols: Go, Rust, Python and C# by their own queries, Python's header too", async () => {
+  assert.deepEqual(await touched("go", [L("hunk"), L("ctx", "func (s *Shelf) Load() int {"), L("del", "\treturn 1"), L("add", "\treturn 2"), L("ctx", "}")]), ["Load()@2"]);
+  assert.deepEqual(await touched("rust", [L("hunk"), L("ctx", "fn load() -> u8 {"), L("add", "    2"), L("ctx", "}")]), ["load()@2"]);
+  assert.deepEqual(await touched("python", [L("hunk", "@@ -3,3 +3,3 @@ class Shelf:"), L("ctx", "    x = 1"), L("del", "    y = 2"), L("add", "    y = 3")]), ["class Shelf@2"]);
+  assert.deepEqual(await touched("csharp", [L("hunk"), L("ctx", "class Shelf {"), L("ctx", "  int Load() {"), L("add", "    return 2;"), L("ctx", "  }"), L("ctx", "}")]), ["Load()@3"]);
+});
+
+test("symbols: changes that are only layout don't count", async () => {
+  const lines = [L("hunk"), L("ctx", "function a() {"), L("del", "  f(1,2);"), L("add", "  f(1, 2);"), L("ctx", "}")];
+  assert.deepEqual(await touched("typescript", lines, new Set([2, 3])), []);
+});
+
+test("symbols: a method in a class is named, a helper inside a function isn't; one name once", async () => {
+  const lines = [L("hunk"), L("ctx", "export function start(doc) {"), L("ctx", "  const row = (x) => {"), L("add", "    return x + 1;"), L("ctx", "  };"), L("ctx", "}"), L("ctx", "class A {"), L("ctx", "  start() {"), L("add", "    go();"), L("ctx", "  }"), L("ctx", "}")];
+  assert.deepEqual(await touched("typescript", lines), ["start()@3"]);
+});
+
+test("symbols: a change below a definition that starts on an unindented line belongs to it, not to the header's", async () => {
+  const lines = [L("hunk", "@@ -120,4 +120,5 @@ export const API_1: Record<string, ApiUse[]> = {"), L("ctx", " */"), L("ctx", "export const API_ADDED: Record<string, string[]> = {"), L("ctx", '  "2.1": [],'), L("add", '  "2.2": [],'), L("ctx", "};")];
+  assert.deepEqual(await touched("typescript", lines), ["API_ADDED@4"]);
+});
+
+test("headerSymbol: only a hunk header's context, and nothing when it isn't a definition", async () => {
+  const g = await grammar("typescript");
+  const name = (h: string) => headerSymbol(h, (t: string) => g.parser.parse(t), g.tags)?.name;
+  assert.equal(name("@@ -1,2 +1,3 @@ export async function run(x: number) {"), "run");
+  assert.equal(name("@@ -226,7 +226,7 @@ export function createApp(env: Env, deps: { gatherer: Gatherer; /** Local: where"), "createApp", "git cut it short: by its keyword");
+  assert.equal(name("@@ -9,2 +9,3 @@ func (s *Shelf) Load() int {"), "Load");
+  assert.equal(name("@@ -1,2 +1,3 @@"), undefined);
+  assert.equal(name("@@ -1,2 +1,3 @@ if (x) {"), undefined);
+  assert.equal(name("not a header"), undefined);
+});
+
+test("symbolLabel: calls get (), types say what they are", () => {
+  assert.equal(symbolLabel({ name: "start", kind: "function" }), "start()");
+  assert.equal(symbolLabel({ name: "Shelf", kind: "class" }), "class Shelf");
+  assert.equal(symbolLabel({ name: "MAX", kind: "constant" }), "MAX");
+  assert.equal(symbolLabel({ name: "vec", kind: "macro" }), "vec!");
 });

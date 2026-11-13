@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { packApp, testContext } from "dovre/pack-testing.ts";
 // @ts-expect-error: plain JS, no types
-import { FMT, FMT_CONFIG, FMT_GLOBAL, localSrc, logicDiff, logicTable, offerLogic, onlyFormatting, rebuildOld } from "../engine.js";
+import { FMT, FMT_CONFIG, FMT_GLOBAL, localSrc, logicDiff, logicTable, offerLogic, onlyFormatting, rebuildOld, showSymbols } from "../engine.js";
 import { codeReviewPack } from "../index.ts";
 import { DPRINT_JS_SHA, RUFF_JS_SHA, SHA } from "../gen.ts";
 import { FMT_EXTS, MAX_SRC, prSrc, readSrc, srcAsk } from "../src.ts";
@@ -93,6 +93,7 @@ function fakeDoc() {
   const el = (tag: string): any => {
     const e: any = { tagName: tag.toUpperCase(), className: "", attrs: {} as Record<string, string>, kids: [] as any[] };
     e.append = (...xs: any[]) => e.kids.push(...xs);
+    e.prepend = (...xs: any[]) => e.kids.unshift(...xs);
     e.setAttribute = (k: string, v: string) => (e.attrs[k] = v);
     e.on = {} as Record<string, (ev: any) => void>;
     e.addEventListener = (k: string, f: (ev: any) => void) => (e.on[k] = f);
@@ -100,6 +101,7 @@ function fakeDoc() {
     e.after = (x: any) => (e.next = x);
     e.classList = {
       add: (c: string) => (e.className += ` ${c}`),
+      remove: (c: string) => (e.className = e.className.split(" ").filter((x: string) => x && x !== c).join(" ")),
       toggle: (c: string, on: boolean) => (e.className = [...e.className.split(" ").filter((x: string) => x && x !== c), ...(on ? [c] : [])].join(" ")),
     };
     Object.defineProperty(e, "children", { get: () => e.kids.filter((k: any) => typeof k !== "string") });
@@ -153,6 +155,29 @@ test("offerLogic: an All changes | Logic only switch in the file's header, the s
   assert.equal(wrap.hidden, false);
   assert.equal(wrap.next.hidden, true);
   assert.doesNotMatch(details.className, /cr-logic-on/);
+});
+
+test("showSymbols: the touched symbols in the file's header as text, four named and the rest counted; one goes to its change", () => {
+  const doc = fakeDoc();
+  const meta = doc.createElement("span");
+  meta.querySelector = () => null;
+  const details: any = doc.createElement("details");
+  details.querySelector = (q: string) => (q === ".dfile-meta" ? meta : null);
+  const fold = doc.createElement("tr");
+  fold.scrollIntoView = () => undefined;
+  const row: any = { hidden: true, previousElementSibling: fold };
+  const lines = [L("hunk"), { kind: "add", text: "x", els: [{ closest: () => row }] }];
+  const syms = ["<b>", "b", "c", "d", "e"].map((name, i) => ({ name, kind: i ? "constant" : "function", line: 1 }));
+  showSymbols(doc, details, lines, syms);
+  const wrap = meta.kids[0];
+  assert.equal(wrap.className, "cr-syms");
+  assert.equal(wrap.html().replace(/ title="[^"]*"/g, ""), '<span class="cr-syms"><span class="cr-syms-in">in</span><button class="cr-sym">&lt;b&gt;()</button><button class="cr-sym">b</button><button class="cr-sym">c</button><button class="cr-sym">d</button><span class="cr-syms-in">+1</span></span>');
+  assert.match(wrap.title, /e$/, "all of them in its title");
+  wrap.children[1].on.click({ preventDefault() {} });
+  assert.equal(details.open, true);
+  assert.match(fold.className, /cr-here/, "a folded change goes to its fold's row");
+  showSymbols(doc, details, lines, []);
+  assert.equal(meta.kids.length, 1, "nothing for no symbols");
 });
 
 test("onlyFormatting: JSON, TOML and CSS normalise; in Markdown a blank line still counts", async () => {
