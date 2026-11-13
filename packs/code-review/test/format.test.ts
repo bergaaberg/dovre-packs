@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { packApp, testContext } from "dovre/pack-testing.ts";
 // @ts-expect-error: plain JS, no types
-import { FMT, FMT_CONFIG, FMT_GLOBAL, localSrc, logicDiff, logicTable, onlyFormatting, rebuildOld } from "../engine.js";
+import { FMT, FMT_CONFIG, FMT_GLOBAL, localSrc, logicDiff, logicTable, offerLogic, onlyFormatting, rebuildOld } from "../engine.js";
 import { codeReviewPack } from "../index.ts";
 import { DPRINT_JS_SHA, RUFF_JS_SHA, SHA } from "../gen.ts";
 import { FMT_EXTS, MAX_SRC, prSrc, readSrc, srcAsk } from "../src.ts";
@@ -94,7 +94,14 @@ function fakeDoc() {
     const e: any = { tagName: tag.toUpperCase(), className: "", attrs: {} as Record<string, string>, kids: [] as any[] };
     e.append = (...xs: any[]) => e.kids.push(...xs);
     e.setAttribute = (k: string, v: string) => (e.attrs[k] = v);
-    e.classList = { add: (c: string) => (e.className += ` ${c}`) };
+    e.on = {} as Record<string, (ev: any) => void>;
+    e.addEventListener = (k: string, f: (ev: any) => void) => (e.on[k] = f);
+    e.getAttribute = (k: string) => e.attrs[k];
+    e.after = (x: any) => (e.next = x);
+    e.classList = {
+      add: (c: string) => (e.className += ` ${c}`),
+      toggle: (c: string, on: boolean) => (e.className = [...e.className.split(" ").filter((x: string) => x && x !== c), ...(on ? [c] : [])].join(" ")),
+    };
     Object.defineProperty(e, "children", { get: () => e.kids.filter((k: any) => typeof k !== "string") });
     Object.defineProperty(e, "textContent", { set: (t: string) => (e.kids = [t]) });
     e.html = (): string => {
@@ -117,6 +124,35 @@ test("logicTable: core's unified rows, no line numbers, the file's text set as t
       '<tr class="d-add"><td class="ln"></td><td class="ln"></td><td class="code"><code><span class="d-sign" aria-hidden="true">+</span>b</code></td></tr>' +
       "</tbody></table>",
   );
+});
+
+test("offerLogic: an All changes | Logic only switch in the file's header, the shown one pressed", () => {
+  const doc = fakeDoc();
+  const meta = doc.createElement("span");
+  const wrap = doc.createElement("div");
+  const table = doc.createElement("table");
+  table.closest = () => wrap;
+  const details: any = doc.createElement("details");
+  details.querySelector = (q: string) => (q === ".dfile-meta" ? meta : null);
+  meta.querySelector = () => null;
+  offerLogic(doc, details, table, [L("hunk", "@@ -1 +1 @@"), L("add", "b")]);
+  const group = meta.kids[0];
+  assert.equal(group.className, "cr-view");
+  const [all, only] = group.children;
+  const pressed = () => [all.getAttribute("aria-pressed"), only.getAttribute("aria-pressed")];
+  const click = (b: any) => b.on.click({ preventDefault() {} });
+  assert.deepEqual(pressed(), ["true", "false"]);
+  click(only);
+  assert.deepEqual(pressed(), ["false", "true"]);
+  assert.equal(wrap.hidden, true);
+  assert.equal(wrap.next.hidden, false, "the formatted diff shows");
+  assert.equal(details.open, true);
+  assert.match(details.className, /cr-logic-on/);
+  click(all);
+  assert.deepEqual(pressed(), ["true", "false"]);
+  assert.equal(wrap.hidden, false);
+  assert.equal(wrap.next.hidden, true);
+  assert.doesNotMatch(details.className, /cr-logic-on/);
 });
 
 test("onlyFormatting: JSON, TOML and CSS normalise; in Markdown a blank line still counts", async () => {
