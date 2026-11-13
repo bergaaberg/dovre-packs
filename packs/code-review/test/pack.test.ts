@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { packApp } from "dovre/pack-testing.ts";
 import { codeReviewPack, ENGINE_PATH } from "../index.ts";
-import { ENGINE_JS, QUERIES, RUNTIME_JS_SHA, SHA } from "../gen.ts";
+import { ENGINE_JS, QUERIES, RUNTIME_JS_SHA, SHA, TAGS } from "../gen.ts";
 // @ts-expect-error: plain JS, no types
 import { FORMATTERS, GRAMMARS, genSource } from "../gen.mjs";
 
@@ -33,7 +33,7 @@ test("the manifest names the runtime and every grammar where core serves them; t
   const { get } = packApp([codeReviewPack]);
   const res = await get("/code-review/langs.json");
   assert.equal(res.status, 200);
-  const m = (await res.json()) as { runtimeJs: string; runtimeWasm: string; langs: Record<string, { wasm: string; query: string }> };
+  const m = (await res.json()) as { runtimeJs: string; runtimeWasm: string; langs: Record<string, { wasm: string; query: string; tags?: string }> };
   assert.match(m.runtimeJs, new RegExp(`^/assets/files/code-review\\.web-tree-sitter\\.${RUNTIME_JS_SHA}\\.js$`));
   assert.match(m.runtimeWasm, new RegExp(`^/assets/wasm/code-review\\.runtime\\.${SHA.runtime}\\.wasm$`));
   assert.deepEqual(Object.keys(m.langs).sort(), [...GRAMMARS].sort());
@@ -45,6 +45,11 @@ test("the manifest names the runtime and every grammar where core serves them; t
   const q = await get(ts.query);
   assert.equal(await q.text(), QUERIES.typescript);
   assert.match(q.headers.get("Cache-Control") ?? "", /immutable/);
+  assert.deepEqual(Object.keys(m.langs).filter((l) => m.langs[l]!.tags).sort(), Object.keys(TAGS).sort(), "definition queries where a grammar has them");
+  assert.equal(m.langs.json!.tags, undefined);
+  const t = await get(ts.tags!);
+  assert.equal(await t.text(), TAGS.typescript);
+  assert.match(t.headers.get("Cache-Control") ?? "", /immutable/);
   for (const p of [ENGINE_PATH, m.runtimeJs]) {
     const r = await get(p);
     assert.equal(r.status, 200, p);
@@ -54,7 +59,7 @@ test("the manifest names the runtime and every grammar where core serves them; t
 
 test("hostile paths: a wrong hash, another file, a traversal or an inherited key aren't served", async () => {
   const { get } = packApp([codeReviewPack]);
-  for (const p of ["/code-review/js/engine.0.js", "/code-review/js/web-tree-sitter.0.js", "/code-review/js/..%2F..%2Fpackage.json", "/code-review/q/typescript.0.scm", "/code-review/q/constructor.x.scm", "/code-review/q/__proto__.scm", "/code-review/q/..%2Fgen.ts"]) {
+  for (const p of ["/code-review/js/engine.0.js", "/code-review/js/web-tree-sitter.0.js", "/code-review/js/..%2F..%2Fpackage.json", "/code-review/q/typescript.0.scm", "/code-review/q/constructor.x.scm", "/code-review/q/__proto__.scm", "/code-review/q/..%2Fgen.ts", "/code-review/t/typescript.0.scm", "/code-review/t/json.x.scm", "/code-review/t/__proto__.scm", "/code-review/t/..%2Fgen.ts"]) {
     assert.equal((await get(p)).status, 404, p);
   }
 });

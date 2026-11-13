@@ -4,6 +4,7 @@
 // - What changed, by token rather than by line: within each run of removed and added lines, the
 //   old and new tokens are matched (longest common subsequence); unmatched ones are marked.
 // - A run whose tokens all match changed only whitespace or layout: it folds to one row.
+// - The functions, classes and methods the changes touch, named in the file's header.
 // Each hunk is parsed on its own (the old side and the new side), so no file is fetched; a hunk
 // that starts inside a comment or string is highlighted a little wrong, never shown wrong.
 // The DOM is only read as text and written with textContent: nothing from the diff becomes markup.
@@ -208,6 +209,132 @@ function merge(marks) {
     else out.push([...m]);
   }
   return out;
+}
+
+// ── Changed symbols (dovre#300) ─────────────────────────────────────────────
+// Which functions, classes and methods a file's changes touch, from the hunks alone (no file is
+// read): each side of a hunk is parsed and its definitions found with the grammar's tags.scm; a
+// changed line belongs to the innermost one around it. A change whose definition starts above the
+// hunk belongs to the one git names in the hunk's header (`@@ -1,4 +1,5 @@ function start(…) {`),
+// until the hunk reaches code at the top level.
+
+/** A line that can start code at the top level: not indented, not blank, not a closing bracket. */
+const TOP = /^[^\s})\]]/;
+
+/** The definitions in a tree of `rows` (its text's lines): { name, kind, from, to (rows), span }. */
+function defsOf(tags, tree, rows) {
+  const out = [];
+  for (const m of tags.matches(tree.rootNode)) {
+    const d = m.captures.find((c) => c.name.startsWith("definition."));
+    const n = m.captures.find((c) => c.name === "name");
+    if (!d || !n || !n.node.text) continue;
+    const from = d.node.startPosition.row;
+    // A constant only on an unindented line: a hunk's text is parsed on its own, so a function's body can read as one.
+    if (d.name === "definition.constant" && !TOP.test(rows[from] ?? "")) continue;
+    out.push({ name: n.node.text, kind: d.name.slice(11), from, to: d.node.endPosition.row, span: d.node.endIndex - d.node.startIndex });
+  }
+  return out;
+}
+
+/** A definition named by its keyword, for a header git cut short: `export function createApp(env: Env, deps: {`. */
+const NAMED = /\b(function\*?|class|interface|type|enum|struct|trait|impl|def|fn|func(?:\s*\([^)]*\))?|module|namespace)\s+([A-Za-z_$][\w$]*)/;
+const KIND = { def: "function", fn: "function", func: "function", namespace: "module" };
+
+/** Definitions that hold others: inside them, the inner one is named (a method, not its class). */
+const HOLDS = new Set(["class", "interface", "module", "impl", "trait"]);
+
+/**
+ * The definition a row belongs to: going inward from the outermost around it, the first that isn't
+ * a class or module, so a method is named but not a helper inside a function. Of two the same size,
+ * not the constant (a `const f = () => …` is a function).
+ */
+function around(defs, row) {
+  const outIn = defs.filter((d) => d.from <= row && row <= d.to).sort((a, b) => b.span - a.span || (a.kind === "constant") - (b.kind === "constant"));
+  let pick;
+  for (const d of outIn) {
+    if (pick && !HOLDS.has(pick.kind)) break;
+    if (!pick || d.span < pick.span) pick = d;
+  }
+  return pick;
+}
+
+/** The definition git names in a hunk's header, if it reads as one. It's one line: closed so it parses. */
+export function headerSymbol(header, parse, tags) {
+  const ctx = /^@@ [^@]*@@ ?(.*)$/.exec(header ?? "")?.[1]?.trim();
+  if (!ctx) return undefined;
+  for (const text of [ctx, `${ctx}\n}`, `${ctx}\n  pass`, `${ctx}\``]) {
+    let tree;
+    try {
+      tree = parse(text);
+    } catch {
+      continue;
+    }
+    const d = tree ? around(defsOf(tags, tree, text.split("\n")).filter((x) => x.from === 0), 0) : undefined;
+    tree?.delete?.();
+    if (d) return d;
+  }
+  const m = NAMED.exec(ctx);
+  if (!m) return undefined;
+  const word = m[1].replace(/\*$/, "").replace(/^func\s*\(.*$/, "method");
+  return { name: m[2], kind: KIND[word] ?? word, from: 0, to: 0, span: 0 };
+}
+
+/**
+ * The symbols a diff's changes touch, in the order they first change: { name, kind, line } (the
+ * index of their first changed line). `lines`: as analyse's; `skip`: indices of lines not to count
+ * (a run that changed only layout).
+ */
+export function symbols(lines, parse, tags, skip = new Set()) {
+  const found = new Map();
+  let header;
+  let hunk = [];
+  const flush = () => {
+    if (!hunk.length) return;
+    const head = header ? headerSymbol(header, parse, tags) : undefined;
+    for (const side of ["old", "new"]) {
+      const mine = hunk.filter((i) => lines[i].kind === "ctx" || lines[i].kind === (side === "old" ? "del" : "add"));
+      const rows = mine.map((i) => lines[i].text);
+      let tree;
+      try {
+        tree = parse(rows.join("\n"));
+      } catch {
+        tree = undefined;
+      }
+      const defs = tree ? defsOf(tags, tree, rows) : [];
+      // Rows where code at the top level starts: a definition on an unindented line, or unindented
+      // code that parsed whole. A string's unindented line that reads as code (CSS's `.a { color:
+      // red; }` is a JavaScript block) counts too: it then belongs to nothing.
+      const tops = new Set(defs.filter((d) => TOP.test(rows[d.from] ?? "")).map((d) => d.from));
+      for (const c of tree?.rootNode.children ?? []) if (c.startPosition.column === 0 && !c.hasError) tops.add(c.startPosition.row);
+      tree?.delete?.();
+      let top = false;
+      mine.forEach((i, row) => {
+        if (tops.has(row) && TOP.test(lines[i].text)) top = true;
+        if (lines[i].kind === "ctx" || skip.has(i)) return;
+        const d = around(defs, row) ?? (top ? undefined : head);
+        if (!d) return;
+        const key = symbolLabel(d);
+        const was = found.get(key);
+        if (!was || i < was.line) found.set(key, { name: d.name, kind: d.kind, line: i });
+      });
+    }
+    hunk = [];
+  };
+  lines.forEach((l, i) => {
+    if (l.kind === "hunk") {
+      flush();
+      header = l.text;
+    } else if (l.kind === "ctx" || l.kind === "add" || l.kind === "del") hunk.push(i);
+  });
+  flush();
+  return [...found.values()].sort((a, b) => a.line - b.line);
+}
+
+/** How a symbol is named in a file's header: `start()`, `class Foo`, `MAX`. */
+export function symbolLabel({ name, kind }) {
+  if (kind === "function" || kind === "method") return `${name}()`;
+  if (kind === "macro") return `${name}!`;
+  return ["class", "interface", "type", "enum", "module", "struct", "trait", "impl"].includes(kind) ? `${kind} ${name}` : name;
 }
 
 // ── Only formatting (dovre#301) ─────────────────────────────────────────────
@@ -477,7 +604,7 @@ function fold(doc, table, rows, count) {
   return true;
 }
 
-/** Upgrades one diff table in place. `ts`: { parser(lang), query(lang) } or undefined (no grammar: tokens by regex). */
+/** Upgrades one diff table in place. `ts`: { parser(lang), query(lang), tags(lang) } or undefined (no grammar: tokens by regex). */
 export async function upgrade(doc, table, path, ts) {
   const lines = linesOf(table);
   if (!lines.length || lines.length > 6000) return;
@@ -504,7 +631,56 @@ export async function upgrade(doc, table, path, ts) {
       meta.prepend(s);
     }
   }
+  const details = table.closest("details.dfile");
+  const tags = parser && details && !table.classList.contains("cr-logic") ? await Promise.resolve(ts.tags?.(lang)).catch(() => undefined) : undefined;
+  if (tags) {
+    const skip = new Set(blocks.filter((b) => b.layout).flatMap((b) => lines.slice(b.first, b.last + 1).map((_, k) => b.first + k)));
+    showSymbols(doc, details, lines, symbols(lines, (t) => parser.parse(t), tags, skip));
+  }
   table.dataset.cr = lang ?? "plain";
+}
+
+/** At most this many symbols are named in a file's header; the rest are counted. */
+const SHOWN = 4;
+
+/** Names in a file's header what its changes touch; pressing one goes to its first change. */
+export function showSymbols(doc, details, lines, syms) {
+  const meta = details.querySelector(".dfile-meta");
+  if (!meta || !syms.length || meta.querySelector(".cr-syms")) return;
+  const wrap = doc.createElement("span");
+  wrap.className = "cr-syms";
+  wrap.title = `Changes in ${syms.map(symbolLabel).join(", ")}`;
+  const lead = doc.createElement("span");
+  lead.className = "cr-syms-in";
+  lead.textContent = "in";
+  wrap.append(lead);
+  for (const s of syms.slice(0, SHOWN)) {
+    const b = doc.createElement("button");
+    b.type = "button";
+    b.className = "cr-sym";
+    b.textContent = symbolLabel(s);
+    b.title = `Goes to the first change in ${symbolLabel(s)}`;
+    b.addEventListener("click", (e) => {
+      // It sits in the file's <summary>: pressing it mustn't open or close the file.
+      e.preventDefault();
+      details.open = true;
+      // A row in a folded run: the fold's row, the first one shown above it.
+      let at = lines[s.line]?.els[0]?.closest("tr");
+      while (at?.hidden) at = at.previousElementSibling;
+      if (!at) return;
+      at.scrollIntoView({ block: "center" });
+      at.classList.add("cr-here");
+      setTimeout(() => at.classList.remove("cr-here"), 1600);
+    });
+    wrap.append(b);
+  }
+  if (syms.length > SHOWN) {
+    const more = doc.createElement("span");
+    more.className = "cr-syms-in";
+    more.textContent = `+${syms.length - SHOWN}`;
+    wrap.append(more);
+  }
+  meta.prepend(wrap);
 }
 
 /** web-tree-sitter, loaded once, and each grammar when a diff first needs it. */
@@ -512,6 +688,7 @@ function loader(manifest) {
   let rt;
   const parsers = new Map();
   const queries = new Map();
+  const tagQueries = new Map();
   const runtime = () =>
     (rt ??= import(manifest.runtimeJs).then(async (m) => {
       await m.Parser.init({ locateFile: () => manifest.runtimeWasm });
@@ -533,6 +710,10 @@ function loader(manifest) {
     query: (lang) =>
       queries.get(lang) ??
       queries.set(lang, language(lang).then(async ({ m, l }) => new m.Query(l, await (await fetch(manifest.langs[lang].query)).text()))).get(lang),
+    // Definition queries (tags.scm): only for a grammar that has them.
+    tags: (lang) =>
+      tagQueries.get(lang) ??
+      tagQueries.set(lang, manifest.langs[lang]?.tags ? language(lang).then(async ({ m, l }) => new m.Query(l, await (await fetch(manifest.langs[lang].tags)).text())) : Promise.reject(new Error(`no tags for ${lang}`))).get(lang),
   };
 }
 

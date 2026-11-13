@@ -1,6 +1,6 @@
 // Writes gen.ts from vendor/ and engine.js (build.sh runs it; test/gen.test.ts checks gen.ts is current).
 import { createHash } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 
 export const GRAMMARS = ["typescript", "tsx", "javascript", "go", "rust", "python", "json", "yaml", "toml", "css", "csharp"];
 /** Formatters (vendor/fmt-<name>.wasm), served as `fmt-<name>`: dprint plugins, and Ruff for Python. */
@@ -12,9 +12,11 @@ const sha16 = (b) => createHash("sha256").update(b).digest("hex").slice(0, 16);
 export function genSource() {
   const sha = { runtime: sha16(readFileSync(here("vendor/runtime.wasm"))) };
   const queries = {};
+  const tags = {};
   for (const g of GRAMMARS) {
     sha[g] = sha16(readFileSync(here(`vendor/${g}.wasm`)));
     queries[g] = readFileSync(here(`vendor/${g}.scm`), "utf8");
+    if (existsSync(here(`vendor/${g}.tags.scm`))) tags[g] = readFileSync(here(`vendor/${g}.tags.scm`), "utf8");
   }
   for (const f of FORMATTERS) sha[`fmt-${f}`] = sha16(readFileSync(here(`vendor/fmt-${f}.wasm`)));
   const engine = readFileSync(here("engine.js"), "utf8");
@@ -29,6 +31,8 @@ export const DPRINT_JS_SHA = ${JSON.stringify(sha16(readFileSync(here("vendor/dp
 export const RUFF_JS_SHA = ${JSON.stringify(sha16(readFileSync(here("vendor/ruff.js"))))};
 /** Each grammar's highlight queries (tree-sitter's highlights.scm). */
 export const QUERIES: Record<string, string> = ${JSON.stringify(queries)};
+/** Each grammar's definition queries (tags.scm, and ours from tags/), where it has them. */
+export const TAGS: Record<string, string> = ${JSON.stringify(tags)};
 /** engine.js, served to the page. */
 export const ENGINE_JS = ${JSON.stringify(engine)};
 `;

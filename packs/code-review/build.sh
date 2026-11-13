@@ -1,7 +1,8 @@
 #!/bin/sh
 # Rebuilds vendor/ and gen.ts. Needs Node and npm (nothing else).
 # - vendor/: web-tree-sitter (its runtime .wasm and ES module) and one grammar .wasm plus its
-#   highlight queries per language, from the npm packages pinned below (npm checks each tarball
+#   highlight queries per language (and its definition queries, tags.scm, where it has them, with
+#   ours from tags/ added), from the npm packages pinned below (npm checks each tarball
 #   against the registry's integrity hash); dprint's host (bundled by esbuild) and one formatter
 #   plugin .wasm per language. All MIT; their licences are copied beside them.
 # - gen.ts: the first 16 hex digits of each .wasm's and of each script's SHA-256 (core's
@@ -24,20 +25,26 @@ fetch tree-sitter-javascript@0.25.0 javascript
 cp "$work/javascript/package/tree-sitter-javascript.wasm" vendor/javascript.wasm
 cat "$work/javascript/package/queries/highlights.scm" > vendor/javascript.scm
 cat "$work/javascript/package/queries/highlights-jsx.scm" >> vendor/javascript.scm 2>/dev/null || true
+cat "$work/javascript/package/queries/tags.scm" tags/javascript.scm > vendor/javascript.tags.scm
 fetch tree-sitter-typescript@0.23.2 typescript
 cp "$work/typescript/package/tree-sitter-typescript.wasm" vendor/typescript.wasm
 cp "$work/typescript/package/tree-sitter-tsx.wasm" vendor/tsx.wasm
 cat "$work/javascript/package/queries/highlights.scm" "$work/typescript/package/queries/highlights.scm" > vendor/typescript.scm
 cat vendor/javascript.scm "$work/typescript/package/queries/highlights.scm" > vendor/tsx.scm
+cat vendor/javascript.tags.scm "$work/typescript/package/queries/tags.scm" tags/typescript.scm > vendor/typescript.tags.scm
+cp vendor/typescript.tags.scm vendor/tsx.tags.scm
 fetch tree-sitter-go@0.25.0 go
 cp "$work/go/package/tree-sitter-go.wasm" vendor/go.wasm
 cp "$work/go/package/queries/highlights.scm" vendor/go.scm
+cp "$work/go/package/queries/tags.scm" vendor/go.tags.scm
 fetch tree-sitter-rust@0.24.0 rust
 cp "$work/rust/package/tree-sitter-rust.wasm" vendor/rust.wasm
 cp "$work/rust/package/queries/highlights.scm" vendor/rust.scm
+cp "$work/rust/package/queries/tags.scm" vendor/rust.tags.scm
 fetch tree-sitter-python@0.25.0 python
 cp "$work/python/package/tree-sitter-python.wasm" vendor/python.wasm
 cp "$work/python/package/queries/highlights.scm" vendor/python.scm
+cp "$work/python/package/queries/tags.scm" vendor/python.tags.scm
 fetch tree-sitter-json@0.24.8 json
 cp "$work/json/package/tree-sitter-json.wasm" vendor/json.wasm
 cp "$work/json/package/queries/highlights.scm" vendor/json.scm
@@ -53,6 +60,7 @@ cp "$work/css/package/queries/highlights.scm" vendor/css.scm
 fetch tree-sitter-c-sharp@0.23.5 csharp
 cp "$work/csharp/package/tree-sitter-c_sharp.wasm" vendor/csharp.wasm
 cp "$work/csharp/package/queries/highlights.scm" vendor/csharp.scm
+cp "$work/csharp/package/queries/tags.scm" vendor/csharp.tags.scm
 # Formatters (dovre#301): dprint's host bundled into one ES module (core serves each pack file on
 # its own, so its imports have to be inside it), and one plugin .wasm per language. A plugin whose
 # package has no LICENSE file says its licence in package.json: that and its source are written down.
