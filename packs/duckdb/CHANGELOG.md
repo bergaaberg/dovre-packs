@@ -1,5 +1,9 @@
 # duckdb
 
+## 1.2.0 — 2026-11-13
+
+- Runs hosted too (dovre#303). There's no native DuckDB in a Worker, so the hosted page runs DuckDB in your browser (duckdb-wasm 1.33.1-dev57.0, the build wasm-canary proved, on several threads as the pages are cross-origin isolated) over the Parquet, CSV and JSON lines files in an R2 bucket bound as `DUCKDB_FILES`. Each file is a view named after it. DuckDB reads a file with range requests over `/duckdb/r2/<name>`, so only the bytes a query needs leave R2, and rows go to your browser only. Files are added (95 MB at most from the page) and removed there. Locally nothing changes, except that `DUCKDB_SOURCES` is optional now: without it, only the files you add are listed. Needs core API 2.2; hosted, add the binding and run core's R2 path for the modules (`assets.ts --r2`).
+
 ## 1.1.0 — 2026-11-10
 
 - A Bino lookup (dovre#262): `duckdb.tables` lists a source's tables and their columns with types, or the ones whose names have some words. Names only, never a row, as the pack stays private. Agent turns get it as a tool too. It reads through the same 24-hour schema cache as the query builder.

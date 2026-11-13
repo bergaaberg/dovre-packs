@@ -2,8 +2,11 @@
  * DuckDB Pack (`duckdb`): zero-row schema exploration, AI query builder,
  * manual/agentic execution, opt-in AI result review, and multi-source routing. Bino may look up
  * the tables and columns (never a row: the pack is private).
+ *
+ * Hosted (dovre#303) there's no native DuckDB: the page runs duckdb-wasm in the browser over the
+ * files in an R2 bucket bound as DUCKDB_FILES (hosted.ts), and the native parts stay local.
  */
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { html } from "hono/html";
 import { bodyLimit } from "hono/body-limit";
 import { type Pack, strictOrigin } from "dovre/pack.ts";
@@ -45,6 +48,18 @@ import {
   duckdbTablePage,
   tableHref,
 } from "./view.ts";
+import { HOSTED_SCRIPT, HOSTED_STYLES, hostedRoutes } from "./hosted.ts";
+import { COI_PTHREAD_SHA256, COI_PTHREAD_URL, COI_WASM_SHA256, COI_WASM_URL, COI_WORKER_SHA256, COI_WORKER_URL, DUCK_JS_SHA256, DUCK_WASM_SHA256, DUCK_WASM_URL, DUCK_WORKER_SHA256, DUCK_WORKER_URL } from "./duck.ts";
+
+/** duckdb.js's bytes (DuckDB's browser API, bundled by duck.build.sh). Under Node only: the Worker never reads it. */
+export const duckJs = (): Uint8Array => new Uint8Array(readFileSync(new URL("./duckdb.js", import.meta.url)));
+
+/** A pinned release's bytes, fetched under Node when core first needs them (it checks the hash). */
+const pinned = (url: string) => async (): Promise<Uint8Array> => {
+  const r = await fetch(url, { signal: AbortSignal.timeout(120_000) });
+  if (!r.ok) throw new Error(`${url} answered ${r.status}`);
+  return new Uint8Array(await r.arrayBuffer());
+};
 
 export type CreateDuckDbPackOpts = {
   run?: DuckDbRunner;
@@ -102,21 +117,22 @@ export function createDuckDbPack(opts: CreateDuckDbPackOpts = {}): Pack & {
     },
 
     manifest: {
-      api: "2.0",
-      version: "1.1.0",
+      api: "2.2",
+      version: "1.2.0",
       id: "duckdb",
       name: "DuckDB",
-      description: "Agentic analytics on local DuckDB databases, Parquet, CSV, and JSON lines files.",
+      description: "Agentic analytics on local DuckDB databases, Parquet, CSV, and JSON lines files. Hosted, DuckDB runs in your browser over Parquet, CSV and JSON lines files in R2.",
       domain: "general",
-      execution: "local-only",
+      execution: "any",
       private: true, // query results are not for a model: nothing its pages show goes to Bino
       requiredBinaries: ["duckdb"],
+      // Hosted: the files the page queries (hosted.ts).
+      requiredBindings: ["DUCKDB_FILES"],
       everyMs: 5 * 60_000,
       settings: [
         {
           key: "DUCKDB_SOURCES",
           label: "DuckDB sources",
-          required: true,
           help: "Comma-separated targets: name=/path/to/db.duckdb, a directory of .parquet/.csv/.jsonl files, a single .parquet/.csv/.jsonl file or a https:// / s3:// / gs:// URL to one (read through httpfs; private buckets use the keys below), or :memory:",
         },
         { key: "DUCKDB_S3_KEY_ID", label: "S3 access key ID", secret: true, help: "For private s3:// files. Sent only to S3 (or the endpoint below), scoped to the one bucket being read." },
@@ -134,22 +150,35 @@ export function createDuckDbPack(opts: CreateDuckDbPackOpts = {}): Pack & {
     },
 
     async refresh(ctx) {
+      if (ctx.hosted) return;
       kept = await readDuckDb(ctx, opts.run, opts.now?.());
       ctx.publish(["duckdb", "snapshot"]);
     },
 
-    styles: FILES_STYLES,
+    styles: FILES_STYLES + HOSTED_STYLES,
+    script: HOSTED_SCRIPT,
+    // Cross-origin isolated pages (COEP): SharedArrayBuffer, so DuckDB's threads build runs hosted.
+    isolated: true,
+    // duckdb, duckdb-coi: 36 MB each, over the static assets' limit: R2's hosted (core's assets.ts --r2).
+    wasm: { duckdb: { sha256: DUCK_WASM_SHA256, load: pinned(DUCK_WASM_URL) }, "duckdb-coi": { sha256: COI_WASM_SHA256, load: pinned(COI_WASM_URL) } },
+    files: {
+      "duckdb.js": { sha256: DUCK_JS_SHA256, load: duckJs },
+      "duckdb-worker.js": { sha256: DUCK_WORKER_SHA256, load: pinned(DUCK_WORKER_URL) },
+      "duckdb-coi-worker.js": { sha256: COI_WORKER_SHA256, load: pinned(COI_WORKER_URL) },
+      "duckdb-coi-pthread.js": { sha256: COI_PTHREAD_SHA256, load: pinned(COI_PTHREAD_URL) },
+    },
 
     nav: () => [{ href: "/duckdb", title: "DuckDB", icon: "db", group: "Code" }],
 
-    pages: () => [
+    pages: (ctx) => [
       {
         title: "DuckDB",
         href: "/duckdb",
         icon: "🦆",
-        about: "DuckDB agentic data pack",
+        about: ctx.hosted ? "SQL over your files in R2, run in your browser" : "DuckDB agentic data pack",
         also: ["sql", "parquet", "query", "duckdb"],
       },
+      ...(ctx.hosted ? [] : [
       {
         title: "DuckDB files",
         href: "/duckdb/files",
@@ -157,11 +186,13 @@ export function createDuckDbPack(opts: CreateDuckDbPackOpts = {}): Pack & {
         about: "Open a Parquet, CSV or JSON lines file: schema, stats and rows",
         also: ["parquet", "csv", "jsonl", "schema", "file viewer"],
       },
+      ]),
     ],
 
     today: () => (kept ? [{ id: "now", render: duckdbCard(parseSources(undefined), kept.sources.length) }] : []),
 
-    bino: () => {
+    bino: (ctx) => {
+      if (ctx.hosted) return "DuckDB: hosted, it queries files in R2 in the browser (nothing for Bino to read).";
       if (!kept?.ok) return "DuckDB: not configured or sources unreachable.";
       const s = kept.sources;
       if (!s.length) return "DuckDB: no sources configured.";
@@ -171,7 +202,7 @@ export function createDuckDbPack(opts: CreateDuckDbPackOpts = {}): Pack & {
     },
 
     /** Table and column names only: query results stay off a model, as the pack's `private` says. */
-    lookups: (ctx) => [
+    lookups: (ctx) => ctx.hosted ? [] : [
       {
         kind: "tables",
         when: "The tables in my DuckDB sources and their columns with types (names only, never a row). Give a source to read just that one, and words to keep the tables whose table or column names have them.",
@@ -187,6 +218,7 @@ export function createDuckDbPack(opts: CreateDuckDbPackOpts = {}): Pack & {
     ],
 
     routes(app, ctx) {
+      if (ctx.hosted) return hostedRoutes(app, ctx);
       app.get("/duckdb", async (c) => {
         const { data, agent, defaultMode } = initServices(ctx.env, ctx);
         return ctx.page(c, {

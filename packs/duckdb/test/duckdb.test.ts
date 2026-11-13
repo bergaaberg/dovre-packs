@@ -67,7 +67,8 @@ function fakeAsker(answers: string[]): Asker & { seen: string[] } {
 
 test("duckdb: manifest adheres to PACK_API and declares settings", () => {
   assert.equal(duckdbPack.manifest.id, "duckdb");
-  assert.equal(duckdbPack.manifest.execution, "local-only");
+  assert.equal(duckdbPack.manifest.execution, "any", "hosted too: the browser runs DuckDB (hosted.ts)");
+  assert.deepEqual(duckdbPack.manifest.requiredBindings, ["DUCKDB_FILES"]);
   assert.equal(duckdbPack.manifest.private, true);
   assert.deepEqual(duckdbPack.manifest.requiredBinaries, ["duckdb"]);
 
