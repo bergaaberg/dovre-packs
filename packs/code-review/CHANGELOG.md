@@ -1,5 +1,9 @@
 # code-review
 
+## 1.5.0 — 2026-11-13
+
+- A file's whole outline (dovre#300): an "Outline" button in its header lists its functions, classes and methods (those at the top level and the members of classes, not helpers inside a function), each with its line. The ones the diff changes are marked, and pressing one goes to its first change. On a PR it reads the file at the PR's head when pressed: one forge read, shared with "Only formatting?". On a checkout's diff it reads the file locally. TypeScript, JavaScript, Go, Rust, Python and C#.
+
 ## 1.4.0 — 2026-11-13
 
 - A file's header names the functions, classes and methods its changes touch ("in start() · class Shelf · MAX"), four of them and the rest counted (dovre#300). Pressing one goes to its first change. They come from tree-sitter's definition queries (tags.scm) in the same parse of each hunk, and from the definition git names in a hunk's header, so nothing more is read. TypeScript, JavaScript, Go, Rust, Python and C#; changes that are only layout don't count.

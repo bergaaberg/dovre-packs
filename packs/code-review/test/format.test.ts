@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { packApp, testContext } from "dovre/pack-testing.ts";
 // @ts-expect-error: plain JS, no types
-import { FMT, FMT_CONFIG, FMT_GLOBAL, localSrc, logicDiff, logicTable, offerLogic, onlyFormatting, rebuildOld, showSymbols } from "../engine.js";
+import { FMT, FMT_CONFIG, FMT_GLOBAL, localSrc, logicDiff, logicTable, offerLogic, onlyFormatting, outlineList, rebuildOld, showSymbols } from "../engine.js";
 import { codeReviewPack } from "../index.ts";
 import { DPRINT_JS_SHA, RUFF_JS_SHA, SHA } from "../gen.ts";
 import { FMT_EXTS, MAX_SRC, prSrc, readSrc, srcAsk } from "../src.ts";
@@ -298,11 +298,37 @@ test("the PR button: on a changed file a formatter knows, with a forge to read i
   const pr = { repo: "acme/web", number: 1, branch: "b", title: "t", url: "https://github.com/acme/web/pull/1", sha: "c".repeat(40) };
   const out = String(slot({ ...pr, path: 'src/"><img src=x onerror=alert(1)>.ts', status: "modified" }));
   assert.match(out, /class="btn sm ghost cr-fmt"/);
+  assert.match(out, /class="btn sm ghost cr-outline-btn"/, "and the outline, from the same read");
   assert.doesNotMatch(out, /<img/, "the path is escaped");
   assert.ok(out.includes(prSrc(pr.repo, pr.sha, 'src/"><img src=x onerror=alert(1)>.ts').replace(/&/g, "&amp;")));
-  assert.equal(slot({ ...pr, path: "a.ts", status: "added" }), "", "nothing to compare with");
-  assert.equal(slot({ ...pr, path: "a.ts", status: "removed" }), "");
-  assert.equal(slot({ ...pr, path: "a.rs", status: "modified" }), "", "no formatter");
-  assert.equal(slot({ ...pr, path: "a.ts", status: "modified", sha: "abc" }), "", "not a full SHA");
-  assert.equal(codeReviewPack.slots!(testContext({ forge: () => undefined }))["pr.file"]!({ ...pr, path: "a.ts", status: "modified" }), "", "no forge, no button");
+  const added = String(slot({ ...pr, path: "a.ts", status: "added" }));
+  assert.doesNotMatch(added, /cr-fmt/, "nothing to compare with");
+  assert.match(added, /cr-outline-btn/, "an added file still has an outline");
+  assert.equal(String(slot({ ...pr, path: "a.ts", status: "removed" })), "");
+  const rust = String(slot({ ...pr, path: "a.rs", status: "modified" }));
+  assert.doesNotMatch(rust, /cr-fmt/, "no formatter");
+  assert.match(rust, /cr-outline-btn/);
+  assert.equal(String(slot({ ...pr, path: "a.yaml", status: "modified" })), "", "no formatter, no definitions");
+  assert.equal(String(slot({ ...pr, path: "a.ts", status: "modified", sha: "abc" })), "", "not a full SHA");
+  assert.equal(String(codeReviewPack.slots!(testContext({ forge: () => undefined }))["pr.file"]!({ ...pr, path: "a.ts", status: "modified" })), "", "no forge, no button");
+});
+
+test("outlineList: definitions as text with their lines, changed ones go to their change; none says so", () => {
+  const doc = fakeDoc();
+  const details: any = doc.createElement("details");
+  const row: any = doc.createElement("tr");
+  row.scrollIntoView = () => undefined;
+  const lines = [L("hunk"), { kind: "add", text: "x", els: [{ closest: () => row }] }];
+  const defs = [{ name: "<b>", kind: "class", from: 0, to: 9, depth: 0, change: 1 }, { name: "m", kind: "method", from: 2, to: 4, depth: 1 }];
+  const nav = outlineList(doc, details, lines, defs);
+  assert.equal(
+    nav.html().replace(/ title="[^"]*"/g, ""),
+    '<nav class="cr-outline" aria-label="Outline of this file"><p class="cr-outline-head">2 definitions, 1 changed</p><ol>' +
+      '<li class="cr-o0"><button class="cr-sym cr-changed">class &lt;b&gt;</button><span class="cr-ln">1</span></li>' +
+      '<li class="cr-o1"><span class="cr-o-name">m()</span><span class="cr-ln">3</span></li></ol></nav>',
+  );
+  nav.kids[1].kids[0].kids[0].on.click({ preventDefault() {} });
+  assert.equal(details.open, true);
+  assert.match(row.className, /cr-here/);
+  assert.equal(outlineList(doc, details, lines, []).html(), '<nav class="cr-outline" aria-label="Outline of this file"><p class="cr-outline-head">No definitions found.</p></nav>');
 });

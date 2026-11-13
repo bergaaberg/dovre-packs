@@ -663,14 +663,7 @@ export function showSymbols(doc, details, lines, syms) {
     b.addEventListener("click", (e) => {
       // It sits in the file's <summary>: pressing it mustn't open or close the file.
       e.preventDefault();
-      details.open = true;
-      // A row in a folded run: the fold's row, the first one shown above it.
-      let at = lines[s.line]?.els[0]?.closest("tr");
-      while (at?.hidden) at = at.previousElementSibling;
-      if (!at) return;
-      at.scrollIntoView({ block: "center" });
-      at.classList.add("cr-here");
-      setTimeout(() => at.classList.remove("cr-here"), 1600);
+      goTo(details, lines, s.line);
     });
     wrap.append(b);
   }
@@ -681,6 +674,143 @@ export function showSymbols(doc, details, lines, syms) {
     wrap.append(more);
   }
   meta.prepend(wrap);
+}
+
+/** Opens a file and shows one of its diff's lines (in a folded run: the fold's row, the first one shown above it). */
+function goTo(details, lines, i) {
+  details.open = true;
+  let at = lines[i]?.els[0]?.closest("tr");
+  while (at?.hidden) at = at.previousElementSibling;
+  if (!at) return;
+  at.scrollIntoView({ block: "center" });
+  at.classList.add("cr-here");
+  setTimeout(() => at.classList.remove("cr-here"), 1600);
+}
+
+// ── Outline (dovre#300) ─────────────────────────────────────────────────────
+// A file's whole outline, from its new side (on a PR read when asked: one forge read, shared with
+// the formatting check). Its definitions as a reviewer scans them: those at the top level and the
+// members of classes, modules and the like, not helpers inside a function. Those the diff changes
+// are marked, and go to their first change.
+
+/** At most this many definitions are listed; the rest are counted. */
+export const OUTLINE_MAX = 400;
+
+/** A file's definitions: { name, kind, from, to (rows, from 0), depth }, in order. */
+export function outline(text, parse, tags) {
+  const rows = text.replace(/\r\n/g, "\n").split("\n");
+  let tree;
+  try {
+    tree = parse(rows.join("\n"));
+  } catch {
+    return [];
+  }
+  if (!tree) return [];
+  const defs = defsOf(tags, tree, rows);
+  tree.delete?.();
+  // One per place: of two the same, not the constant (a `const f = () => …` is a function).
+  const at = new Map();
+  for (const d of defs) {
+    const k = `${d.from}:${d.to}:${d.name}`;
+    const was = at.get(k);
+    if (!was || (was.kind === "constant" && d.kind !== "constant")) at.set(k, d);
+  }
+  const all = [...at.values()].sort((a, b) => a.from - b.from || b.span - a.span);
+  const out = [];
+  for (const d of all) {
+    const outer = all.filter((o) => o !== d && o.span > d.span && o.from <= d.from && d.to <= o.to);
+    if (outer.some((o) => !HOLDS.has(o.kind))) continue;
+    out.push({ name: d.name, kind: d.kind, from: d.from, to: d.to, depth: outer.length });
+  }
+  return out;
+}
+
+/**
+ * Where a diff's changes are on the new side, in order: { row (from 0), line (its index in
+ * `lines`) }. A removed line is at the row that follows it. `skip`: lines not to count (layout only).
+ */
+export function changedRows(lines, skip = new Set()) {
+  const out = [];
+  let row;
+  lines.forEach((l, i) => {
+    if (l.kind === "hunk") {
+      const m = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/.exec(l.text);
+      // A hunk with no lines on the new side names the line before it.
+      row = m ? (m[2] === "0" ? Number(m[1]) : Number(m[1]) - 1) : undefined;
+      return;
+    }
+    if (row === undefined) return;
+    if ((l.kind === "add" || l.kind === "del") && !skip.has(i)) out.push({ row, line: i });
+    if (l.kind === "ctx" || l.kind === "add") row++;
+  });
+  return out;
+}
+
+/** Each definition with the first change inside it (`change`: its line in the diff), if any. */
+export function markChanged(defs, changes) {
+  return defs.map((d) => {
+    const c = changes.find((x) => d.from <= x.row && x.row <= d.to);
+    return c ? { ...d, change: c.line } : d;
+  });
+}
+
+/** The outline, under the file's header: changed definitions go to their change; each says its line. */
+export function outlineList(doc, details, lines, defs) {
+  const nav = doc.createElement("nav");
+  nav.className = "cr-outline";
+  nav.setAttribute("aria-label", "Outline of this file");
+  const head = doc.createElement("p");
+  head.className = "cr-outline-head";
+  const changed = defs.filter((d) => d.change !== undefined).length;
+  head.textContent = defs.length ? `${defs.length} definition${defs.length === 1 ? "" : "s"}, ${changed} changed` : "No definitions found.";
+  nav.append(head);
+  if (!defs.length) return nav;
+  const ol = doc.createElement("ol");
+  for (const d of defs.slice(0, OUTLINE_MAX)) {
+    const li = doc.createElement("li");
+    li.className = `cr-o${Math.min(d.depth, 3)}`;
+    let name;
+    if (d.change !== undefined) {
+      name = doc.createElement("button");
+      name.type = "button";
+      name.className = "cr-sym cr-changed";
+      name.title = `Goes to the first change in ${symbolLabel(d)}`;
+      name.addEventListener("click", (e) => {
+        e.preventDefault();
+        goTo(details, lines, d.change);
+      });
+    } else {
+      name = doc.createElement("span");
+      name.className = "cr-o-name";
+    }
+    name.textContent = symbolLabel(d);
+    const ln = doc.createElement("span");
+    ln.className = "cr-ln";
+    ln.textContent = String(d.from + 1);
+    li.append(name, ln);
+    ol.append(li);
+  }
+  nav.append(ol);
+  if (defs.length > OUTLINE_MAX) {
+    const more = doc.createElement("p");
+    more.className = "cr-outline-head";
+    more.textContent = `and ${defs.length - OUTLINE_MAX} more`;
+    nav.append(more);
+  }
+  return nav;
+}
+
+/** An "Outline" button in a file's header, reading its new side from `src` (the pack's /code-review/src). */
+export function offerOutline(doc, details, src) {
+  const meta = details.querySelector(".dfile-meta");
+  if (!meta || meta.querySelector(".cr-outline-btn")) return;
+  const b = doc.createElement("button");
+  b.type = "button";
+  b.className = "btn sm ghost cr-outline-btn";
+  b.dataset.crSrc = src;
+  b.textContent = "Outline";
+  b.title = "Lists this file's functions, classes and methods, the changed ones marked";
+  meta.append(b);
 }
 
 /** web-tree-sitter, loaded once, and each grammar when a diff first needs it. */
@@ -846,13 +976,13 @@ export function offerLogic(doc, details, table, logic) {
   meta.append(group);
 }
 
-/** Checks one file against its new side at `src` (the pack's /code-review/src). */
-async function check(doc, details, src, fmtFor) {
+/** Checks one file against its new side (`text`: a promise of it, from the pack's /code-review/src). */
+async function check(doc, details, text, fmtFor) {
   const table = details.querySelector("table.diff:not(.cr-logic)");
   if (!table) return { verdict: "unknown", why: "This file's changes aren't shown." };
-  const r = await fetch(src, { credentials: "same-origin" }).catch(() => undefined);
-  if (!r?.ok) return { verdict: "unknown", why: "The file didn't load." };
-  const res = await onlyFormatting(details.dataset.stopLabel ?? "", await r.text(), linesOf(table), fmtFor);
+  const neu = await text.catch(() => undefined);
+  if (neu === undefined) return { verdict: "unknown", why: "The file didn't load." };
+  const res = await onlyFormatting(details.dataset.stopLabel ?? "", neu, linesOf(table), fmtFor);
   if (res.verdict === "same") markSame(doc, details);
   if (res.logic) offerLogic(doc, details, table, res.logic);
   return res;
@@ -881,6 +1011,16 @@ export function start(doc, manifestUrl) {
   const tsOf = () => (ts ??= manifest.then((m) => (m ? loader(m) : undefined)));
   let fmts;
   const fmtOfPage = () => (fmts ??= manifest.then((m) => formatters(m?.fmt)));
+  // A file's new side, read once for both the formatting check and the outline; again after a failure.
+  const texts = new Map();
+  const textAt = (src) => {
+    if (!texts.has(src))
+      texts.set(src, fetch(src, { credentials: "same-origin" }).then((r) => (r.ok ? r.text() : Promise.reject(new Error(String(r.status))))).catch((err) => {
+        texts.delete(src);
+        throw err;
+      }));
+    return texts.get(src);
+  };
   const seen = new WeakSet();
   const io = new IntersectionObserver(
     (entries) => {
@@ -892,8 +1032,10 @@ export function start(doc, manifestUrl) {
         tsOf()
           .then((t) => upgrade(doc, e.target, path, t))
           .then(async () => {
-            const src = details && !e.target.classList.contains("cr-logic") && fmtOf(path) && !/^(added|removed)$/.test(statusOf(details)) && !details.querySelector(".cr-only") ? localSrc(doc.location, path) : undefined;
-            if (src) await check(doc, details, src, await fmtOfPage());
+            const local = details && !e.target.classList.contains("cr-logic") && statusOf(details) !== "removed" ? localSrc(doc.location, path) : undefined;
+            if (local && (await manifest)?.langs?.[langOf(path)]?.tags) offerOutline(doc, details, local);
+            const src = local && fmtOf(path) && statusOf(details) !== "added" && !details.querySelector(".cr-only") ? local : undefined;
+            if (src) await check(doc, details, textAt(src), await fmtOfPage());
           })
           .catch(() => undefined);
       }
@@ -901,6 +1043,13 @@ export function start(doc, manifestUrl) {
     { rootMargin: "600px 0px" },
   );
   doc.addEventListener("click", (e) => {
+    const o = e.target instanceof Element ? e.target.closest("button.cr-outline-btn") : null;
+    if (o) {
+      e.preventDefault();
+      const details = o.closest("details.dfile");
+      if (details && !o.disabled && o.dataset.crSrc?.startsWith("/code-review/src?")) toggleOutline(details, o);
+      return;
+    }
     const b = e.target instanceof Element ? e.target.closest("button.cr-fmt") : null;
     if (!b) return;
     // It sits in the file's <summary>: pressing it mustn't open or close the file.
@@ -910,7 +1059,7 @@ export function start(doc, manifestUrl) {
     b.disabled = true;
     b.textContent = "Checking…";
     fmtOfPage()
-      .then((f) => check(doc, details, b.dataset.crSrc, f))
+      .then((f) => check(doc, details, textAt(b.dataset.crSrc), f))
       .catch(() => ({ verdict: "unknown", why: "Something went wrong." }))
       .then((res) => {
         b.textContent = BUTTON[res.verdict];
@@ -918,6 +1067,44 @@ export function start(doc, manifestUrl) {
         if (res.verdict === "unknown") b.disabled = false;
       });
   });
+  // Shows or hides a file's outline; the first time, reads and parses its new side.
+  function toggleOutline(details, b) {
+    const shown = details.querySelector("nav.cr-outline");
+    if (shown) {
+      shown.hidden = !shown.hidden;
+      b.setAttribute("aria-expanded", String(!shown.hidden));
+      if (!shown.hidden) details.open = true;
+      return;
+    }
+    const table = details.querySelector("table.diff:not(.cr-logic)");
+    const path = details.dataset.stopLabel ?? "";
+    const lang = langOf(path);
+    if (!table || !lang) return;
+    b.disabled = true;
+    b.textContent = "Reading…";
+    Promise.all([tsOf(), textAt(b.dataset.crSrc)])
+      .then(async ([t, text]) => {
+        const parser = await t.parser(lang);
+        const tags = await t.tags(lang);
+        const lines = linesOf(table);
+        // Runs folded as layout only aren't changes.
+        const skip = new Set();
+        lines.forEach((l, i) => l.els[0]?.closest("tr")?.hidden && skip.add(i));
+        const defs = markChanged(outline(text, (x) => parser.parse(x), tags), changedRows(lines, skip));
+        const nav = outlineList(doc, details, lines, defs);
+        (table.closest(".diff-wrap") ?? table).before(nav);
+        details.open = true;
+        b.textContent = "Outline";
+        b.setAttribute("aria-expanded", "true");
+      })
+      .catch(() => {
+        b.textContent = "Outline (didn't load)";
+        b.title = "The file or its grammar didn't load. Press to try again.";
+      })
+      .finally(() => {
+        b.disabled = false;
+      });
+  }
   const scan = () => {
     for (const t of doc.querySelectorAll("table.diff:not([data-cr])")) {
       if (seen.has(t)) continue;

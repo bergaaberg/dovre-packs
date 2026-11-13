@@ -9,6 +9,8 @@
  * Changed symbols (dovre#300): a file's header names the functions, classes and methods its changes
  * touch, found with each grammar's definition queries (tags.scm) in the same parse of each hunk,
  * and with the definition git names in a hunk's header. Nothing more is read from the forge.
+ * A file's whole outline, its changed definitions marked, when its "Outline" button is pressed:
+ * that reads its new side (on a PR, one forge read, shared with the formatting check).
  *
  * The grammars and the runtime are files beside the pack (vendor/, built by build.sh), kept out of
  * the Worker bundle: core serves them (the .wasm as Pack.wasm WasmFiles, web-tree-sitter.js as a
@@ -23,7 +25,7 @@ import { readFileSync } from "node:fs";
 import { html } from "hono/html";
 import type { Pack, WasmFile } from "dovre/pack.ts";
 import { DPRINT_JS_SHA, ENGINE_JS, QUERIES, RUFF_JS_SHA, RUNTIME_JS_SHA, SHA, TAGS } from "./gen.ts";
-import { formattable, MAX_SRC, prSrc, readSrc, srcAsk } from "./src.ts";
+import { formattable, MAX_SRC, outlined, prSrc, readSrc, srcAsk } from "./src.ts";
 
 /** A file from vendor/ (under Node only: hosted, core serves the built copy). */
 const vendored = (sha256: string, name: string): WasmFile => ({ sha256, load: () => new Uint8Array(readFileSync(new URL(`./vendor/${name}`, import.meta.url))) });
@@ -66,6 +68,18 @@ tr.cr-fold button { font-size: var(--fs-s); }
 .cr-sym { font: inherit; font-family: var(--mono, monospace); color: var(--text-2); background: none; border: 0; padding: 0; cursor: pointer; max-width: 24ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cr-sym:hover, .cr-sym:focus-visible { color: var(--accent); text-decoration: underline; }
 tr.cr-here > td { box-shadow: inset 3px 0 0 var(--accent); }
+.cr-outline { margin: 0 0 8px; padding: 8px 12px; border: 1px solid var(--line); border-radius: var(--r-s); font-size: var(--fs-s); max-height: 40vh; overflow: auto; }
+.cr-outline[hidden] { display: none; }
+.cr-outline-head { margin: 0 0 4px; color: var(--text-3); }
+.cr-outline ol { list-style: none; margin: 0; padding: 0; columns: 18rem; column-gap: 24px; }
+.cr-outline li { display: flex; align-items: baseline; gap: 6px; break-inside: avoid; min-width: 0; }
+.cr-o1 { padding-left: 1.5em; }
+.cr-o2 { padding-left: 3em; }
+.cr-o3 { padding-left: 4.5em; }
+.cr-o-name { font-family: var(--mono, monospace); color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cr-changed { color: var(--accent); font-weight: 600; max-width: none; }
+.cr-ln { color: var(--text-3); font-variant-numeric: tabular-nums; }
+.cr-outline-btn[aria-expanded="true"] { color: var(--accent); }
 `;
 
 // On every page; does something only where a diff is (now, or once a live update brings one).
@@ -89,7 +103,7 @@ export function createCodeReviewPack(): Pack {
   return {
     manifest: {
       api: "2.0",
-      version: "1.4.0",
+      version: "1.5.0",
       id: "code-review",
       name: "Code review",
       description: "Diffs read as a reviewer does: highlighting, changes marked by token, the functions and classes they touch named, whitespace and layout changes folded, files that only changed formatting marked. Runs in your browser (tree-sitter, dprint and Ruff, as WebAssembly).",
@@ -103,11 +117,12 @@ export function createCodeReviewPack(): Pack {
     wasm: Object.fromEntries(["runtime", ...Object.keys(QUERIES), ...FORMATTERS.map((f) => `fmt-${f}`)].map((n) => [n, file(n)])),
     files: { "web-tree-sitter.js": vendored(RUNTIME_JS_SHA, "web-tree-sitter.js"), "dprint.js": vendored(DPRINT_JS_SHA, "dprint.js"), "ruff.js": vendored(RUFF_JS_SHA, "ruff.js") },
     slots: (ctx) => ({
-      // A PR's file: whether it changed only formatting, when asked (one forge read).
-      "pr.file": (f) =>
-        formattable(f.path) && !/^(added|removed)$/.test(f.status) && /^[0-9a-f]{40}$/.test(f.sha) && ctx.forge()?.file
-          ? html`<button type="button" class="btn sm ghost cr-fmt" data-cr-src="${prSrc(f.repo, f.sha, f.path)}" title="Reads this file at the PR's head and checks whether its changes are only formatting">Only formatting?</button>`
-          : "",
+      // A PR's file, when asked (one forge read for both): its outline, and whether it changed only formatting.
+      "pr.file": (f) => {
+        if (f.status === "removed" || !/^[0-9a-f]{40}$/.test(f.sha) || !ctx.forge()?.file) return "";
+        const src = prSrc(f.repo, f.sha, f.path);
+        return html`${outlined(f.path) ? html`<button type="button" class="btn sm ghost cr-outline-btn" data-cr-src="${src}" aria-expanded="false" title="Reads this file at the PR's head and lists its functions, classes and methods, the changed ones marked">Outline</button>` : ""}${formattable(f.path) && f.status !== "added" ? html`<button type="button" class="btn sm ghost cr-fmt" data-cr-src="${src}" title="Reads this file at the PR's head and checks whether its changes are only formatting">Only formatting?</button>` : ""}`;
+      },
     }),
     routes(app, ctx) {
       app.get("/code-review/langs.json", (c) => {
