@@ -1,5 +1,9 @@
 # jira
 
+## 1.3.2 — 2026-11-14
+
+- Settings shows the defaults beside their fields: the JQL for Mine, and the minutes between reads through the MCP, now a number field from 2 to 240 (pack API 2.5).
+
 ## 1.3.1 — 2026-11-14
 
 - First run suggests it to whoever keeps tasks in Jira. Nothing changes in what it does.
