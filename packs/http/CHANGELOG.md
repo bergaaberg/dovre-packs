@@ -1,5 +1,9 @@
 # http
 
+## 1.2.2 — 2026-11-14
+
+- First run suggests it where a checkout has .http files. Nothing changes in what it does.
+
 ## 1.2.1 — 2026-11-10
 
 - Moved to Pack API 2.0 (dovre#484): needs Dovre with pack contract 2. Nothing changes in what it does. Its manifest now says `db: "raw"`, shown on its card: it keeps its own tables in Dovre's database. It fills otel-sink's own place only; core's `span.actions` slot is gone.

@@ -1,5 +1,9 @@
 # markdown
 
+## 1.1.4 — 2026-11-14
+
+- First run suggests it to analysts who share results as docs. Nothing changes in what it does.
+
 ## 1.1.3 — 2026-11-10
 
 - Moved to Pack API 2.0 (dovre#484): needs Dovre with pack contract 2. Nothing changes in what it does.

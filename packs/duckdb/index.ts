@@ -118,11 +118,14 @@ export function createDuckDbPack(opts: CreateDuckDbPackOpts = {}): Pack & {
 
     manifest: {
       api: "2.2",
-      version: "1.2.0",
+      version: "1.2.1",
       id: "duckdb",
       name: "DuckDB",
       description: "Agentic analytics on local DuckDB databases, Parquet, CSV, and JSON lines files. Hosted, DuckDB runs in your browser over Parquet, CSV and JSON lines files in R2.",
       domain: "general",
+      roles: ["an"],
+      answers: ["data:files"],
+      markers: ["*.duckdb", "*.parquet"],
       execution: "any",
       private: true, // query results are not for a model: nothing its pages show goes to Bino
       requiredBinaries: ["duckdb"],

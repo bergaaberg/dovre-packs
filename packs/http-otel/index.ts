@@ -11,11 +11,12 @@ export function createHttpOtelPack(opts: { fetchFn?: typeof fetch } = {}): Pack 
     kept: () => kept,
     manifest: {
       api: "2.0",
-      version: "1.0.3",
+      version: "1.0.4",
       id: "http-otel",
       name: "HTTP & OpenTelemetry",
       description: "Polls HTTP /healthz endpoints and OpenTelemetry collector health.",
       domain: "general",
+      roles: ["op"],
       execution: "any",
       everyMs: 60_000,
       settings: [

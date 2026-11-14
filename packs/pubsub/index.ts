@@ -18,11 +18,12 @@ export function createPubsubPack(
     kept: () => kept,
     manifest: {
       api: "2.0",
-      version: "1.0.3",
+      version: "1.0.4",
       id: "pubsub",
       name: "Google Cloud Pub/Sub",
       description: "Subscription backlog, oldest unacked message age, and dead-letter radar.",
       domain: "general",
+      answers: ["run:pubsub"],
       execution: "any",
       everyMs: 2 * 60_000,
       settings: [

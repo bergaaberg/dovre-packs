@@ -12,11 +12,13 @@ export function createCfHealthPack(opts: { fetchFn?: typeof fetch } = {}): Pack 
     kept: () => kept,
     manifest: {
       api: "2.0",
-      version: "1.0.3",
+      version: "1.0.4",
       id: "cf-health",
       name: "Cloudflare Health",
       description: "24h Cloudflare Workers request and error telemetry via GraphQL.",
       domain: "general",
+      answers: ["run:workers"],
+      markers: ["wrangler.toml", "wrangler.jsonc", "wrangler.json"],
       execution: "any",
       everyMs: 2 * 60_000,
       settings: [

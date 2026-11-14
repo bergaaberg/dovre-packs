@@ -83,11 +83,12 @@ export function createHttpPack(opts: CreateHttpPackOpts = {}): Pack & { history(
     manifest: {
       api: "2.0",
       db: "raw",
-      version: "1.2.1",
+      version: "1.2.2",
       id: "http",
       name: "HTTP client",
       description: "Send HTTP requests from this machine; saved per repo as .http files, with environments and secrets bound to hosts.",
       domain: "general",
+      markers: ["*.http", ".http/"],
       execution: "local-only",
       private: true,
       uses: ["otel-sink"],

@@ -110,11 +110,12 @@ export function createCodeReviewPack(): Pack {
   return {
     manifest: {
       api: "2.0",
-      version: "1.6.0",
+      version: "1.6.1",
       id: "code-review",
       name: "Code review",
       description: "Diffs read as a reviewer does: highlighting, changes marked by token, moved blocks shown as moves, the functions and classes they touch named, whitespace and layout changes folded, files that only changed formatting marked. Runs in your browser (tree-sitter, dprint and Ruff, as WebAssembly).",
       domain: "general",
+      roles: ["dev", "lead"],
       execution: "any",
       // Reads a file at a ref in a checkout, for the formatting check (local).
       binaries: ["git"],

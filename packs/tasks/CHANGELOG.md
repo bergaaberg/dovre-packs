@@ -1,5 +1,9 @@
 # tasks
 
+## 0.2.1 — 2026-11-14
+
+- First run suggests it to whoever keeps tasks in their head. Nothing changes in what it does.
+
 ## 0.2.0 — 2026-11-14
 
 - Takes My list's place (pack API 2.3, `replaces: ["todo"]`): while Tasks is on, core's My list is held off, and what reads My list (Bino, search, New work's "Also put it on My list", Slack's saved messages) reads and adds to Tasks through its `list` share, for whoever's asking. My list's items come over in one click, read through My list's share (not its table), steps under their initiative; My list keeps them, so switching Tasks off brings it back as it was. Other packs' proposals for My list show on `/tasks`, hosted too.

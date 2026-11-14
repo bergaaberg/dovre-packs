@@ -375,11 +375,12 @@ export function createTasksPack(opts: { now?: () => number } = {}): Pack & { kep
     kept: () => kept,
     manifest: {
       api: "2.3",
-      version: "0.2.0",
+      version: "0.2.1",
       id: ID,
       name: "Tasks",
       description: "A task list of Dovre's own, for one person or a team, in My list's place: quick-add, Now/Next/Waiting/Inbox, a weekly review, comments and links, and Bino reading and proposing changes.",
       domain: "work",
+      answers: ["tasks:head"],
       execution: "any",
       // In My list's place: what reads My list reads Tasks, and Tasks still reads it to bring its items over.
       replaces: ["todo"],

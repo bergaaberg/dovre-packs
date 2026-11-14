@@ -1,5 +1,9 @@
 # linear
 
+## 1.3.2 — 2026-11-14
+
+- First run suggests it to whoever keeps tasks in Linear. Nothing changes in what it does.
+
 ## 1.3.1 — 2026-11-10
 
 - Moved to Pack API 2.0 (dovre#484): needs Dovre with pack contract 2. Nothing changes in what it does.

@@ -15,11 +15,12 @@ export function createSlackPack(opts: { fetchFn?: typeof fetch } = {}): Pack & {
     kept: () => kept,
     manifest: {
       api: "2.0",
-      version: "1.1.5",
+      version: "1.1.6",
       id: "slack",
       name: "Slack",
       description: "Direct mentions in watched channels and saved items from Slack, with a dock beside Bino's and proposals for My list.",
       domain: "work",
+      answers: ["hear:slack"],
       execution: "any",
       private: true, // chats are not for a model: nothing its pages show goes to Bino
       everyMs: 3 * 60_000,

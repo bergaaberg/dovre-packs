@@ -115,11 +115,12 @@ export function createTopoPack(o: TopoDeps = {}): Pack {
   return {
     manifest: {
       api: "2.0",
-      version: "1.1.5",
+      version: "1.1.6",
       id: "topo",
       name: "Topo",
       description: "What each repo is, from its peak.yaml: tier, components, rules and docs, and which repos have none",
       domain: "general",
+      markers: ["peak.yaml"],
       execution: "any",
       everyMs: 15 * 60_000,
       settings: [
