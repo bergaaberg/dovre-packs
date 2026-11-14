@@ -1,5 +1,9 @@
 # storybook
 
+## 1.0.8 — 2026-11-14
+
+- The port for Storybooks built here is a number field on Settings, 1 to 65535 (pack API 2.5).
+
 ## 1.0.7 — 2026-11-10
 
 - Moved to Pack API 2.0 (dovre#484): needs Dovre with pack contract 2. Nothing changes in what it does.

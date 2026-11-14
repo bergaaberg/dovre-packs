@@ -1,5 +1,9 @@
 # kafka
 
+## 1.1.2 — 2026-11-14
+
+- The lag warn threshold is a number field on Settings, with its default (1000) shown beside it (pack API 2.5).
+
 ## 1.1.1 — 2026-11-14
 
 - First run suggests it to operators who run Kafka. Nothing changes in what it does.

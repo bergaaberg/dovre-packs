@@ -13,8 +13,8 @@ export function createKafkaPack(opts: { fetchFn?: typeof fetch } = {}): Pack & {
   return {
     kept: () => kept,
     manifest: {
-      api: "2.0",
-      version: "1.1.1",
+      api: "2.5",
+      version: "1.1.2",
       id: "kafka",
       name: "Kafka",
       description: "Consumer group lag, dead-letter topics and partition health for Kafka, Redpanda and Confluent (metadata only).",
@@ -25,7 +25,7 @@ export function createKafkaPack(opts: { fetchFn?: typeof fetch } = {}): Pack & {
       settings: [
         { key: "KAFKA_ADMIN_URL", label: "Lag endpoint", required: true, help: "Redpanda Admin API, Confluent REST Proxy v3, or a lag exporter URL" },
         { key: "KAFKA_TOKEN", label: "Credentials", secret: true, help: "Optional: a Bearer token, or a full 'Basic …' header value" },
-        { key: "KAFKA_LAG_WARN", label: "Lag warn threshold", help: "Lag that raises a warning (default 1000)" },
+        { key: "KAFKA_LAG_WARN", label: "Lag warn threshold", kind: "number", min: 1, default: "1000", help: "Lag that raises a warning" },
       ],
       rings: [{ kind: "lag", label: "Kafka lag", hint: "A consumer group falls behind or a dead-letter topic grows" }],
     },

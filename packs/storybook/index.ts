@@ -211,8 +211,8 @@ export function createStorybookPack(d: StorybookDeps = {}): Pack {
   const toBuild = (book: Book, f: FoundAt) => [!book.head ? f.sha : undefined, !book.base ? f.baseSha : undefined].filter((s): s is string => !!s);
   return {
     manifest: {
-      api: "2.0",
-      version: "1.0.7",
+      api: "2.5",
+      version: "1.0.8",
       id: "storybook",
       name: "Storybook",
       description: "A PR's stories before and after, published by CI or built here",
@@ -227,7 +227,7 @@ export function createStorybookPack(d: StorybookDeps = {}): Pack {
           required: true,
           help: "owner/repo, then the PR's Storybook URL and the base branch's, split by ; — e.g. acme/web https://acme.github.io/web/pr-{pr}/ https://acme.github.io/web/{base}/ ({pr}, {branch}, {base}, {sha}). Leave out the PR's URL (acme/web https://acme.github.io/web/) or both (acme/web) and Dovre builds those sides here.",
         },
-        { key: "STORYBOOK_PORT", label: "Port for Storybooks built here", help: "Served apart from Dovre, on this machine only. Default: the one after Dovre's." },
+        { key: "STORYBOOK_PORT", label: "Port for Storybooks built here", kind: "number", min: 1, max: 65535, help: "Served apart from Dovre, on this machine only. Default: the one after Dovre's." },
       ],
     },
     styles: STYLES,

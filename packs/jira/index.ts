@@ -13,7 +13,7 @@ import { randomUUID } from "node:crypto";
 import type { Context } from "hono";
 import { html } from "hono/html";
 import { type ActKind, type AppEnv, type FindItem, type Html, Notice, type Pack, type PackContext } from "dovre/pack.ts";
-import { browseHref, type JiraKept, projectsOf, readJira, siteOf, siteOk, viaOf } from "./data.ts";
+import { browseHref, type JiraKept, MINE_JQL, projectsOf, readJira, siteOf, siteOk, viaOf } from "./data.ts";
 import { jiraLookups } from "./lookups.ts";
 import { JiraSetupError, loadViaMcp, MCP_ASK } from "./mcp.ts";
 import { createFiling, type Filed, SCREEN_MS } from "./filing.ts";
@@ -135,8 +135,8 @@ export function createJiraPack(
   return {
     kept: () => kept,
     manifest: {
-      api: "2.0",
-      version: "1.3.1",
+      api: "2.5",
+      version: "1.3.2",
       id: "jira",
       name: "Jira",
       description: "Jira issues assigned to me, what moved in my projects, ticket keys as links, and filing tickets.",
@@ -154,8 +154,8 @@ export function createJiraPack(
         { key: "JIRA_EMAIL", label: "Jira account email", help: "For Atlassian Cloud Basic auth (rest)" },
         { key: "JIRA_TOKEN", label: "Jira API token", secret: true, help: "For rest" },
         { key: "JIRA_PROJECTS", label: "Projects to watch", help: "Jira keys, comma-separated: what moved in them in 3 days, and which keys become links" },
-        { key: "JIRA_JQL", label: "Mine (JQL)", help: "Default: assigned to me and not done" },
-        { key: "JIRA_EVERY_MIN", label: "Read every (minutes, mcp)", help: "Each read through the MCP is an agent job (default 10)" },
+        { key: "JIRA_JQL", label: "Mine (JQL)", default: MINE_JQL, help: "Which issues count as mine" },
+        { key: "JIRA_EVERY_MIN", label: "Read every (minutes, mcp)", kind: "number", min: 2, max: 240, default: "10", help: "Each read through the MCP is an agent job" },
         { key: "TICKET_PROJECTS", label: "File tickets in", help: "Jira keys, comma-separated: where New work, search and Bino can create a ticket. Empty: none." },
       ],
     },
