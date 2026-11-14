@@ -1,15 +1,12 @@
-/** Tasks (`tasks`): the quick-add parser, the store on a real SQLite, the lists, escaping, privacy and the acts' re-checks. */
+/** Tasks (`tasks`): the quick-add parser, the store on a real SQLite, the lists, escaping, privacy, the acts' re-checks and My list's place. */
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { openDb, type D1 } from "dovre/db.ts";
-import { assertFragment, assertInert, HOSTILE, packApp, testContext } from "dovre/packs/testing.ts";
-import type { PackContext } from "dovre/packs/types.ts";
-import { viewingAs } from "dovre/viewer.ts";
-import { html } from "dovre/ui/kit.ts";
+import { type D1, html, type ListItem, type ListShare, type Pack, type PackContext } from "dovre/pack.ts";
+import { assertFragment, assertInert, HOSTILE, openDb, packApp, testContext, testList } from "dovre/pack-testing.ts";
 import { createTasksPack, newTaskOf, opPatch, previewOf } from "../index.ts";
 import { bucketOf, filtered, listsOf, peopleOf, reviewOf } from "../lists.ts";
 import { addDays, dateFrom, dayOf, isoDate, parseQuick, readDate } from "../parse.ts";
-import { activityOf, addComment, createTask, getTask, idOf, importTodos, linkOf, loadKept, searchTasks, type Task, todoLeft, updateTask } from "../store.ts";
+import { activityOf, addComment, createTask, getTask, idOf, importTodos, linkOf, loadKept, MIGRATIONS, notImported, searchTasks, type Task, updateTask } from "../store.ts";
 import { detailPage, dockView, listsPage, reviewPage, todayCard } from "../view.ts";
 
 // Friday 2026-11-06.
@@ -127,10 +124,15 @@ test("dates: helpers", () => {
 
 // ── The store ──
 
-const db = (): D1 => openDb().DB;
+/** A fresh database with core's tables and this pack's, as core makes them from `migrations`. */
+async function db(): Promise<D1> {
+  const d = openDb().DB;
+  for (const m of MIGRATIONS) await d.prepare(m).run();
+  return d;
+}
 
 test("store: create, edit, status, comment, activity", async () => {
-  const d = db();
+  const d = await db();
   const t = await createTask(d, newTaskOf(parseQuick("fix retries tomorrow #skribb !high due fri", TODAY), ""), "", NOW);
   assert.equal(t.id, 1);
   assert.equal(idOf("T-1"), 1);
@@ -157,7 +159,7 @@ test("store: create, edit, status, comment, activity", async () => {
 });
 
 test("store: search escapes LIKE and SQL; links are checked", async () => {
-  const d = db();
+  const d = await db();
   await createTask(d, { title: "100% done_ish" }, "", NOW);
   await createTask(d, { title: "something else", notes: "mentions retries" }, "", NOW);
   assert.equal((await searchTasks(d, "%")).length, 1);
@@ -177,7 +179,7 @@ test("store: search escapes LIKE and SQL; links are checked", async () => {
 });
 
 test("store: memory keeps open tasks and those closed lately", async () => {
-  const d = db();
+  const d = await db();
   const a = await createTask(d, { title: "open" }, "", NOW);
   const b = await createTask(d, { title: "old done", status: "done" }, "", NOW - 30 * 86400_000);
   await createTask(d, { title: "new done", status: "done" }, "", NOW - 86400_000);
@@ -188,29 +190,34 @@ test("store: memory keeps open tasks and those closed lately", async () => {
 });
 
 test("store: My list's items come over once, steps keep their initiative", async () => {
-  const d = db();
-  assert.equal(await todoLeft(d), 0);
-  const ins = (id: number, parent: number | null, title: string, state: string, due: string | null) =>
-    d.prepare("INSERT INTO todo (id, parent, title, notes, state, due, pos, created_at, updated_at, done_at) VALUES (?, ?, ?, '', ?, ?, ?, ?, ?, ?)").bind(id, parent, title, state, due, id, NOW, NOW, state === "done" ? NOW : null).run();
-  await ins(1, null, "Launch", "doing", "2026-11-20");
-  await ins(2, 1, `step ${HOSTILE}`, "next", null);
-  await ins(3, null, "old", "done", null);
-  assert.equal(await todoLeft(d), 3);
-  const made = await importTodos(d, "", NOW);
-  assert.deepEqual(made.map((t) => [t.title, t.status, t.due]), [["Launch", "doing", "2026-11-20"], ["old", "done", null], [`step ${HOSTILE}`, "next", null]]);
-  assert.deepEqual(made[2]!.links, [{ kind: "page", ref: "/tasks/T-1", label: "Part of T-1" }]);
-  assert.equal(await todoLeft(d), 0);
-  assert.equal((await importTodos(d, "", NOW)).length, 0, "never twice");
-  await ins(4, 1, "later step", "next", null);
-  const more = await importTodos(d, "", NOW);
-  assert.equal(more[0]!.links[0]?.ref, "/tasks/T-1", "a step added later finds its imported parent");
+  const d = await db();
+  const item = (id: number, parent: number | null, title: string, state: ListItem["state"], due: string | null): ListItem => ({ id, parent, title, notes: "", state, due, doneAt: state === "done" ? NOW : null });
+  const items = [item(2, 1, `step ${HOSTILE}`, "next", null), item(1, null, "Launch", "doing", "2026-11-20"), item(3, null, "old", "done", null), item(9, null, "  ", "next", "not-a-date")];
+  assert.equal((await notImported(d, items)).length, 4);
+  const made = await importTodos(d, items, "", NOW);
+  assert.deepEqual(made.map((t) => [t.title, t.status, t.due, t.parent]), [["Launch", "doing", "2026-11-20", null], ["old", "done", null, null], [`step ${HOSTILE}`, "next", null, 1]]);
+  assert.equal(made[1]!.doneAt, NOW);
+  assert.equal((await notImported(d, items)).length, 1, "only the one with no title is left");
+  assert.equal((await importTodos(d, items, "", NOW)).length, 0, "never twice");
+  const more = await importTodos(d, [...items, item(4, 1, "later step", "next", null)], "", NOW);
+  assert.equal(more[0]!.parent, 1, "a step added later finds its imported initiative");
+});
+
+test("store: a step's step goes under its initiative (one level)", async () => {
+  const d = await db();
+  const top = await createTask(d, { title: "initiative" }, "", NOW);
+  const step = await createTask(d, { title: "step", parent: top.id }, "", NOW);
+  const deeper = await createTask(d, { title: "deeper", parent: step.id }, "", NOW);
+  assert.equal(step.parent, top.id);
+  assert.equal(deeper.parent, top.id);
+  assert.equal((await createTask(d, { title: "orphan", parent: 999 }, "", NOW)).parent, null, "no such task: no parent");
 });
 
 // ── The lists ──
 
 const T = (o: Partial<Task>): Task => ({
   id: 1, title: "t", notes: "", status: "next", priority: "normal", area: "", due: null, scheduled: null, waitingOn: "", createdBy: "", assignee: "",
-  private: false, links: [], position: 0, createdAt: NOW, updatedAt: NOW, statusAt: NOW, doneAt: null, ...o,
+  private: false, links: [], parent: null, position: 0, createdAt: NOW, updatedAt: NOW, statusAt: NOW, doneAt: null, ...o,
 });
 
 test("lists: which list a task is on", () => {
@@ -221,6 +228,9 @@ test("lists: which list a task is on", () => {
   assert.equal(bucketOf(T({ status: "waiting", due: TODAY }), TODAY), "now");
   assert.equal(bucketOf(T({ status: "inbox" }), TODAY), "inbox");
   assert.equal(bucketOf(T({ scheduled: "2026-12-01" }), TODAY), "later");
+  assert.equal(bucketOf(T({ due: "2026-11-01", scheduled: "2026-11-07" }), TODAY), "later", "snoozed while overdue: it waits for that day");
+  assert.equal(bucketOf(T({ due: TODAY, scheduled: "2026-11-09" }), TODAY), "later", "snoozed on its due day too");
+  assert.equal(bucketOf(T({ status: "doing", scheduled: "2026-11-09" }), TODAY), "now", "what I'm doing stays now");
   assert.equal(bucketOf(T({ status: "done" }), TODAY), "closed");
   const l = listsOf([T({ id: 1, priority: "low", due: TODAY }), T({ id: 2, priority: "high", due: TODAY }), T({ id: 3, status: "doing" })], TODAY, NOW);
   assert.deepEqual(l.now.map((t) => t.id), [3, 2, 1]);
@@ -231,6 +241,10 @@ test("lists: which list a task is on", () => {
 
 test("lists: snooze and the one-click buttons", () => {
   assert.deepEqual(opPatch("snooze", T({ status: "doing" }), TODAY), { scheduled: "2026-11-07", status: "next" });
+  for (const op of ["snooze", "week"]) {
+    const t = T({ due: "2026-11-01" });
+    assert.equal(bucketOf({ ...t, ...opPatch(op, t, TODAY) }, TODAY), "later", `${op} on an overdue task moves it off Now`);
+  }
   assert.deepEqual(opPatch("week", T({ status: "waiting" }), TODAY), { scheduled: "2026-11-09" });
   assert.deepEqual(opPatch("done", T({}), TODAY), { status: "done" });
   assert.equal(opPatch("rm -rf", T({}), TODAY), undefined);
@@ -275,11 +289,11 @@ test("views: hostile text stays text, javascript: links don't get through", asyn
 
 function ctxFor(d: D1, over: Partial<PackContext> = {}) {
   const published: string[] = [];
-  return { ctx: testContext({ db: d, env: { TZ_NAME: "UTC" }, publish: (t) => void published.push(...t), ...over }), published };
+  return { ctx: testContext({ db: d, env: { TZ_NAME: "UTC" }, publish: (t: string[]) => void published.push(...t), ...over }, { id: "tasks" }), published };
 }
 
 async function seeded() {
-  const d = openDb().DB;
+  const d = await db();
   const pack = createTasksPack({ now: () => NOW });
   const { ctx, published } = ctxFor(d);
   await createTask(d, { title: "shared overdue", due: "2026-11-01", notes: "shared notes", status: "next" }, "", NOW);
@@ -301,6 +315,8 @@ test("pack: bino, needs, pulse, finds and lookups never show a private task", as
   assert.deepEqual(needs.map((n) => n.key), ["tasks-overdue-1-2026-11-01"]);
   assert.deepEqual(pack.pulse!(ctx), { asking: 1 });
   assert.ok(!JSON.stringify(pack.finds!(ctx)).includes("SECRET"));
+  assert.ok(JSON.stringify(pack.finds!({ ...ctx, viewer: () => "ann@acme.no" })).includes("SECRET"), "its maker finds it");
+  assert.ok(!JSON.stringify(pack.finds!({ ...ctx, viewer: () => "bob@acme.no" })).includes("SECRET"));
   assert.ok(!JSON.stringify(pack.brief!(ctx)).includes("SECRET"));
   assert.equal(await pack.about!(ctx, "/tasks/T-2"), "A task (private, or not loaded).");
   const look = Object.fromEntries(pack.lookups!(ctx).map((l) => [l.kind, l]));
@@ -316,7 +332,7 @@ test("pack: bino, needs, pulse, finds and lookups never show a private task", as
 
 test("pack: Today's card is for whoever's looking", async () => {
   const { pack, ctx } = await seeded();
-  const card = async (who: string | undefined) => String(await (await viewingAs(who, () => pack.today!(ctx)))[0]!.render);
+  const card = async (who: string | undefined) => String((await pack.today!({ ...ctx, viewer: () => who }))[0]!.render);
   assert.ok((await card("ann@acme.no")).includes("SECRET"), "its maker sees it");
   assert.ok(!(await card("bob@acme.no")).includes("SECRET"));
   assert.ok(!(await card(undefined)).includes("SECRET"));
@@ -327,7 +343,7 @@ test("acts: each re-checks, refuses and logs", async () => {
   const { d, pack, ctx } = await seeded();
   const acts = Object.fromEntries(pack.acts!(ctx).map((a) => [a.kind, a]));
   assert.deepEqual(Object.keys(acts), ["create", "status", "schedule", "edit", "comment"]);
-  const logged = async () => (await d.prepare("SELECT kind, target, ok, error, detail FROM actions ORDER BY id").all<{ kind: string; target: string; ok: number; error: string | null; detail: string | null }>()).results;
+  const logged = async () => (await d.prepare("SELECT kind, target, ok, error, detail FROM actions ORDER BY id").all<{ kind: string; target: string; ok: number; error: string | null; detail: string | null }>()).results as { kind: string; target: string; ok: number; error: string | null; detail: string | null }[];
 
   const made = await acts.create!.run({ title: "write report fri #work !high", notes: "n" }, {}, ctx);
   assert.deepEqual(made, { ok: true, done: "Added T-4", href: "/tasks/T-4" });
@@ -411,22 +427,59 @@ test("routes: quick-add, a task's page, the buttons, the Origin guard, hostile t
   assert.equal((await app.get("/tasks/review")).status, 200);
   assertInert("review", await (await app.get("/tasks/review")).text());
   assert.equal((await app.get("/tasks/dock")).status, 200);
-  const acts = (await app.db.DB.prepare("SELECT kind FROM actions WHERE kind LIKE 'tasks.%' ORDER BY id").all<{ kind: string }>()).results.map((r) => r.kind);
+  const acts = (await app.db.DB.prepare("SELECT kind FROM actions WHERE kind LIKE 'tasks.%' ORDER BY id").all<{ kind: string }>()).results.map((r: { kind: string }) => r.kind);
   assert.deepEqual(acts, ["tasks.create", "tasks.status", "tasks.edit", "tasks.edit", "tasks.comment"]);
 });
 
-test("routes: copy My list here in one click, logged; other packs' proposals show", async () => {
-  const proposer = { manifest: { api: "1.6", id: "proposer", name: "Proposer", description: "x", domain: "work" as const }, slots: () => ({ "todo.proposals": () => html`<p class="t3">proposed ${HOSTILE}</p>` }) };
-  const app = packApp([createTasksPack(), proposer]);
-  await app.db.DB.prepare("INSERT INTO todo (parent, title, notes, state, due, pos, created_at, updated_at) VALUES (NULL, 'from my list', '', 'next', NULL, 1, 1, 1)").run();
+/** A stand-in for core's My list: a pack `todo` sharing a list, as core's does. */
+function myListPack(list: ListShare): Pack {
+  return { manifest: { api: "2.3", id: "todo", name: "My list", description: "x", domain: "personal" }, shares: () => ({ list }), routes: (app) => void app.get("/todo", (c) => c.text("my list")) };
+}
+
+test("My list's place: held off, its readers read Tasks, its items come over in one click, logged; other packs' proposals show", async () => {
+  const old = testList();
+  await old.add({ title: "from my list" });
+  await old.add({ title: `step ${HOSTILE}`, parent: 1 });
+  const proposer = { manifest: { api: "2.0", id: "proposer", name: "Proposer", description: "x", domain: "work" as const }, slots: () => ({ "todo.proposals": () => html`<p class="t3">proposed ${HOSTILE}</p>` }) };
+  const pack = createTasksPack();
+  const app = packApp([myListPack(old), pack, proposer]);
+  await app.ready;
+  assert.equal((await app.get("/todo")).status, 404, "My list is held off");
   const page = await (await app.get("/tasks")).text();
-  assert.match(page, /My list has 1 item/);
+  assert.match(page, /My list has 2 items/);
   assert.match(page, /proposed /);
   assertInert("lists with proposals", page);
   assert.equal((await app.post("/tasks/import", {})).status, 303);
   const after = await (await app.get("/tasks")).text();
   assert.doesNotMatch(after, /My list has/);
   assert.match(after, /from my list/);
+  assert.equal(pack.kept().find((t) => t.title.startsWith("step"))?.parent, pack.kept().find((t) => t.title === "from my list")?.id);
+  assert.equal((await old.items()).length, 2, "My list keeps its items");
   const log = (await app.db.DB.prepare("SELECT kind, detail FROM actions WHERE kind = 'tasks.import'").all<{ kind: string; detail: string }>()).results;
-  assert.deepEqual(log.map((l) => ({ ...l })), [{ kind: "tasks.import", detail: "1 item" }]);
+  assert.deepEqual(log.map((l: { kind: string; detail: string }) => ({ ...l })), [{ kind: "tasks.import", detail: "2 items" }]);
+  assert.equal((await app.post("/tasks/import", {})).status, 303);
+  assert.equal(pack.kept().length, 2, "never twice");
+});
+
+test("My list's place: the list share reads and adds tasks, for whoever's asking", async () => {
+  const { d, pack, ctx } = await seeded();
+  const share = (who?: string) => pack.shares!({ ...ctx, viewer: () => who }).list!;
+  const mine = await share().items();
+  assert.deepEqual(mine.map((i) => [i.id, i.state]), [[1, "next"], [3, "doing"]], "a private task isn't anyone else's");
+  assert.ok((await share("ann@acme.no").items()).some((i) => i.title.includes("SECRET")), "its maker reads it");
+  assert.equal(await share().get(2), undefined);
+  assert.equal((await share().get(1))?.title, "shared overdue");
+  const added = await share().add({ title: `put on my list ${HOSTILE}`, due: "2026-11-20", state: "waiting", parent: 1 });
+  assert.deepEqual([added?.state, added?.due, added?.parent], ["waiting", "2026-11-20", 1]);
+  assert.equal(await share().add({ title: "   " }), undefined);
+  assert.equal((await share().add({ title: "x", due: "soon", state: "bogus" as ListItem["state"] }))?.state, "next");
+  assert.equal(share().href(4), "/tasks/T-4");
+  const log = (await d.prepare("SELECT kind FROM actions WHERE kind = 'tasks.create'").all<{ kind: string }>()).results;
+  assert.equal(log.length, 2);
+  const t = await getTask(d, 1);
+  await updateTask(d, t!, { status: "dropped" }, "", NOW);
+  await pack.refresh!(ctx);
+  assert.ok(!(await share().items()).some((i) => i.id === 1), "dropped isn't on the list");
+  const inbox = await createTask(d, { title: "inbox thing" }, "", NOW);
+  assert.equal((await share().get(inbox.id))?.state, "next", "the inbox reads as next");
 });

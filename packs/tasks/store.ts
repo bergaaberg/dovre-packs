@@ -1,14 +1,14 @@
 /**
- * The tasks' own tables in Dovre's database (SQLite locally, D1 hosted), made on first use
- * (`CREATE … IF NOT EXISTS`, prefixed `tasks_`), so the pack needs no core migration.
+ * The tasks' own tables in Dovre's database (SQLite locally, D1 hosted), made by core from the
+ * pack's `migrations` (prefixed `tasks_`). Nothing is ever deleted: a task is done or dropped.
  *
- * `parent_id` and `repeat` are there for subtasks (a checklist is subtasks) and recurring tasks
- * later; nothing reads them yet. Nothing is ever deleted: a task is done or dropped.
+ * `parent_id`: the task it's a step of, one level, as My list's initiatives (`ListShare`).
+ * `source`: where an imported task came from ("todo:12", My list's item), so each comes in once.
  *
- * Who: hosted, the email Cloudflare Access verified for the request (lowercased); locally "" (the
- * one person this Dovre is). A private task is seen only by whoever made it.
+ * Who: hosted, the verified email of whoever asks (lowercased); locally "" (the one person this
+ * Dovre is). A private task is seen only by whoever made it.
  */
-import type { D1, D1Value } from "dovre/db.ts";
+import type { D1, D1Value, ListItem, ListState } from "dovre/pack.ts";
 import { clean, isPriority, isStatus, MAX_TITLE, type Priority, type Status } from "./parse.ts";
 
 export type LinkKind = "issue" | "url" | "signal" | "page";
@@ -28,6 +28,8 @@ export type Task = {
   assignee: string;
   private: boolean;
   links: TaskLink[];
+  /** The task it's a step of (one level). */
+  parent: number | null;
   position: number;
   createdAt: number;
   updatedAt: number;
@@ -45,23 +47,15 @@ export const MAX_LINKS = 20;
 export const DONE_KEPT_MS = 14 * 86400_000;
 export const MAX_KEPT = 5000;
 
-const SCHEMA = [
-  `CREATE TABLE IF NOT EXISTS tasks_items (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, notes TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'inbox', priority TEXT NOT NULL DEFAULT 'normal', area TEXT NOT NULL DEFAULT '', due TEXT, scheduled TEXT, waiting_on TEXT NOT NULL DEFAULT '', created_by TEXT NOT NULL DEFAULT '', assignee TEXT NOT NULL DEFAULT '', private INTEGER NOT NULL DEFAULT 0, links TEXT NOT NULL DEFAULT '[]', position REAL NOT NULL DEFAULT 0, parent_id INTEGER, repeat TEXT, source TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, status_at INTEGER NOT NULL, done_at INTEGER)`,
+/** Append-only (core runs each once, in order): never edit one that has shipped, add another. */
+export const MIGRATIONS = [
+  `CREATE TABLE IF NOT EXISTS tasks_items (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, notes TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'inbox', priority TEXT NOT NULL DEFAULT 'normal', area TEXT NOT NULL DEFAULT '', due TEXT, scheduled TEXT, waiting_on TEXT NOT NULL DEFAULT '', created_by TEXT NOT NULL DEFAULT '', assignee TEXT NOT NULL DEFAULT '', private INTEGER NOT NULL DEFAULT 0, links TEXT NOT NULL DEFAULT '[]', position REAL NOT NULL DEFAULT 0, parent_id INTEGER, source TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, status_at INTEGER NOT NULL, done_at INTEGER)`,
   `CREATE INDEX IF NOT EXISTS tasks_items_status ON tasks_items (status, done_at)`,
-  // Where an imported task came from ("todo:12", My list's row): each comes in once.
   `CREATE UNIQUE INDEX IF NOT EXISTS tasks_items_source ON tasks_items (source) WHERE source IS NOT NULL`,
   `CREATE INDEX IF NOT EXISTS tasks_items_parent ON tasks_items (parent_id)`,
   `CREATE TABLE IF NOT EXISTS tasks_activity (id INTEGER PRIMARY KEY AUTOINCREMENT, task_id INTEGER NOT NULL, at INTEGER NOT NULL, who TEXT NOT NULL DEFAULT '', what TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '', text TEXT)`,
   `CREATE INDEX IF NOT EXISTS tasks_activity_task ON tasks_activity (task_id, at)`,
 ];
-
-const made = new WeakSet<object>();
-
-export async function ensureSchema(db: D1): Promise<void> {
-  if (made.has(db)) return;
-  await db.batch(SCHEMA.map((s) => db.prepare(s)));
-  made.add(db);
-}
 
 // ── Ids: T-42 ──
 
@@ -130,7 +124,7 @@ function linksFrom(json: string): TaskLink[] {
 
 type Row = {
   id: number; title: string; notes: string; status: string; priority: string; area: string; due: string | null; scheduled: string | null;
-  waiting_on: string; created_by: string; assignee: string; private: number; links: string; position: number;
+  waiting_on: string; created_by: string; assignee: string; private: number; links: string; parent_id: number | null; position: number;
   created_at: number; updated_at: number; status_at: number; done_at: number | null;
 };
 
@@ -148,6 +142,7 @@ const taskOf = (r: Row): Task => ({
   assignee: r.assignee ?? "",
   private: !!r.private,
   links: linksFrom(r.links ?? "[]"),
+  parent: r.parent_id == null ? null : Number(r.parent_id),
   position: Number(r.position) || 0,
   createdAt: Number(r.created_at),
   updatedAt: Number(r.updated_at),
@@ -157,7 +152,6 @@ const taskOf = (r: Row): Task => ({
 
 /** Every open task and the ones closed lately, for memory. */
 export async function loadKept(db: D1, now: number): Promise<Task[]> {
-  await ensureSchema(db);
   const { results } = await db
     .prepare("SELECT * FROM tasks_items WHERE status NOT IN ('done', 'dropped') OR done_at >= ? OR status_at >= ? ORDER BY id DESC LIMIT ?")
     .bind(now - DONE_KEPT_MS, now - DONE_KEPT_MS, MAX_KEPT)
@@ -166,14 +160,12 @@ export async function loadKept(db: D1, now: number): Promise<Task[]> {
 }
 
 export async function getTask(db: D1, id: number): Promise<Task | undefined> {
-  await ensureSchema(db);
   const r = await db.prepare("SELECT * FROM tasks_items WHERE id = ?").bind(id).first<Row>();
   return r ? taskOf(r) : undefined;
 }
 
 /** Tasks whose title or notes have every word, newest first, `limit` at most (open and closed). */
 export async function searchTasks(db: D1, q: string, limit = 20): Promise<Task[]> {
-  await ensureSchema(db);
   const words = clean(q, 200).toLowerCase().split(" ").filter(Boolean).slice(0, 6);
   if (!words.length) return [];
   const like = (w: string) => `%${w.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
@@ -186,7 +178,6 @@ export async function searchTasks(db: D1, q: string, limit = 20): Promise<Task[]
 }
 
 export async function activityOf(db: D1, id: number, limit = 100): Promise<Activity[]> {
-  await ensureSchema(db);
   const { results } = await db.prepare("SELECT * FROM tasks_activity WHERE task_id = ? ORDER BY at DESC, id DESC LIMIT ?").bind(id, limit).all<{ id: number; task_id: number; at: number; who: string; what: string; detail: string; text: string | null }>();
   return results.map((r) => ({ id: Number(r.id), taskId: Number(r.task_id), at: Number(r.at), who: r.who ?? "", what: r.what, detail: r.detail ?? "", text: r.text ?? null }));
 }
@@ -205,21 +196,23 @@ export type NewTask = {
   assignee?: string;
   private?: boolean;
   links?: TaskLink[];
+  /** The task it's a step of: one level, so a step's own steps go under its parent. */
+  parent?: number | null;
 };
 
 const areaOf = (s: unknown) => clean(s, 40).toLowerCase().replace(/^#/, "").replace(/[^\p{L}\p{N}_-]/gu, "");
 const personOf = (s: unknown) => clean(s, 120).replace(/^@/, "");
 
 export async function createTask(db: D1, t: NewTask, who: string, now: number): Promise<Task> {
-  await ensureSchema(db);
   const title = clean(t.title, MAX_TITLE);
   if (!title) throw new Error("A task needs a title.");
   const status = t.status ?? "inbox";
   const done = status === "done" || status === "dropped" ? now : null;
   const top = await db.prepare("SELECT MAX(position) AS p FROM tasks_items").first<{ p: number | null }>();
+  const parent = t.parent ? await db.prepare("SELECT id, parent_id FROM tasks_items WHERE id = ?").bind(t.parent).first<{ id: number; parent_id: number | null }>() : null;
   const r = await db
     .prepare(
-      "INSERT INTO tasks_items (title, notes, status, priority, area, due, scheduled, waiting_on, created_by, assignee, private, links, position, created_at, updated_at, status_at, done_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+      "INSERT INTO tasks_items (title, notes, status, priority, area, due, scheduled, waiting_on, created_by, assignee, private, links, position, parent_id, created_at, updated_at, status_at, done_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
     )
     .bind(
       title,
@@ -235,6 +228,7 @@ export async function createTask(db: D1, t: NewTask, who: string, now: number): 
       t.private ? 1 : 0,
       JSON.stringify((t.links ?? []).slice(0, MAX_LINKS)),
       (Number(top?.p) || 0) + 1,
+      parent ? Number(parent.parent_id ?? parent.id) : null,
       now,
       now,
       now,
@@ -341,62 +335,46 @@ export async function addActivity(db: D1, taskId: number, who: string, what: str
   await db.prepare("INSERT INTO tasks_activity (task_id, at, who, what, detail, text) VALUES (?, ?, ?, ?, ?, ?)").bind(taskId, now, who, what, detail.slice(0, 500), text).run();
 }
 
-// ── From core's My list (/todo) ──
+// ── My list (core's `todo` pack), which Tasks takes the place of ──
 
-/** My list's row as its table has it (core's migrations/0005_todo.sql). */
-type TodoRow = { id: number; parent: number | null; title: string; notes: string; state: string; due: string | null; pos: number; created_at: number; updated_at: number; done_at: number | null };
-
-const NOT_IMPORTED = "FROM todo WHERE ('todo:' || id) NOT IN (SELECT source FROM tasks_items WHERE source IS NOT NULL)";
-
-/** How many of My list's items aren't tasks yet; 0 where there's no My list. */
-export async function todoLeft(db: D1): Promise<number> {
-  await ensureSchema(db);
-  try {
-    return Number((await db.prepare(`SELECT COUNT(*) AS n ${NOT_IMPORTED}`).first<{ n: number }>())?.n) || 0;
-  } catch {
-    return 0;
-  }
+/** My list's items that aren't tasks yet, parents first. */
+export async function notImported(db: D1, items: ListItem[]): Promise<ListItem[]> {
+  const { results } = await db.prepare("SELECT source FROM tasks_items WHERE source LIKE 'todo:%'").all<{ source: string }>();
+  const had = new Set(results.map((r) => r.source));
+  return items.filter((i) => Number.isSafeInteger(i?.id) && !had.has(`todo:${i.id}`)).sort((a, b) => Number(a.parent != null) - Number(b.parent != null));
 }
 
 /**
- * Copies My list's items that aren't tasks yet (My list keeps them). Its states are the same words;
- * its date is a due date. An item under another (an initiative's step) keeps its parent as
- * `parent_id` and as a link to it. Returns the tasks made.
+ * Copies My list's items (read through its share) that aren't tasks yet; My list keeps them. Its
+ * states are the same words, its date a due date, and a step keeps its initiative as its parent.
+ * Returns the tasks made.
  */
-export async function importTodos(db: D1, who: string, now: number): Promise<Task[]> {
-  await ensureSchema(db);
-  let rows: TodoRow[];
-  try {
-    rows = (await db.prepare(`SELECT * ${NOT_IMPORTED} ORDER BY parent IS NOT NULL, pos, id`).all<TodoRow>()).results;
-  } catch {
-    return [];
-  }
+export async function importTodos(db: D1, items: ListItem[], who: string, now: number): Promise<Task[]> {
   const made: Task[] = [];
-  const idOfTodo = new Map<number, number>();
-  for (const r of rows) {
-    const title = clean(r.title, MAX_TITLE);
+  for (const i of await notImported(db, items)) {
+    const title = clean(i.title, MAX_TITLE);
     if (!title) continue;
-    const status: Status = isStatus(r.state) ? r.state : "next";
-    let parent = r.parent == null ? undefined : idOfTodo.get(Number(r.parent));
-    if (r.parent != null && parent === undefined) {
-      const had = await db.prepare("SELECT id FROM tasks_items WHERE source = ?").bind(`todo:${r.parent}`).first<{ id: number }>();
-      parent = had ? Number(had.id) : undefined;
-    }
-    const links: TaskLink[] = parent ? [{ kind: "page", ref: `/tasks/${label(parent)}`, label: `Part of ${label(parent)}` }] : [];
-    const at = Number(r.created_at) || now;
+    const status: Status = isStatus(i.state) ? i.state : "next";
+    const parent = i.parent == null ? null : await db.prepare("SELECT id FROM tasks_items WHERE source = ?").bind(`todo:${i.parent}`).first<{ id: number }>();
     const res = await db
       .prepare(
-        "INSERT OR IGNORE INTO tasks_items (title, notes, status, priority, area, due, scheduled, waiting_on, created_by, assignee, private, links, position, parent_id, source, created_at, updated_at, status_at, done_at) VALUES (?, ?, ?, 'normal', '', ?, NULL, '', ?, '', 0, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+        "INSERT OR IGNORE INTO tasks_items (title, notes, status, priority, area, due, scheduled, waiting_on, created_by, assignee, private, links, position, parent_id, source, created_at, updated_at, status_at, done_at) VALUES (?, ?, ?, 'normal', '', ?, NULL, '', ?, '', 0, '[]', ?, ?, ?, ?, ?, ?, ?) RETURNING id",
       )
-      .bind(title, String(r.notes ?? "").slice(0, MAX_NOTES), status, isoDateOf(r.due), who, JSON.stringify(links), Number(r.pos) || 0, parent ?? null, `todo:${r.id}`, at, now, now, status === "done" ? Number(r.done_at) || now : null)
+      .bind(title, String(i.notes ?? "").slice(0, MAX_NOTES), status, isoDateOf(i.due), who, made.length + 1, parent ? Number(parent.id) : null, `todo:${i.id}`, now, now, now, status === "done" ? Number(i.doneAt) || now : null)
       .first<{ id: number }>();
     if (!res) continue;
     const id = Number(res.id);
-    idOfTodo.set(Number(r.id), id);
-    await addActivity(db, id, who, "created", `from My list (item ${r.id})`, null, now);
+    await addActivity(db, id, who, "created", `from My list (item ${i.id})`, null, now);
     made.push((await getTask(db, id))!);
   }
   return made;
+}
+
+/** A task as My list's readers see it (Bino, search, New work): the inbox reads as next, dropped isn't there. */
+export function listItemOf(t: Task): ListItem | undefined {
+  if (t.status === "dropped") return undefined;
+  const state: ListState = t.status === "inbox" ? "next" : t.status;
+  return { id: t.id, parent: t.parent, title: t.title, notes: t.notes, state, due: t.due, doneAt: t.doneAt };
 }
 
 const isoDateOf = (s: unknown) => (typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null);

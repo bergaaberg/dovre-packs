@@ -2,7 +2,8 @@
  * Which list a task is on, and the filters over them. Pure: tasks and today's date in, lists out.
  *
  * Now: doing, due today or before, or set to be done today or before (not while waiting).
- * Waiting, Next and Inbox: by status. Later: set for a day still to come.
+ * Waiting, Next and Inbox: by status. Later: set for a day still to come, even when it's due
+ * already (snoozed: put off on purpose, so it waits for that day).
  */
 import { addDays, daysBetween } from "./parse.ts";
 import { isMine, label, shortName, type Task, visibleTo } from "./store.ts";
@@ -11,13 +12,17 @@ export type Bucket = "now" | "next" | "waiting" | "inbox" | "later" | "closed";
 
 export const isOpen = (t: Task) => t.status !== "done" && t.status !== "dropped";
 export const overdue = (t: Task, today: string) => isOpen(t) && !!t.due && t.due < today;
+/** Put off to a day still to come (snooze, next week): its due day doesn't ask for it until then. */
+export const snoozed = (t: Task, today: string) => t.status !== "doing" && !!t.scheduled && t.scheduled > today;
+/** Overdue and not snoozed: what needs, the brief and the pulse ask about. */
+export const late = (t: Task, today: string) => overdue(t, today) && !snoozed(t, today);
 
 export function bucketOf(t: Task, today: string): Bucket {
   if (!isOpen(t)) return "closed";
+  if (snoozed(t, today)) return "later";
   if (t.status === "doing" || (t.due && t.due <= today)) return "now";
   if (t.status !== "waiting" && t.scheduled && t.scheduled <= today) return "now";
   if (t.status === "waiting") return "waiting";
-  if (t.scheduled && t.scheduled > today) return "later";
   return t.status === "next" ? "next" : "inbox";
 }
 

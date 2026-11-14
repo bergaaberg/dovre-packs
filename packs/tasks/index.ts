@@ -7,26 +7,24 @@
  * card, a dock, needs for what's overdue, and Bino: lines about the shared tasks, lookups (list,
  * search, one task) and acts (create, status, schedule, edit, comment) behind the confirm card.
  *
- * Who: hosted, each request's verified email (`c.get("who")`); locally "" (the one person). A
- * private task is its maker's alone: never in Bino's lines, lookups, needs, the feed, search, the
- * actions log's detail, or anyone else's lists. Lookups don't know who's asking (hosted, they come
- * from Bino's Durable Object), so they never show a private task.
+ * It takes My list's place (`replaces: ["todo"]`): while it's on, My list is held off, and what
+ * reads My list (Bino, search, New work's "Also put it on My list", Slack's saved messages) reads
+ * and adds to Tasks through its `list` share. My list's items come over in one click, once; other
+ * packs' proposals for My list (`todo.proposals`) show on /tasks.
+ *
+ * Who: hosted, each request's verified email (`ctx.viewer()`); locally "" (the one person). A
+ * private task is its maker's alone: never in Bino's lines, lookups, needs, the feed, the actions
+ * log's detail, or anyone else's lists and search. Lookups don't know who's asking (hosted, they
+ * come from Bino's Durable Object), so they never show a private task.
  */
 import type { Context } from "hono";
-import type { AppEnv } from "dovre/env.ts";
-import { logAction } from "dovre/actions/deploys.ts";
-import { commentAct, statusAct, writeAct } from "dovre/packs/acts.ts";
-import type { ActKind, LookupKind, Pack, PackContext, PackNeed, RefRule } from "dovre/packs/types.ts";
-import { within } from "dovre/pages/later.ts";
-import { strictOrigin } from "dovre/strict.ts";
-import { Empty } from "dovre/ui/kit.ts";
-import { currentViewer } from "dovre/viewer.ts";
-import { areasOf, filtered, isOpen, lineOf, listsOf, nextWeek, overdue, peopleOf, reviewOf, whenOf, type Filter } from "./lists.ts";
+import { type ActKind, type AppEnv, commentAct, Empty, type ListShare, type LookupKind, type Pack, type PackContext, type PackNeed, type RefRule, statusAct, strictOrigin, within, writeAct } from "dovre/pack.ts";
+import { areasOf, bucketOf, filtered, isOpen, late, lineOf, listsOf, nextWeek, peopleOf, reviewOf, whenOf, type Filter } from "./lists.ts";
 import { addDays, clean, dateFrom, dayOf, isoDate, isPriority, isStatus, parseQuick, STATUSES, type Parsed, type Status } from "./parse.ts";
 import { SCRIPT } from "./script.ts";
 import {
   activityOf, addComment, createTask, getTask, idOf, label, linkOf, loadKept, MAX_COMMENT, MAX_LINKS, MAX_NOTES, type NewTask, type Patch,
-  importTodos, searchTasks, shortName, type Task, todoLeft, updateTask, viewerOf, visibleTo,
+  importTodos, listItemOf, MIGRATIONS, notImported, searchTasks, shortName, type Task, updateTask, viewerOf, visibleTo,
 } from "./store.ts";
 import { backOf, detailPage, dockView, errorOf, listsPage, reviewPage, styles, taskHref, todayCard, type View } from "./view.ts";
 
@@ -95,7 +93,14 @@ export function createTasksPack(opts: { now?: () => number } = {}): Pack & { kep
   const today = (ctx: PackContext) => dayOf(now(), ctx.env.TZ_NAME);
   const reload = async (ctx: PackContext) => (kept = await loadKept(ctx.db, now()));
   /** Fresh from the database within the page's budget, else what memory has. */
-  const fresh = async (ctx: PackContext) => (await within(reload(ctx).catch(() => kept), PAGE_MS)) ?? kept;
+  const fresh = async (ctx: PackContext) => {
+    const r = await within(PAGE_MS, () => reload(ctx).catch(() => kept));
+    return r.ok ? r.value : kept;
+  };
+  /** Whom this request is for: hosted their email, locally "". */
+  const viewer = (ctx: PackContext) => viewerOf(ctx.viewer());
+  /** My list, while Tasks takes its place: read only to bring its items over. */
+  const myList = (ctx: PackContext): ListShare | undefined => ctx.required("todo", "list");
   const shared = () => kept.filter((t) => !t.private);
   const nowOf = (ts: Task[], day: string) => listsOf(ts, day, now()).now;
 
@@ -106,7 +111,7 @@ export function createTasksPack(opts: { now?: () => number } = {}): Pack & { kep
   };
   /** The action log's line: the title only when everyone may see it. */
   const log = (ctx: PackContext, kind: string, t: Task | undefined, ok: boolean, error?: string) =>
-    logAction(ctx.db, { kind: `${ID}.${kind}`, target: t ? label(t.id) : "task", ...(t && !t.private ? { detail: t.title.slice(0, 200) } : {}), ok, ...(error ? { error } : {}) }).catch(() => {});
+    ctx.logged({ kind, target: t ? label(t.id) : "task", ...(t && !t.private ? { detail: t.title.slice(0, 200) } : {}), ok, ...(error ? { error } : {}) });
 
   /** The task, read again, if this viewer may see it. */
   const findFor = async (ctx: PackContext, raw: unknown, viewer: string) => {
@@ -184,11 +189,11 @@ export function createTasksPack(opts: { now?: () => number } = {}): Pack & { kep
   ];
 
   const acts = (ctx: PackContext): ActKind[] => {
-    // Acts run locally only, for the one person there; still, a private task stays its maker's.
-    const viewer = () => currentViewer() ?? "";
+    // Core offers acts locally only, for the one person there; still, a private task stays its maker's.
+    const me = () => viewer(ctx);
     const ref = { name: "task", about: "the task's id, e.g. T-42", pattern: /T-\d{1,9}/, max: 20, normalize: (s: string) => (idOf(s) ? label(idOf(s)!) : s.trim()) };
     const found = async (key: string) => {
-      const t = await findFor(ctx, key, viewer());
+      const t = await findFor(ctx, key, me());
       return t ? { task: t, label: label(t.id), href: taskHref(t.id), state: t.status, open: isOpen(t), states: [...STATUSES] } : null;
     };
     const dateField = (v: string | undefined, day: string): string | null | undefined | false => {
@@ -240,12 +245,12 @@ export function createTasksPack(opts: { now?: () => number } = {}): Pack & { kep
           if (who) p.assignee = who.replace(/^@/, "");
           const waiting = clean(form.waiting_on, 120);
           if (waiting) (p.waitingOn = waiting), (p.status = "waiting");
-          const t = newTaskOf(p, viewer());
+          const t = newTaskOf(p, me());
           t.notes = (form.notes ?? "").trim().slice(0, 4000);
           return { target: "new task", value: t };
         },
         async write(t) {
-          const made = await createTask(ctx.db, t, viewer(), now());
+          const made = await createTask(ctx.db, t, me(), now());
           await wrote(ctx);
           return { done: `Added ${label(made.id)}`, href: taskHref(made.id), detail: made.title };
         },
@@ -259,7 +264,7 @@ export function createTasksPack(opts: { now?: () => number } = {}): Pack & { kep
         find: found,
         async setStatus(f, status) {
           if (!isStatus(status)) return { refuse: `There's no status "${status}".` };
-          await updateTask(ctx.db, f.task, { status }, viewer(), now());
+          await updateTask(ctx.db, f.task, { status }, me(), now());
           await wrote(ctx);
           return true;
         },
@@ -287,13 +292,13 @@ export function createTasksPack(opts: { now?: () => number } = {}): Pack & { kep
           return { target: label(id), value: { id, scheduled, due } };
         },
         async check(v) {
-          const t = await findFor(ctx, v.id, viewer());
+          const t = await findFor(ctx, v.id, me());
           if (!t) return { refuse: `There's no task ${label(v.id)}.`, log: "no such task" };
           if (!isOpen(t)) return { refuse: `${label(t.id)} is ${t.status}; let it be.`, log: t.status };
           return t;
         },
         async write(v, t) {
-          const r = await updateTask(ctx.db, t, { ...(v.scheduled !== undefined ? { scheduled: v.scheduled } : {}), ...(v.due !== undefined ? { due: v.due } : {}) }, viewer(), now());
+          const r = await updateTask(ctx.db, t, { ...(v.scheduled !== undefined ? { scheduled: v.scheduled } : {}), ...(v.due !== undefined ? { due: v.due } : {}) }, me(), now());
           if (!r.changed.length) return { refuse: `${label(t.id)} already has those dates.`, log: "unchanged" };
           await wrote(ctx);
           const day = today(ctx);
@@ -331,7 +336,7 @@ export function createTasksPack(opts: { now?: () => number } = {}): Pack & { kep
           const area = blank(form.area, 40);
           if (area !== undefined) patch.area = area;
           const who = blank(form.assignee, 120);
-          if (who !== undefined) patch.assignee = assigneeOf(who.replace(/^@/, ""), viewer());
+          if (who !== undefined) patch.assignee = assigneeOf(who.replace(/^@/, ""), me());
           const waiting = blank(form.waiting_on, 120);
           if (waiting !== undefined) patch.waitingOn = waiting;
           const notes = (form.notes ?? "").trim();
@@ -340,11 +345,11 @@ export function createTasksPack(opts: { now?: () => number } = {}): Pack & { kep
           return { target: label(id), value: { id, patch } };
         },
         async check(v) {
-          const t = await findFor(ctx, v.id, viewer());
+          const t = await findFor(ctx, v.id, me());
           return t ?? { refuse: `There's no task ${label(v.id)}.`, log: "no such task" };
         },
         async write(v, t) {
-          const r = await updateTask(ctx.db, t, v.patch, viewer(), now());
+          const r = await updateTask(ctx.db, t, v.patch, me(), now());
           if (!r.changed.length) return { refuse: `${label(t.id)} is already like that.`, log: "unchanged" };
           await wrote(ctx);
           return { done: `Changed ${label(t.id)}: ${r.changed.join("; ").slice(0, 150)}`, href: taskHref(t.id) };
@@ -358,7 +363,7 @@ export function createTasksPack(opts: { now?: () => number } = {}): Pack & { kep
         when: "I want a comment added to a task (T-42).",
         find: found,
         async comment(f, text) {
-          await addComment(ctx.db, f.task, viewer(), text, now());
+          await addComment(ctx.db, f.task, me(), text, now());
           await wrote(ctx);
           return true;
         },
@@ -369,13 +374,16 @@ export function createTasksPack(opts: { now?: () => number } = {}): Pack & { kep
   return {
     kept: () => kept,
     manifest: {
-      api: "1.6",
-      version: "0.1.0",
+      api: "2.3",
+      version: "0.2.0",
       id: ID,
       name: "Tasks",
-      description: "A task list of Dovre's own, for one person or a team: quick-add, Now/Next/Waiting/Inbox, a weekly review, comments and links, and Bino reading and proposing changes.",
+      description: "A task list of Dovre's own, for one person or a team, in My list's place: quick-add, Now/Next/Waiting/Inbox, a weekly review, comments and links, and Bino reading and proposing changes.",
       domain: "work",
       execution: "any",
+      // In My list's place: what reads My list reads Tasks, and Tasks still reads it to bring its items over.
+      replaces: ["todo"],
+      uses: ["todo"],
       everyMs: 60_000,
       rings: [{ kind: "tasks-overdue", label: "A task is overdue", hint: "Once per task, the first time it's past its due day", off: true }],
     },
@@ -386,6 +394,7 @@ export function createTasksPack(opts: { now?: () => number } = {}): Pack & { kep
       { kind: "comment", label: "Comment on a task" },
       { kind: "import", label: "Copy My list's items into Tasks" },
     ],
+    migrations: MIGRATIONS,
     styles,
     script: SCRIPT,
     async init(ctx) {
@@ -402,9 +411,10 @@ export function createTasksPack(opts: { now?: () => number } = {}): Pack & { kep
       { title: "Tasks", href: "/tasks", icon: "☑", about: "Your tasks: now, next, waiting, inbox", also: ["todo", "to do", "tasks", "inbox"] },
       { title: "Tasks: weekly review", href: "/tasks/review", icon: "☑", about: "Triage the inbox, chase what's waiting, settle what's late", also: ["review", "weekly"] },
     ],
-    finds: () =>
-      shared()
-        .filter(isOpen)
+    // Search is asked per request: a private task shows to its maker only.
+    finds: (ctx) =>
+      kept
+        .filter((t) => isOpen(t) && visibleTo(t, viewer(ctx)))
         .slice(0, 300)
         .map((t) => ({ title: t.title, sub: `${label(t.id)} · ${t.status}${t.area ? ` · #${t.area}` : ""}`, href: taskHref(t.id), also: [label(t.id), ...(t.area ? [t.area] : [])] })),
     refs: (): RefRule[] => [{ pattern: /\bT-\d{1,7}\b/g, href: (m) => `/tasks/${m}` }],
@@ -413,13 +423,13 @@ export function createTasksPack(opts: { now?: () => number } = {}): Pack & { kep
       return n ? [{ label: "Tasks now", value: n }] : [];
     },
     brief(ctx) {
-      const n = shared().filter((t) => overdue(t, today(ctx))).length;
+      const n = shared().filter((t) => late(t, today(ctx))).length;
       return n ? [{ text: `${n} ${n === 1 ? "task is" : "tasks are"} overdue.`, href: "/tasks", tone: "warn" }] : [];
     },
     needs(ctx): PackNeed[] {
       const day = today(ctx);
       return shared()
-        .filter((t) => overdue(t, day))
+        .filter((t) => late(t, day))
         .sort((a, b) => (a.due ?? "").localeCompare(b.due ?? ""))
         .slice(0, 5)
         .map((t) => ({
@@ -436,7 +446,7 @@ export function createTasksPack(opts: { now?: () => number } = {}): Pack & { kep
     },
     pulse(ctx) {
       const day = today(ctx);
-      const asking = shared().filter((t) => isOpen(t) && t.due && t.due <= day).length;
+      const asking = shared().filter((t) => isOpen(t) && t.due && t.due <= day && bucketOf(t, day) === "now").length;
       return asking ? { asking } : null;
     },
     bino(ctx) {
@@ -444,8 +454,8 @@ export function createTasksPack(opts: { now?: () => number } = {}): Pack & { kep
       const l = listsOf(shared(), day, now());
       const open = l.now.length + l.next.length + l.waiting.length + l.inbox.length + l.later.length;
       if (!open && !l.done.length) return "";
-      const late = l.now.filter((t) => overdue(t, day));
-      const lines = [`Tasks (shared; today is ${day}): ${l.now.length} now (${late.length} overdue), ${l.next.length} next, ${l.waiting.length} waiting, ${l.inbox.length} in the inbox, ${l.later.length} later; ${l.done.length} done this week.`];
+      const lateNow = l.now.filter((t) => late(t, day));
+      const lines = [`Tasks (shared; today is ${day}): ${l.now.length} now (${lateNow.length} overdue), ${l.next.length} next, ${l.waiting.length} waiting, ${l.inbox.length} in the inbox, ${l.later.length} later; ${l.done.length} done this week.`];
       for (const t of l.now.slice(0, 15)) lines.push(lineOf(t, day));
       if (l.now.length > 15) lines.push(`… ${l.now.length - 15} more for now.`);
       return lines.join("\n");
@@ -465,13 +475,36 @@ export function createTasksPack(opts: { now?: () => number } = {}): Pack & { kep
     async today(ctx) {
       // Fresh when it can be (hosted, another isolate may have written), else memory.
       const all = ctx.db ? await fresh(ctx) : kept;
-      const viewer = currentViewer() ?? "";
+      const who = viewer(ctx);
       const day = today(ctx);
-      const mine = all.filter((t) => visibleTo(t, viewer));
-      return [{ id: "now", render: todayCard({ today: day, viewer, team: ctx.hosted, now: nowOf(mine, day), inbox: mine.filter((t) => t.status === "inbox").length, overdue: mine.filter((t) => overdue(t, day)).length }) }];
+      const mine = all.filter((t) => visibleTo(t, who));
+      return [{ id: "now", render: todayCard({ today: day, viewer: who, team: ctx.hosted, now: nowOf(mine, day), inbox: mine.filter((t) => t.status === "inbox").length, overdue: mine.filter((t) => late(t, day)).length }) }];
     },
     lookups,
     acts,
+    // My list as Bino, search, New work and other packs read and add to it, for whoever's asking.
+    shares: (ctx): { list: ListShare } => ({
+      list: {
+        items: async () => {
+          const who = viewer(ctx);
+          return (await fresh(ctx)).filter((t) => visibleTo(t, who)).sort((a, b) => a.position - b.position || a.id - b.id).flatMap((t) => listItemOf(t) ?? []);
+        },
+        get: async (id) => {
+          const t = await findFor(ctx, id, viewer(ctx));
+          return t ? listItemOf(t) : undefined;
+        },
+        add: async (n) => {
+          const title = clean(n?.title, 200);
+          if (!title) return undefined;
+          const status = n.state && isStatus(n.state) ? n.state : "next";
+          const t = await createTask(ctx.db, { title, notes: String(n.notes ?? "").slice(0, MAX_NOTES), status, due: isoDate(n.due) ?? null, parent: typeof n.parent === "number" ? n.parent : null }, viewer(ctx), now());
+          await log(ctx, "create", t, true);
+          await wrote(ctx);
+          return listItemOf(t);
+        },
+        href: (id) => taskHref(id),
+      },
+    }),
     routes(app, ctx) {
       const page = (c: Context<AppEnv>, title: string, body: Parameters<typeof ctx.page>[1]["body"]) => ctx.page(c, { title, body, current: "/tasks" });
       const who = (c: Context<AppEnv>) => viewerOf(c.get("who"));
@@ -489,17 +522,18 @@ export function createTasksPack(opts: { now?: () => number } = {}): Pack & { kep
         if (filter.area) q.set("area", filter.area);
         if (filter.who) q.set("who", filter.who);
         const back = `/tasks${q.size ? `?${q}` : ""}`;
-        // What other packs propose for My list (Slack's saved messages): shown here too, locally where My list is.
-        // Added, they land on My list, and come over with the import below.
-        const proposals = ctx.hosted ? [] : ctx.fill("todo.proposals", {}).filter((x) => x !== "");
-        const fromTodo = await todoLeft(ctx.db);
+        // What other packs propose for My list (Slack's saved messages): added, they land here, through the share.
+        const proposals = ctx.fill("todo.proposals", {}).filter((x) => x !== "");
+        const old = myList(ctx);
+        const fromTodo = old ? (await notImported(ctx.db, await old.items().catch(() => []))).length : 0;
         return page(c, "Tasks", listsPage({ ...v, lists: listsOf(filtered(all, viewer, filter), v.today, now()), filter, areas, people, back, error: errorOf(c.req.query("e")), fromTodo, proposals }));
       });
 
       app.post("/tasks/import", strictOrigin, async (c) => {
-        const viewer = who(c);
-        const made = await importTodos(ctx.db, viewer, now());
-        await logAction(ctx.db, { kind: `${ID}.import`, target: "My list", detail: `${made.length} item${made.length === 1 ? "" : "s"}`, ok: true }).catch(() => {});
+        const old = myList(ctx);
+        if (!old) return c.redirect("/tasks", 303);
+        const made = await importTodos(ctx.db, await old.items(), who(c), now());
+        await ctx.logged({ kind: "import", target: "My list", detail: `${made.length} item${made.length === 1 ? "" : "s"}`, ok: true });
         if (made.length) await wrote(ctx);
         return c.redirect("/tasks", 303);
       });

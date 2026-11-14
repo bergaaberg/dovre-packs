@@ -4,9 +4,7 @@
  * Each one-click button is a Confirm of its write kind: one click unless set to ask twice.
  */
 import { html } from "hono/html";
-import { Ago, safeUrl } from "dovre/pages/parts.ts";
-import { Card, type Child, Confirm, ConfirmSubmit, Empty, Grid2, type Html, Item, KeyValues, List, Notice, PageHeader, Panel, Pill, Tabs } from "dovre/ui/kit.ts";
-import { markdown } from "dovre/ui/markdown.ts";
+import { Ago, Card, type Child, Confirm, ConfirmSubmit, Empty, Grid2, type Html, Item, KeyValues, List, markdown, Notice, PageHeader, Panel, Pill, safeUrl, Tabs } from "dovre/pack.ts";
 import { type Filter, type Lists, overdue, whenOf } from "./lists.ts";
 import { PRIORITIES, STATUSES } from "./parse.ts";
 import { type Activity, label, shortName, type Task, type TaskLink } from "./store.ts";
@@ -93,7 +91,7 @@ function fromTodoNote(n: number): Html | "" {
   if (!n) return "";
   return Notice({
     tone: "neutral",
-    children: html`<span class="tasks-import">My list has ${n} item${n === 1 ? "" : "s"} that aren't tasks yet. ${Confirm({ action: "/tasks/import", label: "Copy them here", question: `Copy ${n} item${n === 1 ? "" : "s"} from My list? My list keeps them.`, kind: "tasks.import" })}</span>`,
+    children: html`<span class="tasks-import">Tasks takes My list's place, and My list has ${n} item${n === 1 ? "" : "s"} that aren't tasks yet. ${Confirm({ action: "/tasks/import", label: "Copy them here", question: `Copy ${n} item${n === 1 ? "" : "s"} from My list? My list keeps them.`, kind: "tasks.import" })}</span>`,
   });
 }
 
@@ -139,7 +137,7 @@ export function listsPage(m: ListsModel): Html {
 ${m.error ? Notice({ tone: "warn", children: m.error }) : ""}
 ${fromTodoNote(m.fromTodo ?? 0)}
 ${quickAdd({ action: "/tasks", back: m.back, team: m.team })}
-${m.proposals?.length ? html`<details class="tasks-proposals"><summary>Proposed for My list (${m.proposals.length})</summary><p class="t3 sm">Added, they go to My list; copy them here from there.</p>${m.proposals}</details>` : ""}
+${m.proposals?.length ? html`<details class="tasks-proposals"><summary>Proposed for My list (${m.proposals.length})</summary><p class="t3 sm">Added, they become tasks here.</p>${m.proposals}</details>` : ""}
 ${areaTabs ? html`<div class="tasks-filters">${areaTabs}${whoTabs}</div>` : whoTabs ? html`<div class="tasks-filters">${whoTabs}</div>` : ""}
 <div data-live id="tasks">
 ${open ? "" : Empty({ title: "Nothing to do", children: html`<p class="t2">Add one above: what's left after the #area, !priority, @person and dates is its title.</p>` })}
