@@ -1,5 +1,9 @@
 # kafka
 
+## 1.1.1 — 2026-11-14
+
+- First run suggests it to operators who run Kafka. Nothing changes in what it does.
+
 ## 1.1.0 — 2026-11-10
 
 - A Bino lookup (dovre#262): `kafka.lag` gives the lag of a topic or consumer group as last read, with its worst partition and recent samples (every pair when no name is given). Agent turns get it as a tool too. Nothing new is fetched for it.

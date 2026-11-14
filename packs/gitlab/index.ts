@@ -10,11 +10,12 @@ export function createGitlabPack(opts: { fetchFn?: Fetch } = {}): Pack {
   return {
     manifest: {
       api: "2.0",
-      version: "1.0.4",
+      version: "1.0.5",
       id: "gitlab",
       name: "GitLab",
       description: "GitLab as the forge: merge requests, pipelines, todos, activity and blocked deployments (set FORGE=gitlab).",
       domain: "work",
+      markers: [".gitlab-ci.yml"],
       execution: "any",
       settings: [
         { key: "GITLAB_HOST", label: "GitLab host", help: "gitlab.com (the default) or your self-managed host" },

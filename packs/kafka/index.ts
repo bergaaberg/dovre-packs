@@ -14,11 +14,12 @@ export function createKafkaPack(opts: { fetchFn?: typeof fetch } = {}): Pack & {
     kept: () => kept,
     manifest: {
       api: "2.0",
-      version: "1.1.0",
+      version: "1.1.1",
       id: "kafka",
       name: "Kafka",
       description: "Consumer group lag, dead-letter topics and partition health for Kafka, Redpanda and Confluent (metadata only).",
       domain: "work",
+      answers: ["run:kafka"],
       execution: "any",
       everyMs: 60_000,
       settings: [

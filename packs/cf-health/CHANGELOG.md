@@ -1,5 +1,9 @@
 # cf-health
 
+## 1.0.4 — 2026-11-14
+
+- First run suggests it to operators who run Cloudflare Workers, and where a checkout has a wrangler config. Nothing changes in what it does.
+
 ## 1.0.3 — 2026-11-10
 
 - Moved to Pack API 2.0 (dovre#484): needs Dovre with pack contract 2. Nothing changes in what it does.

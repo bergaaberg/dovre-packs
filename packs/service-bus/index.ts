@@ -15,11 +15,12 @@ export function createServiceBusPack(opts: { fetchFn?: typeof fetch; now?: () =>
     kept: () => kept,
     manifest: {
       api: "2.0",
-      version: "1.0.3",
+      version: "1.0.4",
       id: "service-bus",
       name: "Azure Service Bus",
       description: "Queue and subscription backlog and dead-letter queue depth, with a DLQ radar.",
       domain: "general",
+      answers: ["run:servicebus"],
       execution: "any",
       everyMs: 2 * 60_000,
       settings: [

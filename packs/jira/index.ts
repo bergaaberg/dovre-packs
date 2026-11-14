@@ -136,11 +136,12 @@ export function createJiraPack(
     kept: () => kept,
     manifest: {
       api: "2.0",
-      version: "1.3.0",
+      version: "1.3.1",
       id: "jira",
       name: "Jira",
       description: "Jira issues assigned to me, what moved in my projects, ticket keys as links, and filing tickets.",
       domain: "work",
+      answers: ["tasks:jira"],
       execution: "any",
       everyMs: 5 * 60_000,
       // What it files can go on My list too, while the todo pack is on.

@@ -1,5 +1,9 @@
 # topo
 
+## 1.1.6 — 2026-11-14
+
+- First run suggests it where a checkout has a peak.yaml. Nothing changes in what it does.
+
 ## 1.1.5 — 2026-11-10
 
 - Moved to Pack API 2.0 (dovre#484): needs Dovre with pack contract 2. Nothing changes in what it does.

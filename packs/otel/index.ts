@@ -13,11 +13,12 @@ export function createOtelPack(opts: { fetchFn?: typeof fetch } = {}): Pack & { 
     kept: () => kept,
     manifest: {
       api: "2.0",
-      version: "1.0.3",
+      version: "1.0.4",
       id: "otel",
       name: "OpenTelemetry & Prometheus",
       description: "RED metrics, firing alerts and prod versions from Prometheus / Mimir / VictoriaMetrics / Grafana Cloud.",
       domain: "general",
+      answers: ["run:prometheus", "data:prometheus"],
       execution: "any",
       everyMs: 3 * 60_000,
       settings: [

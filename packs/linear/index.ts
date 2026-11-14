@@ -58,11 +58,12 @@ export function createLinearPack(
     kept: () => kept,
     manifest: {
       api: "2.0",
-      version: "1.3.1",
+      version: "1.3.2",
       id: "linear",
       name: "Linear",
       description: "Assigned Linear issues, cycle progress, un-triaged team issues and TEAM-123 linking.",
       domain: "work",
+      answers: ["tasks:linear"],
       execution: "any",
       everyMs: 5 * 60_000,
       settings: [
