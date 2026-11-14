@@ -25,3 +25,4 @@ export { movementPack, createMovementPack } from "./packs/movement/index.ts";
 export { summariesPack, createSummariesPack } from "./packs/summaries/index.ts";
 export { tasksPack, createTasksPack } from "./packs/tasks/index.ts";
 export { themesPack, createThemesPack } from "./packs/themes/index.ts";
+export { releasesPack, createReleasesPack } from "./packs/releases/index.ts";
