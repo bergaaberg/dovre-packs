@@ -237,3 +237,51 @@ test("the outline's extensions are the engine's grammars that have definition qu
   const { TAGS } = await import("../gen.ts");
   assert.deepEqual([...OUTLINE_EXTS].sort(), Object.keys(EXT).filter((e) => Object.hasOwn(TAGS, EXT[e])).sort());
 });
+
+// ── Moved blocks (dovre#520) ──
+
+const fnA = ["function load(repo: string) {", "  const rows = fetchRows(repo);", "  return rows.filter((r) => r.open);", "}"];
+const moves = (r: { moves: { old: number[]; new: number[]; edited: boolean }[] }) => r.moves.map((m) => `${m.old.join("-")}>${m.new.join("-")}${m.edited ? " edited" : ""}`);
+
+test("a function removed in one hunk and added in another is a move: both ends found, nothing in it marked", async () => {
+  const lines = [L("hunk", "@@ -1,6 +1,2 @@"), L("ctx", "import x from 'y';"), ...fnA.map((t) => L("del", t)), L("ctx", "export const a = 1;"), L("hunk", "@@ -40,2 +36,6 @@"), L("ctx", "// the end"), ...fnA.map((t) => L("add", t)), L("ctx", "export {};")];
+  const r = await read("typescript", lines);
+  assert.deepEqual(moves(r), ["2-5>9-12"]);
+  for (let i = 2; i <= 12; i++) assert.deepEqual(r.per[i].marks, [], `line ${i} isn't marked`);
+  assert.deepEqual(r.blocks.map((b: { layout: boolean }) => b.layout), [false, false], "a move isn't a layout change");
+});
+
+test("moved and re-wrapped is still a move: the subtree's tokens match, whatever its lines", async () => {
+  const lines = [L("hunk"), L("del", "register(app, { path: '/x', handler: serveIndex });"), L("ctx", "const gap = true;"), L("add", "register(app, {"), L("add", "  path: '/x',"), L("add", "  handler: serveIndex"), L("add", "});")];
+  assert.deepEqual(moves(await read("typescript", lines)), ["1-1>3-6"]);
+});
+
+test("moved and edited: the definition is matched, only its edit marked", async () => {
+  const edited = [...fnA];
+  edited[2] = "  return rows.filter((r) => r.closed);";
+  const lines = [L("hunk"), ...fnA.map((t) => L("del", t)), L("ctx", "export const a = 1;"), L("ctx", "export const b = 2;"), ...edited.map((t) => L("add", t))];
+  const r = await read("typescript", lines);
+  assert.deepEqual(moves(r), ["1-4>7-10 edited"]);
+  assert.deepEqual(r.per[3].marks.map(([s, e]: [number, number]) => fnA[2]!.slice(s, e)), ["open"]);
+  assert.deepEqual(r.per[9].marks.map(([s, e]: [number, number]) => edited[2]!.slice(s, e)), ["closed"]);
+});
+
+test("not moves: an edit in place, a small line, two different functions of the same shape, a block that stayed while its neighbour moved", async () => {
+  assert.deepEqual(moves(await read("typescript", [L("hunk"), ...fnA.map((t) => L("del", t)), ...fnA.map((t, i) => L("add", i === 1 ? "  const rows = fetchAll(repo);" : t))])), [], "edited where it is");
+  assert.deepEqual(moves(await read("typescript", [L("hunk"), L("del", "  return null;"), L("ctx", "x();"), L("add", "  return null;")])), [], "too small to name");
+  const other = ["function save(path: number) {", "  const data = encodeAll(path);", "  return data.map((d) => d.size);", "}"];
+  assert.deepEqual(moves(await read("typescript", [L("hunk"), ...fnA.map((t) => L("del", t)), L("ctx", "x();"), ...other.map((t) => L("add", t))])), [], "same shape, other words");
+  const routesA = ["const routes = [", '  ["/a", [one, [two]]],', '  ["/b", [three, [four]]],', "];"];
+  const routesB = ["const others = [", '  ["/c", [five, [six]]],', '  ["/d", [seven, [eight]]],', "];"];
+  assert.deepEqual(moves(await read("typescript", [L("hunk"), ...routesA.map((t) => L("del", t)), L("ctx", "x();"), ...routesB.map((t) => L("add", t))])), [], "the same brackets, none of the same words");
+  const fnB = ["function keep(store: Store) {", "  return store.flush(true);", "}"];
+  const swap = await read("typescript", [L("hunk"), ...fnA.map((t) => L("del", t)), ...fnB.map((t) => L("del", t)), ...fnB.map((t) => L("add", t)), ...fnA.map((t) => L("add", t))]);
+  assert.equal(swap.moves.length, 1, "of two swapped functions, one moved");
+});
+
+test("without a grammar, identical lines are matched and grown into one block", () => {
+  const para = ["The cockpit reads every repo once a minute,", "and keeps the newest snapshot in memory."];
+  const r = analyse([L("hunk"), ...para.map((t) => L("del", t)), L("ctx", "## Setup"), ...para.map((t) => L("add", t))], undefined, undefined);
+  assert.deepEqual(moves(r), ["1-2>4-5"]);
+  assert.deepEqual(r.per[4].marks, []);
+});

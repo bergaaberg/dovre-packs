@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { packApp, testContext } from "dovre/pack-testing.ts";
 // @ts-expect-error: plain JS, no types
-import { FMT, FMT_CONFIG, FMT_GLOBAL, localSrc, logicDiff, logicTable, offerLogic, onlyFormatting, outlineList, rebuildOld, showSymbols } from "../engine.js";
+import { FMT, FMT_CONFIG, FMT_GLOBAL, localSrc, logicDiff, logicTable, offerLogic, onlyFormatting, outlineList, rebuildOld, showMoves, showSymbols } from "../engine.js";
 import { codeReviewPack } from "../index.ts";
 import { DPRINT_JS_SHA, RUFF_JS_SHA, SHA } from "../gen.ts";
 import { FMT_EXTS, MAX_SRC, prSrc, readSrc, srcAsk } from "../src.ts";
@@ -331,4 +331,34 @@ test("outlineList: definitions as text with their lines, changed ones go to thei
   assert.equal(details.open, true);
   assert.match(row.className, /cr-here/);
   assert.equal(outlineList(doc, details, lines, []).html(), '<nav class="cr-outline" aria-label="Outline of this file"><p class="cr-outline-head">No definitions found.</p></nav>');
+});
+
+test("showMoves: each end marked and tagged with the other's line, as text; pressing one goes there", () => {
+  const doc = fakeDoc();
+  const row = () => {
+    const tr: any = doc.createElement("tr");
+    const td: any = doc.createElement("td");
+    const code: any = doc.createElement("code");
+    td.append(code);
+    tr.append(td);
+    code.closest = (q: string) => (q === "td" ? td : tr);
+    tr.scrollIntoView = () => {};
+    return { code, td, tr };
+  };
+  const rows = [row(), row(), row(), row()];
+  const lines = [L("hunk", "@@ -10,3 +10,3 @@"), L("del", "a"), L("ctx", "b"), L("add", "<a>"), L("hunk", "@@ -40 +40 @@"), L("ctx", "c")].map((l, i) => {
+    const r = ({ 1: 0, 2: 1, 3: 2, 5: 3 } as Record<number, number>)[i];
+    return { ...l, els: r === undefined ? [] : [rows[r]!.code], rows: [] };
+  });
+  const details: any = { open: false };
+  showMoves(doc, details, lines, [{ old: [1, 1], new: [3, 3], edited: true }]);
+  assert.ok(rows[0]!.td.className.includes("cr-mv") && rows[2]!.td.className.includes("cr-mv"));
+  assert.ok(!rows[1]!.td.className.includes("cr-mv"), "the line between isn't");
+  const tag = (r: any) => r.td.kids.find((k: any) => k.className === "cr-mv-tag");
+  assert.equal(tag(rows[0]).html(), '<button class="cr-mv-tag">moved to line 11, changed</button>');
+  assert.equal(tag(rows[2]).html(), '<button class="cr-mv-tag">moved from line 10, changed</button>');
+  tag(rows[2]).on.click({ preventDefault() {} });
+  assert.equal(details.open, true, "it opens the file and goes to the other end");
+  showMoves(doc, details, lines.map((l) => ({ ...l, text: l.kind === "hunk" ? "" : l.text })), [{ old: [1, 1], new: [3, 3], edited: false }]);
+  assert.equal(rows[0]!.td.kids.filter((k: any) => k.className === "cr-mv-tag")[1].html(), '<button class="cr-mv-tag">moved to below</button>', "no header: which way");
 });

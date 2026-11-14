@@ -4,6 +4,7 @@
 // - What changed, by token rather than by line: within each run of removed and added lines, the
 //   old and new tokens are matched (longest common subsequence); unmatched ones are marked.
 // - A run whose tokens all match changed only whitespace or layout: it folds to one row.
+// - A block removed in one place and added in another is shown as moved, both ends linked.
 // - The functions, classes and methods the changes touch, named in the file's header.
 // Each hunk is parsed on its own (the old side and the new side), so no file is fetched; a hunk
 // that starts inside a comment or string is highlighted a little wrong, never shown wrong.
@@ -116,8 +117,9 @@ export function lcs(a, b, cap = 2_000_000) {
  * A diff's lines read as a reviewer would. `lines`: { kind: "hunk" | "ctx" | "add" | "del", text }
  * in order, removed lines before the added ones that replace them. `parse(text)`: a tree or
  * undefined; `query`: highlight queries or undefined. Returns, per line, `hl` (runs of [from, to,
- * class]) and `marks` ([from, to) of changed tokens), and the runs of changes (`blocks`: first and
- * last line index, and `layout` when only whitespace or layout changed).
+ * class]) and `marks` ([from, to) of changed tokens); the runs of changes (`blocks`: first and
+ * last line index, and `layout` when only whitespace or layout changed); and the blocks that moved
+ * (`moves`, see findMoves).
  */
 export function analyse(lines, parse, query) {
   const per = lines.map(() => ({ hl: [], marks: [] }));
@@ -131,10 +133,16 @@ export function analyse(lines, parse, query) {
     } else if (l.kind === "ctx" || l.kind === "add" || l.kind === "del") cur.push(i);
   });
   if (cur.length) hunks.push(cur);
+  /** A changed line's tokens ({ t, line, from, to, abs }: `abs` is its offset in its side's text). */
+  const toksAt = new Map();
+  /** Spans of whole changed lines, from the trees: { side, first, last, s, e, size } (line indices; s, e: offsets in that side's text). */
+  const spans = [];
+  const runs = [];
+  const runOf = new Map();
   for (const idx of hunks) {
-    const sides = {};
     for (const side of ["old", "new"]) {
-      const mine = idx.filter((i) => lines[i].kind === "ctx" || lines[i].kind === (side === "old" ? "del" : "add"));
+      const kind = side === "old" ? "del" : "add";
+      const mine = idx.filter((i) => lines[i].kind === "ctx" || lines[i].kind === kind);
       const at = new Map();
       let text = "";
       for (const i of mine) {
@@ -150,8 +158,18 @@ export function analyse(lines, parse, query) {
       }
       const colours = paint(query, tree, text.length);
       const toks = tokensOf(tree, text);
+      if (tree) spans.push(...wholeLines(tree, mine, at, lines, kind, side, text));
       tree?.delete?.();
-      sides[side] = { at, text, colours, toks };
+      // Each token to its line (a token across lines, which only a broken parse gives, to none).
+      let row = 0;
+      for (const t of toks) {
+        while (row + 1 < mine.length && at.get(mine[row + 1]) <= t.s) row++;
+        const i = mine[row];
+        const s = at.get(i);
+        if (lines[i].kind !== kind || t.e > s + lines[i].text.length) continue;
+        if (!toksAt.has(i)) toksAt.set(i, []);
+        toksAt.get(i).push({ t: t.t, line: i, from: t.s - s, to: t.e - s, abs: t.s });
+      }
       // Highlighting: a ctx line from the new side, a removed line from the old.
       for (const i of mine) {
         if (side === "old" && lines[i].kind === "ctx") continue;
@@ -176,28 +194,177 @@ export function analyse(lines, parse, query) {
       }
       const run = [];
       while (k < idx.length && lines[idx[k]].kind !== "ctx") run.push(idx[k++]);
-      const pick = (side, kind) => {
-        const { at, toks } = sides[side];
-        const out = [];
-        for (const i of run) {
-          if (lines[i].kind !== kind) continue;
-          const s = at.get(i);
-          const e = s + lines[i].text.length;
-          for (const t of toks) if (t.s >= s && t.e <= e) out.push({ ...t, line: i, from: t.s - s, to: t.e - s });
-        }
-        return out;
-      };
-      const olds = pick("old", "del");
-      const news = pick("new", "add");
-      const [ka, kb] = lcs(olds.map((t) => t.t), news.map((t) => t.t));
-      const mark = (toks, keep) => toks.forEach((t, j) => keep[j] || per[t.line].marks.push([t.from, t.to]));
-      mark(olds, ka);
-      mark(news, kb);
-      blocks.push({ first: run[0], last: run[run.length - 1], layout: ka.every(Boolean) && kb.every(Boolean) });
+      for (const i of run) runOf.set(i, runs.length);
+      runs.push(run);
     }
   }
+  const side = (run, kind) => run.filter((i) => lines[i].kind === kind).flatMap((i) => toksAt.get(i) ?? []);
+  // First each run on its own, so a block that only moved within its run, the rest matching
+  // around it, isn't taken for a move.
+  for (const run of runs) {
+    const olds = side(run, "del");
+    const news = side(run, "add");
+    const [ka, kb] = lcs(olds.map((t) => t.t), news.map((t) => t.t));
+    olds.forEach((t, j) => (t.kept = ka[j]));
+    news.forEach((t, j) => (t.kept = kb[j]));
+  }
+  const moves = findMoves(lines, toksAt, spans, runOf);
+  const moved = new Set();
+  const mark = (toks, keep) => toks.forEach((t, j) => keep[j] || per[t.line].marks.push([t.from, t.to]));
+  for (const m of moves) {
+    const o = [];
+    const n = [];
+    for (let i = m.old[0]; i <= m.old[1]; i++) moved.add(i), o.push(...(toksAt.get(i) ?? []));
+    for (let i = m.new[0]; i <= m.new[1]; i++) moved.add(i), n.push(...(toksAt.get(i) ?? []));
+    if (!m.edited) continue;
+    const [ka, kb] = lcs(o.map((t) => t.t), n.map((t) => t.t));
+    mark(o, ka);
+    mark(n, kb);
+  }
+  // Then what's left of each run, without what moved.
+  for (const run of runs) {
+    const rest = run.filter((i) => !moved.has(i));
+    const olds = side(rest, "del");
+    const news = side(rest, "add");
+    const [ka, kb] = lcs(olds.map((t) => t.t), news.map((t) => t.t));
+    mark(olds, ka);
+    mark(news, kb);
+    blocks.push({ first: run[0], last: run[run.length - 1], layout: rest.length === run.length && ka.every(Boolean) && kb.every(Boolean) });
+  }
   for (const p of per) p.marks = merge(p.marks);
-  return { per, blocks };
+  return { per, blocks, moves };
+}
+
+// ── Moved blocks (dovre#520) ────────────────────────────────────────────────
+// A block removed in one place and added in another is a move, not a delete and an add. Its
+// syntax trees are matched, difftastic-style: whole subtrees of changed lines, compared by their
+// tokens (so a block that moved and was re-wrapped still matches), the biggest first, each grown
+// over the identical lines around it. Then, for what's left, a moved definition that was also
+// edited: two blocks of three lines or more, in different runs, most of their tokens in common.
+// Each hunk is parsed on its own, so a block is matched across the file's hunks without reading it.
+
+/** A move this small (in letters and digits) isn't named: a stray `return null;` is no move. */
+export const MOVE_MIN = 20;
+/** A moved-and-edited block keeps at least this much of its tokens and of its words. */
+const EDITED_MIN = 0.75;
+const WORDY = /\w/;
+
+/** The nodes of a tree that are whole changed lines (only `kind` ones): { side, first, last, s, e, size }. */
+function wholeLines(tree, mine, at, lines, kind, side, text) {
+  const out = [];
+  const seen = new Set();
+  const c = tree.walk();
+  for (;;) {
+    const s = c.startIndex;
+    const e = c.endIndex;
+    const r0 = c.startPosition.row;
+    let r1 = c.endPosition.row;
+    if (r1 > r0 && c.endPosition.column === 0) r1--;
+    const first = mine[r0];
+    const last = mine[r1];
+    let whole = e > s && first !== undefined && last !== undefined;
+    for (let r = r0; whole && r <= r1; r++) whole = lines[mine[r]].kind === kind;
+    if (whole) {
+      const end = at.get(last) + lines[last].text.length;
+      whole = !text.slice(at.get(first), s).trim() && !text.slice(Math.min(e, end), end).replace(/[;,]/g, "").trim();
+    }
+    // The outermost node of a span stands for it (an expression statement, not its call).
+    if (whole && !seen.has(`${first}:${last}`)) {
+      seen.add(`${first}:${last}`);
+      out.push({ side, first, last, s, e });
+    }
+    if (c.gotoFirstChild()) continue;
+    while (!c.gotoNextSibling()) if (!c.gotoParent()) return out;
+  }
+}
+
+/**
+ * The blocks that moved: { old: [first, last], new: [first, last], edited } (line indices; `edited`
+ * when it changed too, its marks then from the two sides). `toksAt`: each changed line's tokens,
+ * `kept` set where its run's own matching kept them; `spans`: wholeLines'; `runOf`: line → run.
+ */
+export function findMoves(lines, toksAt, spans, runOf) {
+  const toks = (first, last, s, e) => {
+    const out = [];
+    for (let i = first; i <= last; i++) for (const t of toksAt.get(i) ?? []) if (s === undefined || (t.abs >= s && t.abs < e)) out.push(t);
+    return out;
+  };
+  const cands = [];
+  const lineSpan = new Set(spans.map((x) => `${x.side}:${x.first}:${x.last}`));
+  for (const x of spans) cands.push({ ...x, toks: toks(x.first, x.last, x.s, x.e) });
+  // Every changed line is a span of its own too (and the only kind without a grammar).
+  for (const [i, ts] of toksAt) {
+    const side = lines[i].kind === "del" ? "old" : "new";
+    if (!lineSpan.has(`${side}:${i}:${i}`)) cands.push({ side, first: i, last: i, toks: ts });
+  }
+  // One that its run already matches whole, or with no word in it, isn't a move to look for.
+  const live = cands.filter((c) => c.toks.some((t) => !t.kept) && c.toks.some((t) => WORDY.test(t.t)));
+  for (const c of live) c.key = c.toks.map((t) => t.t).join("\u0000");
+  const used = new Set();
+  const free = (c) => {
+    for (let i = c.first; i <= c.last; i++) if (used.has(i)) return false;
+    return true;
+  };
+  const key = (i) => (toksAt.get(i) ?? []).map((t) => t.t).join("\u0000");
+  const alnum = (a, b) => toks(a, b).reduce((n, t) => n + (t.t.match(/[\p{L}\p{N}]/gu)?.length ?? 0), 0);
+  /** A match grown over the identical removed and added lines on each side of it. */
+  const grow = (o0, o1, n0, n1) => {
+    const ok = (o, n) => lines[o]?.kind === "del" && lines[n]?.kind === "add" && !used.has(o) && !used.has(n) && key(o) === key(n);
+    while (ok(o0 - 1, n0 - 1)) o0--, n0--;
+    while (ok(o1 + 1, n1 + 1)) o1++, n1++;
+    // Not ending on lines with no tokens (blank ones).
+    while (o1 > o0 && n1 > n0 && !toksAt.get(o1) && !toksAt.get(n1)) o1--, n1--;
+    while (o0 < o1 && n0 < n1 && !toksAt.get(o0) && !toksAt.get(n0)) o0++, n0++;
+    return [o0, o1, n0, n1];
+  };
+  const take = (o0, o1, n0, n1) => {
+    for (let i = o0; i <= o1; i++) used.add(i);
+    for (let i = n0; i <= n1; i++) used.add(i);
+  };
+  const moves = [];
+  const byKey = new Map();
+  for (const c of live) if (c.side === "new") byKey.set(c.key, [...(byKey.get(c.key) ?? []), c]);
+  // Moved and edited: big blocks only, never two from the same run (that's an edit in place).
+  const big = (c) => c.s !== undefined && c.last - c.first >= 2 && c.toks.length >= 12;
+  const bigNew = live.filter((c) => c.side === "new" && big(c)).sort((a, b) => b.toks.length - a.toks.length).slice(0, 60);
+  let tries = 0;
+  const edited = (o) => {
+    let best;
+    for (const n of bigNew) {
+      if (!free(n) || runOf.get(n.first) === runOf.get(o.first)) continue;
+      const [a, b] = [o.toks.length, n.toks.length];
+      if (Math.min(a, b) / Math.max(a, b) < EDITED_MIN || ++tries > 400) continue;
+      const [ka, kb] = lcs(o.toks.map((t) => t.t), n.toks.map((t) => t.t), 250_000);
+      const kept = ka.filter(Boolean).length;
+      const words = o.toks.filter((t) => WORDY.test(t.t)).length;
+      const keptWords = o.toks.filter((t, j) => ka[j] && WORDY.test(t.t)).length;
+      const score = (2 * kept) / (a + b);
+      if (score >= EDITED_MIN && keptWords >= EDITED_MIN * words && kb.some(Boolean) && (!best || score > best.score)) best = { n, score };
+    }
+    return best?.n;
+  };
+  // The biggest first, so a whole definition is matched before its parts: as it is, else edited.
+  const olds = live.filter((c) => c.side === "old").sort((a, b) => b.toks.length - a.toks.length || a.first - b.first);
+  for (const o of olds) {
+    if (!free(o)) continue;
+    // Of the places it could have gone as it is, the one it matches the most lines around.
+    let best;
+    for (const n of (byKey.get(o.key) ?? []).filter(free).slice(0, 8)) {
+      const g = grow(o.first, o.last, n.first, n.last);
+      if (!best || g[1] - g[0] > best[1] - best[0]) best = g;
+    }
+    if (best && alnum(best[0], best[1]) >= MOVE_MIN) {
+      take(...best);
+      moves.push({ old: [best[0], best[1]], new: [best[2], best[3]], edited: false });
+      continue;
+    }
+    const n = big(o) && alnum(o.first, o.last) >= MOVE_MIN ? edited(o) : undefined;
+    if (n) {
+      take(o.first, o.last, n.first, n.last);
+      moves.push({ old: [o.first, o.last], new: [n.first, n.last], edited: true });
+    }
+  }
+  return moves.sort((a, b) => a.new[0] - b.new[0]);
 }
 
 /** Marks that touch or are only whitespace apart become one. */
@@ -611,11 +778,12 @@ export async function upgrade(doc, table, path, ts) {
   const lang = langOf(path);
   const parser = lang && ts ? await ts.parser(lang).catch(() => undefined) : undefined;
   const query = lang && ts ? await ts.query(lang).catch(() => undefined) : undefined;
-  const { per, blocks } = analyse(lines, parser ? (t) => parser.parse(t) : undefined, query);
+  const { per, blocks, moves } = analyse(lines, parser ? (t) => parser.parse(t) : undefined, query);
   lines.forEach((l, i) => {
     if (l.kind === "hunk") return;
     for (const el of l.els) draw(doc, el, l.text, per[i].hl, per[i].marks);
   });
+  showMoves(doc, table.closest("details.dfile") ?? table, lines, moves);
   let folded = 0;
   for (const b of blocks) {
     if (!b.layout) continue;
@@ -685,6 +853,54 @@ function goTo(details, lines, i) {
   at.scrollIntoView({ block: "center" });
   at.classList.add("cr-here");
   setTimeout(() => at.classList.remove("cr-here"), 1600);
+}
+
+/** Each line's numbers on the old and new side ({ old, new }), from its hunk's header; none where a header doesn't read. */
+export function numbers(lines) {
+  let o;
+  let n;
+  return lines.map((l) => {
+    if (l.kind === "hunk") {
+      const m = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(l.text ?? "");
+      [o, n] = m ? [Number(m[1]), Number(m[2])] : [undefined, undefined];
+      return {};
+    }
+    const at = { old: l.kind !== "add" ? o : undefined, new: l.kind !== "del" ? n : undefined };
+    if (o !== undefined && l.kind !== "add") o++;
+    if (n !== undefined && l.kind !== "del") n++;
+    return at;
+  });
+}
+
+/**
+ * Marks the lines that moved, and puts a tag on each end that says where the other is and goes
+ * there: "moved to line 120" where it was removed, "moved from line 4" where it was added (and
+ * "…, changed" when it was edited too).
+ */
+export function showMoves(doc, details, lines, moves) {
+  const nums = numbers(lines);
+  for (const m of moves) {
+    const ends = [
+      { at: m.old, to: m.new[0], word: "to", line: nums[m.new[0]]?.new },
+      { at: m.new, to: m.old[0], word: "from", line: nums[m.old[0]]?.old },
+    ];
+    for (const { at, to, word, line } of ends) {
+      for (let i = at[0]; i <= at[1]; i++) for (const el of lines[i].els) el.closest?.("td")?.classList.add("cr-mv");
+      const td = lines[at[0]].els[0]?.closest?.("td");
+      if (!td) continue;
+      const where = line !== undefined ? `line ${line}` : to > at[0] ? "below" : "above";
+      const b = doc.createElement("button");
+      b.type = "button";
+      b.className = "cr-mv-tag";
+      b.textContent = `moved ${word} ${where}${m.edited ? ", changed" : ""}`;
+      b.title = word === "to" ? "Goes to where this block went" : "Goes to where this block came from";
+      b.addEventListener("click", (e) => {
+        e.preventDefault();
+        goTo(details, lines, to);
+      });
+      td.append(b);
+    }
+  }
 }
 
 // ── Outline (dovre#300) ─────────────────────────────────────────────────────
