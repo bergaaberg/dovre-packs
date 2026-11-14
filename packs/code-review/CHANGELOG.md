@@ -1,5 +1,9 @@
 # code-review
 
+## 1.6.0 — 2026-11-14
+
+- Moved blocks (dovre#520): a block removed in one place and added in another is shown as moved, not as a delete and an add. Both ends are tinted, and each has a tag that says where the other is and goes there ("moved to line 120", "moved from line 4"). Blocks are matched by syntax subtree across all of a file's hunks, so a block that moved and was re-wrapped still matches. One that moved and was edited a little ("moved from line 4, changed") has only its edit marked. Small moves (under 20 letters and digits) aren't named. Without a grammar, identical lines are matched.
+
 ## 1.5.0 — 2026-11-13
 
 - A file's whole outline (dovre#300): an "Outline" button in its header lists its functions, classes and methods (those at the top level and the members of classes, not helpers inside a function), each with its line. The ones the diff changes are marked, and pressing one goes to its first change. On a PR it reads the file at the PR's head when pressed: one forge read, shared with "Only formatting?". On a checkout's diff it reads the file locally. TypeScript, JavaScript, Go, Rust, Python and C#.

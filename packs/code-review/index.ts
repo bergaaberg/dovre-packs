@@ -6,6 +6,10 @@
  * parsed on its own, so nothing more is read from the forge. The comments, threads and Viewed
  * boxes core draws stay as they are: only the code's text is redrawn (engine.js).
  *
+ * Moved blocks (dovre#520): a block removed in one place and added in another is marked as moved, its
+ * two ends linked ("moved to line 120", "moved from line 4"), matched by syntax subtree across the
+ * file's hunks, so a block that moved and was re-wrapped, or moved and was edited a little, still is.
+ *
  * Changed symbols (dovre#300): a file's header names the functions, classes and methods its changes
  * touch, found with each grammar's definition queries (tags.scm) in the same parse of each hunk,
  * and with the definition git names in a hunk's header. Nothing more is read from the forge.
@@ -68,6 +72,9 @@ tr.cr-fold button { font-size: var(--fs-s); }
 .cr-sym { font: inherit; font-family: var(--mono, monospace); color: var(--text-2); background: none; border: 0; padding: 0; cursor: pointer; max-width: 24ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cr-sym:hover, .cr-sym:focus-visible { color: var(--accent); text-decoration: underline; }
 tr.cr-here > td { box-shadow: inset 3px 0 0 var(--accent); }
+td.cr-mv { background: color-mix(in srgb, var(--accent) 9%, transparent); box-shadow: inset 2px 0 0 color-mix(in srgb, var(--accent) 60%, transparent); }
+.cr-mv-tag { float: right; margin-left: 12px; padding: 0 4px; font: inherit; font-size: var(--fs-s); color: var(--text-2); background: none; border: 0; cursor: pointer; white-space: nowrap; }
+.cr-mv-tag:hover, .cr-mv-tag:focus-visible { color: var(--accent); text-decoration: underline; }
 .cr-outline { margin: 0 0 8px; padding: 8px 12px; border: 1px solid var(--line); border-radius: var(--r-s); font-size: var(--fs-s); max-height: 40vh; overflow: auto; }
 .cr-outline[hidden] { display: none; }
 .cr-outline-head { margin: 0 0 4px; color: var(--text-3); }
@@ -103,10 +110,10 @@ export function createCodeReviewPack(): Pack {
   return {
     manifest: {
       api: "2.0",
-      version: "1.5.0",
+      version: "1.6.0",
       id: "code-review",
       name: "Code review",
-      description: "Diffs read as a reviewer does: highlighting, changes marked by token, the functions and classes they touch named, whitespace and layout changes folded, files that only changed formatting marked. Runs in your browser (tree-sitter, dprint and Ruff, as WebAssembly).",
+      description: "Diffs read as a reviewer does: highlighting, changes marked by token, moved blocks shown as moves, the functions and classes they touch named, whitespace and layout changes folded, files that only changed formatting marked. Runs in your browser (tree-sitter, dprint and Ruff, as WebAssembly).",
       domain: "general",
       execution: "any",
       // Reads a file at a ref in a checkout, for the formatting check (local).
