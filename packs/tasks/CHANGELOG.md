@@ -1,5 +1,12 @@
 # tasks
 
+## 0.3.0 — 2026-11-14
+
+- Keys on every list of tasks: j and k move down and up the rows (Enter opens the one in focus), x ticks it in the weekly review. Never while typing.
+- The weekly review changes several at once: tick rows in the inbox, waiting and overdue lists, then Next, Next wk, Done or Drop. Each task is read again, changed and logged on its own; a task closed in the meantime is left alone.
+- A reminder before a due date: a task due today or tomorrow shows in what needs me, and rings once as "A task is due tomorrow" (off until switched on in Settings → Notifications).
+- A handover shows: a task remembers when it was given to its assignee and by whom (two new columns), its row says "@kari from ola", and on a hosted cockpit it's in what needs me for three days, ringing once as "A task was given to someone" (off until switched on). What needs me is the same for everyone on a cockpit, so the line names whose task it is. Tasks assigned before this version have no handover.
+
 ## 0.2.1 — 2026-11-14
 
 - First run suggests it to whoever keeps tasks in their head. Nothing changes in what it does.

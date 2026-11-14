@@ -7,6 +7,7 @@ import { createTasksPack, newTaskOf, opPatch, previewOf } from "../index.ts";
 import { bucketOf, filtered, listsOf, peopleOf, reviewOf } from "../lists.ts";
 import { addDays, dateFrom, dayOf, isoDate, parseQuick, readDate } from "../parse.ts";
 import { activityOf, addComment, createTask, getTask, idOf, importTodos, linkOf, loadKept, MIGRATIONS, notImported, searchTasks, type Task, updateTask } from "../store.ts";
+import { SCRIPT } from "../script.ts";
 import { detailPage, dockView, listsPage, reviewPage, todayCard } from "../view.ts";
 
 // Friday 2026-11-06.
@@ -216,7 +217,7 @@ test("store: a step's step goes under its initiative (one level)", async () => {
 // ── The lists ──
 
 const T = (o: Partial<Task>): Task => ({
-  id: 1, title: "t", notes: "", status: "next", priority: "normal", area: "", due: null, scheduled: null, waitingOn: "", createdBy: "", assignee: "",
+  id: 1, title: "t", notes: "", status: "next", priority: "normal", area: "", due: null, scheduled: null, waitingOn: "", createdBy: "", assignee: "", assignedAt: null, assignedBy: "",
   private: false, links: [], parent: null, position: 0, createdAt: NOW, updatedAt: NOW, statusAt: NOW, doneAt: null, ...o,
 });
 
@@ -328,6 +329,77 @@ test("pack: bino, needs, pulse, finds and lookups never show a private task", as
   assert.match(await look.list!.run({ area: "skribb" }, ctx), /T-3/);
   assert.match(await look.list!.run({ status: "bogus" }, ctx), /no status/);
   assert.match(await look.list!.run({ due: "<script>" }, ctx), /isn't a due window/);
+});
+
+test("needs: a task due today or tomorrow reminds once; a handover shows where there's a team, never a private one", async () => {
+  const d = await db();
+  const pack = createTasksPack({ now: () => NOW });
+  await createTask(d, { title: "due tomorrow", due: "2026-11-07", assignee: "kari@acme.no" }, "ola@acme.no", NOW - 3600_000);
+  await createTask(d, { title: "due today", due: TODAY, priority: "high" }, "ola@acme.no", NOW);
+  await createTask(d, { title: "due next week", due: "2026-11-13" }, "ola@acme.no", NOW);
+  await createTask(d, { title: "SECRET due tomorrow", due: "2026-11-07", assignee: "kari@acme.no", private: true }, "ola@acme.no", NOW);
+  await createTask(d, { title: "took it myself", assignee: "ola" }, "ola@acme.no", NOW);
+  await createTask(d, { title: "given long ago", assignee: "kari" }, "ola@acme.no", NOW - 4 * 86400_000);
+  const closed = await createTask(d, { title: "done already", due: TODAY, assignee: "kari" }, "ola@acme.no", NOW);
+  await updateTask(d, closed, { status: "done" }, "kari@acme.no", NOW);
+  const local = ctxFor(d).ctx;
+  await pack.refresh!(local);
+  assert.deepEqual(pack.needs!(local).map((n) => n.key), ["tasks-due-2-2026-11-06", "tasks-due-1-2026-11-07"], "alone, nobody is handed anything");
+  const team = ctxFor(d, { hosted: true }).ctx;
+  const needs = pack.needs!(team);
+  assert.deepEqual(needs.map((n) => `${n.key} ${n.ring}`), ["tasks-due-2-2026-11-06 tasks-due", "tasks-due-1-2026-11-07 tasks-due", `tasks-assigned-1-${NOW - 3600_000} tasks-assigned`]);
+  assert.equal(needs[0]!.title, "T-2 is due today: due today");
+  assert.equal(needs[0]!.tone, "warn");
+  assert.equal(needs[1]!.title, "T-1 is due tomorrow: due tomorrow");
+  assert.equal(needs[1]!.tone, "neutral");
+  assert.equal(needs[2]!.title, "T-1 is kari's: due tomorrow");
+  assert.equal(needs[2]!.line, "From ola");
+  assert.ok(!JSON.stringify(needs).includes("SECRET"));
+  for (const n of needs) assert.ok(pack.manifest.rings!.some((r) => r.kind === n.ring && r.off), `${n.ring} is a ring of its own, off until switched on`);
+
+  // Handed on: a new handover, by whoever did it. Handed to no one: none.
+  const t1 = (await getTask(d, 1))!;
+  assert.equal(t1.assignedBy, "ola@acme.no");
+  const on = await updateTask(d, t1, { assignee: "per@acme.no" }, "kari@acme.no", NOW + 1000);
+  assert.deepEqual([on.task.assignedAt, on.task.assignedBy], [NOW + 1000, "kari@acme.no"]);
+  const off = await updateTask(d, on.task, { assignee: "" }, "per@acme.no", NOW + 2000);
+  assert.deepEqual([off.task.assignedAt, off.task.assignedBy], [null, ""]);
+  const same = await updateTask(d, off.task, { title: "renamed" }, "per@acme.no", NOW + 3000);
+  assert.equal(same.task.assignedAt, null, "another edit isn't a handover");
+});
+
+test("review: ticked rows are changed together, each checked and logged on its own", async () => {
+  const pack = createTasksPack();
+  const app = packApp([pack]);
+  for (const q of ["one", "two", "three", `${HOSTILE} four`]) await app.post("/tasks", { q });
+  const page = await (await app.get("/tasks/review")).text();
+  assertInert("review with tickboxes", page);
+  assert.match(page, /<form id="tasks-bulk" method="post" action="\/tasks\/bulk">/);
+  assert.equal(page.match(/class="pick" form="tasks-bulk" name="pick"/g)?.length, 4);
+  assert.match(page, /name="pick" value="2" aria-label="Pick T-2"/);
+
+  assert.equal((await app.post("/tasks/bulk", "pick=1&pick=2&op=next", { origin: "https://evil.test" })).status, 403);
+  assert.equal((await app.post("/tasks/bulk", "op=next&back=/tasks/review")).headers.get("location"), "/tasks/review?e=pick", "nothing ticked");
+  assert.equal((await app.post("/tasks/bulk", "pick=1&op=reopen&back=/tasks/review")).headers.get("location"), "/tasks/review?e=pick", "not a bulk button's op");
+  assert.match(await (await app.get("/tasks/review?e=pick")).text(), /Tick the tasks first/);
+
+  const done = await app.post("/tasks/bulk", "pick=1&pick=2&pick=2&pick=99&pick=%3Cscript%3E&pick=1%3B+DROP&op=next&back=https%3A%2F%2Fevil.test");
+  assert.equal(done.status, 303);
+  assert.equal(done.headers.get("location"), "/tasks");
+  const status = () => Object.fromEntries(pack.kept().map((t) => [t.id, t.status]));
+  assert.deepEqual(status(), { 1: "next", 2: "next", 3: "inbox", 4: "inbox" });
+  await app.post("/tasks/bulk", "pick=3&pick=1&op=drop&back=/tasks/review");
+  await app.post("/tasks/bulk", "pick=3&op=next&back=/tasks/review");
+  assert.deepEqual(status(), { 1: "dropped", 2: "next", 3: "dropped", 4: "inbox" }, "a closed task isn't picked up again from an old page");
+  const acts = (await app.db.DB.prepare("SELECT kind, target FROM actions WHERE kind = 'tasks.status' ORDER BY id").all<{ kind: string; target: string }>()).results.map((r: { target: string }) => r.target);
+  assert.deepEqual(acts, ["T-1", "T-2", "T-3", "T-1"]);
+});
+
+test("keys: the script moves by j and k and ticks by x, never while typing", () => {
+  assert.match(SCRIPT, /e\.key === "j" \? 1 : e\.key === "k" \? -1 : 0/);
+  assert.ok(SCRIPT.includes('closest("input:not([type=checkbox]), textarea, select, [contenteditable]'), "a ticked box still moves on");
+  assert.match(SCRIPT, /e\.ctrlKey \|\| e\.metaKey \|\| e\.altKey/);
+  assert.doesNotThrow(() => new Function(SCRIPT), "it parses");
 });
 
 test("pack: Today's card is for whoever's looking", async () => {

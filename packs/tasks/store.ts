@@ -26,6 +26,9 @@ export type Task = {
   waitingOn: string;
   createdBy: string;
   assignee: string;
+  /** When it was last given to its assignee, and by whom (null and "": to no one, or before 0.3.0). */
+  assignedAt: number | null;
+  assignedBy: string;
   private: boolean;
   links: TaskLink[];
   /** The task it's a step of (one level). */
@@ -55,6 +58,8 @@ export const MIGRATIONS = [
   `CREATE INDEX IF NOT EXISTS tasks_items_parent ON tasks_items (parent_id)`,
   `CREATE TABLE IF NOT EXISTS tasks_activity (id INTEGER PRIMARY KEY AUTOINCREMENT, task_id INTEGER NOT NULL, at INTEGER NOT NULL, who TEXT NOT NULL DEFAULT '', what TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '', text TEXT)`,
   `CREATE INDEX IF NOT EXISTS tasks_activity_task ON tasks_activity (task_id, at)`,
+  `ALTER TABLE tasks_items ADD COLUMN assigned_at INTEGER`,
+  `ALTER TABLE tasks_items ADD COLUMN assigned_by TEXT NOT NULL DEFAULT ''`,
 ];
 
 // ── Ids: T-42 ──
@@ -83,6 +88,12 @@ export function isMine(t: Pick<Task, "assignee" | "createdBy">, viewer: string):
   const a = t.assignee.trim().toLowerCase();
   if (!a) return t.createdBy === viewer;
   return a === viewer || (!!viewer && a === shortName(viewer)) || a === "me";
+}
+
+/** Given to its assignee by someone else: who, else "". Taking a task yourself isn't that. */
+export function givenBy(t: Pick<Task, "assignee" | "assignedAt" | "assignedBy">): string {
+  if (!t.assignee || !t.assignedAt || !t.assignedBy) return "";
+  return isMine({ assignee: t.assignee, createdBy: "" }, t.assignedBy) ? "" : t.assignedBy;
 }
 
 // ── Links ──
@@ -124,7 +135,7 @@ function linksFrom(json: string): TaskLink[] {
 
 type Row = {
   id: number; title: string; notes: string; status: string; priority: string; area: string; due: string | null; scheduled: string | null;
-  waiting_on: string; created_by: string; assignee: string; private: number; links: string; parent_id: number | null; position: number;
+  waiting_on: string; created_by: string; assignee: string; assigned_at?: number | null; assigned_by?: string | null; private: number; links: string; parent_id: number | null; position: number;
   created_at: number; updated_at: number; status_at: number; done_at: number | null;
 };
 
@@ -140,6 +151,8 @@ const taskOf = (r: Row): Task => ({
   waitingOn: r.waiting_on ?? "",
   createdBy: r.created_by ?? "",
   assignee: r.assignee ?? "",
+  assignedAt: r.assigned_at == null ? null : Number(r.assigned_at),
+  assignedBy: r.assigned_by ?? "",
   private: !!r.private,
   links: linksFrom(r.links ?? "[]"),
   parent: r.parent_id == null ? null : Number(r.parent_id),
@@ -236,6 +249,7 @@ export async function createTask(db: D1, t: NewTask, who: string, now: number): 
     )
     .first<{ id: number }>();
   const id = Number(r!.id);
+  if (personOf(t.assignee)) await db.prepare("UPDATE tasks_items SET assigned_at = ?, assigned_by = ? WHERE id = ?").bind(now, who, id).run();
   await addActivity(db, id, who, "created", title, null, now);
   return (await getTask(db, id))!;
 }
@@ -321,6 +335,10 @@ export async function updateTask(db: D1, t: Task, p: Patch, who: string, now: nu
   if (c.status) {
     sets.push("status_at = ?", "done_at = ?");
     binds.push(now, c.status === "done" || c.status === "dropped" ? now : null);
+  }
+  if (c.assignee !== undefined) {
+    sets.push("assigned_at = ?", "assigned_by = ?");
+    binds.push(c.assignee ? now : null, c.assignee ? who : "");
   }
   sets.push("updated_at = ?");
   binds.push(now);
