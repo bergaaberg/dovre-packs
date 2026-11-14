@@ -4,10 +4,10 @@
  * Each one-click button is a Confirm of its write kind: one click unless set to ask twice.
  */
 import { html } from "hono/html";
-import { Ago, Card, type Child, Confirm, ConfirmSubmit, Empty, Grid2, type Html, Item, KeyValues, List, markdown, Notice, PageHeader, Panel, Pill, safeUrl, Tabs } from "dovre/pack.ts";
+import { Ago, BulkBar, Card, type Child, Confirm, ConfirmSubmit, Empty, Grid2, type Html, Item, KeyValues, List, markdown, Notice, PageHeader, Panel, Pick, Pill, safeUrl, Tabs } from "dovre/pack.ts";
 import { type Filter, type Lists, overdue, whenOf } from "./lists.ts";
 import { PRIORITIES, STATUSES } from "./parse.ts";
-import { type Activity, label, shortName, type Task, type TaskLink } from "./store.ts";
+import { type Activity, givenBy, label, shortName, type Task, type TaskLink } from "./store.ts";
 
 export const taskHref = (id: number) => `/tasks/${label(id)}`;
 
@@ -36,7 +36,7 @@ function dueBit(t: Task, today: string): Child {
 function metaOf(t: Task, v: View): Child {
   const bits: Child[] = [html`<span class="tasks-id">${label(t.id)}</span>`];
   if (t.area) bits.push(html`<a class="tasks-area" href="/tasks?area=${encodeURIComponent(t.area)}">#${t.area}</a>`);
-  if (t.assignee) bits.push(`@${shortName(t.assignee)}`);
+  if (t.assignee) bits.push(`@${shortName(t.assignee)}${givenBy(t) ? ` from ${whoText(givenBy(t), v.viewer)}` : ""}`);
   if (t.scheduled && t.status !== "done") bits.push(`do ${whenOf(t.scheduled, v.today)}`);
   if (t.status === "waiting" && t.waitingOn) bits.push(`waiting on ${t.waitingOn}`);
   if (t.private) bits.push("private");
@@ -53,10 +53,15 @@ function rowActs(t: Task, back: string, o: { compact?: boolean } = {}): Html {
   }</span>`;
 }
 
-export function taskRow(t: Task, v: View, back: string, o: { compact?: boolean } = {}): Html {
+const BULK = "tasks-bulk";
+/** A row's tickbox for the review's bulk buttons. */
+const pickOf = (t: Task) => Pick({ form: BULK, value: String(t.id), label: `Pick ${label(t.id)}` });
+
+export function taskRow(t: Task, v: View, back: string, o: { compact?: boolean; pick?: boolean } = {}): Html {
   const pills = html`${t.status === "doing" ? Pill({ tone: "accent", children: "doing" }) : ""}${t.priority === "high" ? Pill({ tone: "neutral", children: "!high" }) : ""}${dueBit(t, v.today)}`;
   return Item({
     id: `task-${t.id}`,
+    ...(o.pick ? { lead: pickOf(t) } : {}),
     quiet: t.priority === "low" || t.status === "done" || t.status === "dropped",
     title: html`<a href="${taskHref(t.id)}">${t.title}</a>`,
     line: metaOf(t, v),
@@ -111,6 +116,7 @@ const ERRORS: Record<string, string> = {
   gone: "That task isn't here (or isn't yours to see).",
   link: "That isn't a link it knows: owner/repo#12, an http(s) URL, signal:<id> or a path here (/prs).",
   comment: "A comment needs some text.",
+  pick: "Tick the tasks first, then press what to do with them.",
 };
 export const errorOf = (code: unknown) => (typeof code === "string" && code in ERRORS ? ERRORS[code] : undefined);
 
@@ -152,7 +158,7 @@ ${l.done.length ? html`<details class="tasks-done"><summary>Done this week (${l.
 
 // ── /tasks/review ──
 
-export type ReviewModel = View & { inbox: Task[]; stale: Task[]; overdue: Task[]; done: Task[] };
+export type ReviewModel = View & { inbox: Task[]; stale: Task[]; overdue: Task[]; done: Task[]; error?: string };
 
 function triageActs(t: Task): Html {
   const back = "/tasks/review";
@@ -168,10 +174,14 @@ export function reviewPage(m: ReviewModel): Html {
       meta: String(ts.length),
       flush: true,
       children: ts.length
-        ? List(ts.map((t) => (acts ? Item({ id: `task-${t.id}`, title: html`<a href="${taskHref(t.id)}">${t.title}</a>`, line: metaOf(t, m), trail: html`${dueBit(t, m.today)}${acts(t)}` }) : taskRow(t, m, back))))
+        ? List(ts.map((t) => (acts ? Item({ id: `task-${t.id}`, lead: pickOf(t), title: html`<a href="${taskHref(t.id)}">${t.title}</a>`, line: metaOf(t, m), trail: html`${dueBit(t, m.today)}${acts(t)}` }) : taskRow(t, m, back, { pick: true }))))
         : html`<p class="t3 tasks-none">${empty}</p>`,
     });
+  const n = m.inbox.length + m.stale.length + m.overdue.length;
+  const press = (value: string, lbl: string, question: string) => ({ name: "op", value, label: lbl, question, kind: "tasks.status" });
   return html`${PageHeader({ title: "Weekly review", sub: "Empty the inbox, chase what's waiting, settle what's late, see what got done.", tabs: pageTabs("review") })}
+${m.error ? Notice({ tone: "warn", children: m.error }) : ""}
+${n ? BulkBar({ id: BULK, action: "/tasks/bulk", label: "The ticked ones (x ticks a row):", fields: { back }, buttons: [press("next", "Next", "Put the ticked tasks on Next?"), press("week", "Next wk", "Do the ticked tasks next week?"), press("done", "Done", "Mark the ticked tasks done?"), press("drop", "Drop", "Drop the ticked tasks?")] }) : ""}
 <div data-live id="tasks">
 ${panel("Inbox to triage", m.inbox, "The inbox is empty.", triageActs)}
 ${panel("Waiting a week or more", m.stale, "Nothing has waited a week.")}

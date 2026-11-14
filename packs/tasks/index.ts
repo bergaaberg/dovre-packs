@@ -3,8 +3,9 @@
  * hosted cockpit. Kept in its own `tasks_*` tables in Dovre's database; no service, no settings.
  *
  * Lists (/tasks: Now, Next, Waiting, Inbox, Later), a task's page (/tasks/T-42: fields, Markdown
- * notes, links, activity and comments), a weekly review, a quick-add line read as I type, a Today
- * card, a dock, needs for what's overdue, and Bino: lines about the shared tasks, lookups (list,
+ * notes, links, activity and comments), a weekly review with tickboxes for several at once, j and k
+ * down and up any list, a quick-add line read as I type, a Today card, a dock, needs for what's
+ * overdue, due today or tomorrow, or newly handed to someone (hosted), and Bino: lines about the shared tasks, lookups (list,
  * search, one task) and acts (create, status, schedule, edit, comment) behind the confirm card.
  *
  * It takes My list's place (`replaces: ["todo"]`): while it's on, My list is held off, and what
@@ -23,7 +24,7 @@ import { areasOf, bucketOf, filtered, isOpen, late, lineOf, listsOf, nextWeek, p
 import { addDays, clean, dateFrom, dayOf, isoDate, isPriority, isStatus, parseQuick, STATUSES, type Parsed, type Status } from "./parse.ts";
 import { SCRIPT } from "./script.ts";
 import {
-  activityOf, addComment, createTask, getTask, idOf, label, linkOf, loadKept, MAX_COMMENT, MAX_LINKS, MAX_NOTES, type NewTask, type Patch,
+  activityOf, addComment, createTask, getTask, givenBy, idOf, label, linkOf, loadKept, MAX_COMMENT, MAX_LINKS, MAX_NOTES, type NewTask, type Patch,
   importTodos, listItemOf, MIGRATIONS, notImported, searchTasks, shortName, type Task, updateTask, viewerOf, visibleTo,
 } from "./store.ts";
 import { backOf, detailPage, dockView, errorOf, listsPage, reviewPage, styles, taskHref, todayCard, type View } from "./view.ts";
@@ -31,6 +32,12 @@ import { backOf, detailPage, dockView, errorOf, listsPage, reviewPage, styles, t
 const ID = "tasks";
 /** How long a page waits for the database before drawing what memory has. */
 const PAGE_MS = 1000;
+
+/** How long a handover stays among what needs me. */
+const GIVEN_MS = 3 * 86400_000;
+/** What the review's bulk buttons may do, and to how many at once. */
+const BULK_OPS = ["next", "week", "done", "drop"];
+const MAX_BULK = 100;
 
 /** The quick-add's reading, as the preview shows it. */
 export function previewOf(p: Parsed, today: string): { title: string; bits: string[] } {
@@ -375,7 +382,7 @@ export function createTasksPack(opts: { now?: () => number } = {}): Pack & { kep
     kept: () => kept,
     manifest: {
       api: "2.3",
-      version: "0.2.1",
+      version: "0.3.0",
       id: ID,
       name: "Tasks",
       description: "A task list of Dovre's own, for one person or a team, in My list's place: quick-add, Now/Next/Waiting/Inbox, a weekly review, comments and links, and Bino reading and proposing changes.",
@@ -386,7 +393,11 @@ export function createTasksPack(opts: { now?: () => number } = {}): Pack & { kep
       replaces: ["todo"],
       uses: ["todo"],
       everyMs: 60_000,
-      rings: [{ kind: "tasks-overdue", label: "A task is overdue", hint: "Once per task, the first time it's past its due day", off: true }],
+      rings: [
+        { kind: "tasks-overdue", label: "A task is overdue", hint: "Once per task, the first time it's past its due day", off: true },
+        { kind: "tasks-due", label: "A task is due tomorrow", hint: "Once per task, the day before its due day (or on it, when it was set that late)", off: true },
+        { kind: "tasks-assigned", label: "A task was given to someone", hint: "Once per handover, on a cockpit a team shares", off: true },
+      ],
     },
     writes: [
       { kind: "create", label: "Add a task" },
@@ -429,7 +440,8 @@ export function createTasksPack(opts: { now?: () => number } = {}): Pack & { kep
     },
     needs(ctx): PackNeed[] {
       const day = today(ctx);
-      return shared()
+      const open = shared().filter(isOpen);
+      const overdue: PackNeed[] = open
         .filter((t) => late(t, day))
         .sort((a, b) => (a.due ?? "").localeCompare(b.due ?? ""))
         .slice(0, 5)
@@ -444,6 +456,41 @@ export function createTasksPack(opts: { now?: () => number } = {}): Pack & { kep
           ring: "tasks-overdue",
           label: "Tasks",
         }));
+      // The reminder: the same key the day before and on the day, so it rings once.
+      const due: PackNeed[] = open
+        .filter((t) => t.due === day || t.due === addDays(day, 1))
+        .sort((a, b) => (a.due ?? "").localeCompare(b.due ?? "") || a.id - b.id)
+        .slice(0, 5)
+        .map((t) => ({
+          key: `tasks-due-${t.id}-${t.due}`,
+          title: `${label(t.id)} is due ${whenOf(t.due!, day)}: ${t.title}`.slice(0, 200),
+          ...(t.assignee ? { line: `@${shortName(t.assignee)}` } : {}),
+          href: taskHref(t.id),
+          tone: t.due === day ? "warn" : "neutral",
+          rank: t.priority === "high" ? 2 : 3,
+          at: Date.parse(`${t.due}T00:00:00Z`),
+          ring: "tasks-due",
+          label: "Tasks",
+        }));
+      // A handover, for three days, where there's a team to hand to. Needs are everyone's, so it says whose it is.
+      const given: PackNeed[] = ctx.hosted
+        ? open
+            .filter((t) => givenBy(t) && now() - t.assignedAt! < GIVEN_MS)
+            .sort((a, b) => b.assignedAt! - a.assignedAt!)
+            .slice(0, 5)
+            .map((t) => ({
+              key: `tasks-assigned-${t.id}-${t.assignedAt}`,
+              title: `${label(t.id)} is ${shortName(t.assignee)}'s: ${t.title}`.slice(0, 200),
+              line: `From ${shortName(givenBy(t))}`,
+              href: taskHref(t.id),
+              tone: "neutral",
+              rank: 3,
+              at: t.assignedAt!,
+              ring: "tasks-assigned",
+              label: "Tasks",
+            }))
+        : [];
+      return [...overdue, ...due, ...given];
     },
     pulse(ctx) {
       const day = today(ctx);
@@ -568,7 +615,7 @@ export function createTasksPack(opts: { now?: () => number } = {}): Pack & { kep
         const viewer = who(c);
         const all = (await fresh(ctx)).filter((t) => visibleTo(t, viewer));
         const v = viewOf(ctx, viewer);
-        return page(c, "Weekly review", reviewPage({ ...v, ...reviewOf(all, v.today, now()) }));
+        return page(c, "Weekly review", reviewPage({ ...v, ...reviewOf(all, v.today, now()), error: errorOf(c.req.query("e")) }));
       });
 
       app.get("/tasks/dock", async (c) => {
@@ -592,6 +639,28 @@ export function createTasksPack(opts: { now?: () => number } = {}): Pack & { kep
         if (c.req.param("id") !== label(t.id)) return c.redirect(taskHref(t.id), 301);
         const activity = await activityOf(ctx.db, t.id);
         return page(c, `${label(t.id)} ${t.title}`, detailPage({ ...viewOf(ctx, viewer), task: t, activity, error: errorOf(c.req.query("e")), forgeHost: ctx.forge()?.host || "github.com" }));
+      });
+
+      // The review's ticked rows: each read again, changed and logged on its own.
+      app.post("/tasks/bulk", strictOrigin, async (c) => {
+        const viewer = who(c);
+        const f = (await c.req.parseBody({ all: true }).catch(() => ({}))) as Record<string, unknown>;
+        const back = backOf(f.back);
+        const op = typeof f.op === "string" && BULK_OPS.includes(f.op) ? f.op : "";
+        const ids = [...new Set(([] as unknown[]).concat(f.pick ?? []).flatMap((v) => (typeof v === "string" && /^\d{1,9}$/.test(v) ? [Number(v)] : [])))].slice(0, MAX_BULK);
+        if (!op || !ids.length) return c.redirect(withError(back, "pick"), 303);
+        let any = false;
+        for (const id of ids) {
+          const t = await findFor(ctx, label(id), viewer);
+          const patch = t && isOpen(t) ? opPatch(op, t, today(ctx)) : undefined;
+          if (!t || !patch) continue;
+          const r = await updateTask(ctx.db, t, patch, viewer, now());
+          if (!r.changed.length) continue;
+          await log(ctx, "status", r.task, true);
+          any = true;
+        }
+        if (any) await wrote(ctx);
+        return c.redirect(back, 303);
       });
 
       app.post("/tasks/:id/do", strictOrigin, async (c) => {
