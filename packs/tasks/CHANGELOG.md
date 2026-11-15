@@ -1,5 +1,10 @@
 # tasks
 
+## 0.4.0 — 2026-11-15
+
+- A handover to an email address is that person's alone (pack API 2.7, `PackNeed.person`): it reads "T-4 is yours" and only they are told of it. One given to a name ("kari") isn't a sign-in, so it stays everyone's and says whose it is, as before. Each person gets their five newest handovers.
+- Needs Dovre with pack API 2.7.
+
 ## 0.3.0 — 2026-11-14
 
 - Keys on every list of tasks: j and k move down and up the rows (Enter opens the one in focus), x ticks it in the weekly review. Never while typing.
