@@ -381,8 +381,8 @@ export function createTasksPack(opts: { now?: () => number } = {}): Pack & { kep
   return {
     kept: () => kept,
     manifest: {
-      api: "2.3",
-      version: "0.3.0",
+      api: "2.7",
+      version: "0.4.0",
       id: ID,
       name: "Tasks",
       description: "A task list of Dovre's own, for one person or a team, in My list's place: quick-add, Now/Next/Waiting/Inbox, a weekly review, comments and links, and Bino reading and proposing changes.",
@@ -396,7 +396,7 @@ export function createTasksPack(opts: { now?: () => number } = {}): Pack & { kep
       rings: [
         { kind: "tasks-overdue", label: "A task is overdue", hint: "Once per task, the first time it's past its due day", off: true },
         { kind: "tasks-due", label: "A task is due tomorrow", hint: "Once per task, the day before its due day (or on it, when it was set that late)", off: true },
-        { kind: "tasks-assigned", label: "A task was given to someone", hint: "Once per handover, on a cockpit a team shares", off: true },
+        { kind: "tasks-assigned", label: "A task was given to someone", hint: "Once per handover, on a cockpit a team shares; one given to an email address is told only to that person", off: true },
       ],
     },
     writes: [
@@ -472,23 +472,36 @@ export function createTasksPack(opts: { now?: () => number } = {}): Pack & { kep
           ring: "tasks-due",
           label: "Tasks",
         }));
-      // A handover, for three days, where there's a team to hand to. Needs are everyone's, so it says whose it is.
+      // A handover, for three days, where there's a team to hand to. One given to an address is that
+      // person's alone (PackNeed.person, API 2.7): core tells only them. A name isn't a sign-in, so
+      // that one stays everyone's and says whose it is.
+      // The five newest for each person named, and five for everyone.
+      const told = new Map<string, number>();
       const given: PackNeed[] = ctx.hosted
         ? open
             .filter((t) => givenBy(t) && now() - t.assignedAt! < GIVEN_MS)
             .sort((a, b) => b.assignedAt! - a.assignedAt!)
-            .slice(0, 5)
-            .map((t) => ({
-              key: `tasks-assigned-${t.id}-${t.assignedAt}`,
-              title: `${label(t.id)} is ${shortName(t.assignee)}'s: ${t.title}`.slice(0, 200),
-              line: `From ${shortName(givenBy(t))}`,
-              href: taskHref(t.id),
-              tone: "neutral",
-              rank: 3,
-              at: t.assignedAt!,
-              ring: "tasks-assigned",
-              label: "Tasks",
-            }))
+            .flatMap((t): PackNeed[] => {
+              const to = t.assignee.trim().toLowerCase();
+              const person = to.includes("@") ? to : "";
+              const had = told.get(person) ?? 0;
+              if (had >= 5) return [];
+              told.set(person, had + 1);
+              return [
+                {
+                  key: `tasks-assigned-${t.id}-${t.assignedAt}`,
+                  title: (person ? `${label(t.id)} is yours: ${t.title}` : `${label(t.id)} is ${shortName(t.assignee)}'s: ${t.title}`).slice(0, 200),
+                  line: `From ${shortName(givenBy(t))}`,
+                  href: taskHref(t.id),
+                  tone: "neutral",
+                  rank: 3,
+                  at: t.assignedAt!,
+                  ring: "tasks-assigned",
+                  label: "Tasks",
+                  ...(person ? { person } : {}),
+                },
+              ];
+            })
         : [];
       return [...overdue, ...due, ...given];
     },

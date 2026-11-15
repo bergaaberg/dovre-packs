@@ -352,10 +352,21 @@ test("needs: a task due today or tomorrow reminds once; a handover shows where t
   assert.equal(needs[0]!.tone, "warn");
   assert.equal(needs[1]!.title, "T-1 is due tomorrow: due tomorrow");
   assert.equal(needs[1]!.tone, "neutral");
-  assert.equal(needs[2]!.title, "T-1 is kari's: due tomorrow");
+  assert.equal(needs[2]!.title, "T-1 is yours: due tomorrow");
   assert.equal(needs[2]!.line, "From ola");
+  assert.equal(needs[2]!.person, "kari@acme.no", "given to an address: hers alone");
+  assert.ok(needs.slice(0, 2).every((n) => n.person === undefined), "a due reminder is everyone's");
   assert.ok(!JSON.stringify(needs).includes("SECRET"));
   for (const n of needs) assert.ok(pack.manifest.rings!.some((r) => r.kind === n.ring && r.off), `${n.ring} is a ring of its own, off until switched on`);
+
+  // Given to a name, not an address: nobody's sign-in, so everyone's, saying whose. Five for each person at most.
+  const byName = await createTask(d, { title: "by name", assignee: "Per" }, "ola@acme.no", NOW);
+  for (let i = 0; i < 6; i++) await createTask(d, { title: `more ${i}`, assignee: "Kari@acme.no" }, "ola@acme.no", NOW + i);
+  await pack.refresh!(team);
+  const handed = pack.needs!(team).filter((n) => n.ring === "tasks-assigned");
+  assert.deepEqual(handed.filter((n) => !n.person).map((n) => n.title), [`T-${byName.id} is Per's: by name`]);
+  assert.equal(handed.filter((n) => n.person === "kari@acme.no").length, 5, "her five newest");
+  assert.ok(handed.every((n) => !n.person || n.title.includes("is yours")));
 
   // Handed on: a new handover, by whoever did it. Handed to no one: none.
   const t1 = (await getTask(d, 1))!;
