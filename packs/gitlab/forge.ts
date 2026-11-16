@@ -1,9 +1,10 @@
 /**
  * GitLab as a Dovre forge (REST API v4, a personal access token with `read_api`). Merge requests map
  * onto Dovre's PRs, todos onto notifications, project events onto movement, and blocked deployments
- * onto waiting deploys, issues onto the Issues pack's sets. Read-only: nothing here writes to GitLab.
+ * onto waiting deploys, issues onto the Issues pack's sets, and merged merge requests, releases and
+ * tags onto what shipped. Read-only: nothing here writes to GitLab.
  */
-import { type Deploy, type Forge, type Issue, type IssueSets, type Move, type Note, owners as ownersList, type Pr, type PrRef } from "dovre/pack.ts";
+import { type Deploy, type Forge, type ForgeShipped, type Issue, type IssueSets, type Move, type Note, owners as ownersList, type Pr, type PrRef } from "dovre/pack.ts";
 
 export type Fetch = typeof fetch;
 const enc = encodeURIComponent;
@@ -400,6 +401,127 @@ export async function loadIssues(gl: GitLab, owners: string, opts: { triage?: st
   return { assigned: seen(raw.assigned), mentioned: seen(raw.mentioned), authored: seen(raw.authored), triage: seen(raw.triage) };
 }
 
+// ── Shipped (Forge.shipped, pack API 2.6) ─────────────────────────────────────
+
+/** The most merged merge requests given, the newest: as many as GitHub's forge gives. */
+export const MAX_SHIPPED_PRS = 3000;
+/** Projects read per owner (the last active first), and the releases read of each. */
+const SHIP_PROJECTS = 100;
+const SHIP_RELEASES = 20;
+/** Pages of 100 tags read of a project, at most, while they still fall on or after the day. */
+const TAG_PAGES = 10;
+
+type Loose = Record<string, any>;
+const str = (v: unknown, max = 255) => (typeof v === "string" ? v.slice(0, max) : "");
+const list = (v: unknown): Loose[] => (Array.isArray(v) ? v.filter((x) => x && typeof x === "object") : []);
+/** A time as GitLab wrote it (in the instance's or the tagger's offset), in UTC; "" when it isn't one. */
+const utc = (v: unknown): string => {
+  const t = typeof v === "string" && v.length <= 40 ? Date.parse(v) : NaN;
+  return Number.isFinite(t) ? new Date(t).toISOString().replace(".000Z", "Z") : "";
+};
+/** A UTC time on or after the day. */
+const sinceDay = (at: string, since: string) => !!at && at.slice(0, 10) >= since;
+const newest = <T>(items: T[], at: (x: T) => string) => items.sort((a, b) => (at(a) < at(b) ? 1 : at(a) > at(b) ? -1 : 0));
+/** A link GitLab gave, when it's on this host; "" otherwise. */
+const onHost = (url: unknown, host: string) => (str(url, 500).startsWith(`https://${host}/`) ? str(url, 500) : "");
+/** An annotated tag's own time; a plain tag has none, so its commit's. The order GitLab lists them in. */
+const tagAt = (t: Loose | undefined) => utc(t?.created_at) || utc(t?.commit?.committed_date);
+const notFound = <T>(v: T) => (e: unknown): T => {
+  if (e instanceof GitLabError && e.status === 404) return v;
+  throw e;
+};
+
+/** A project's tags, newest first, read on a page at a time while the page ends on or after the day. */
+async function tagsSince(gl: GitLab, id: number, since: string, slot: ReturnType<typeof limiter>): Promise<Loose[]> {
+  const out: Loose[] = [];
+  for (let page = 1; page <= TAG_PAGES; page++) {
+    const got = list(await slot(() => gl.get<unknown>(`/projects/${id}/repository/tags?order_by=updated&sort=desc&per_page=${PAGE_SIZE}&page=${page}`)).catch(orElse<unknown>([])));
+    out.push(...got);
+    if (got.length < PAGE_SIZE || !sinceDay(tagAt(got.at(-1)), since)) break;
+  }
+  return out;
+}
+
+type Shipped = { prs: ForgeShipped["prs"]; more: boolean; releases: ForgeShipped["releases"]; tags: ForgeShipped["tags"] };
+
+/**
+ * One owner's part: a group's merged merge requests in one paged list (its subgroups come along), or,
+ * when the owner is a user, each of their projects'. Releases and tags are read per project, and only
+ * of projects with activity on or after the day: a tag or a release made since then is activity.
+ */
+async function ownerShipped(gl: GitLab, owner: string, since: string, slot: ReturnType<typeof limiter>): Promise<Shipped> {
+  const after = enc(`${since}T00:00:00Z`);
+  // merged_after is the filter; updated_after says the same to a GitLab too old to know it (merged_at is checked below either way).
+  const merged = `merge_requests?state=merged&merged_after=${after}&updated_after=${after}&order_by=updated_at&sort=desc&per_page=${PAGE_SIZE}`;
+  const projectsQ = `?order_by=last_activity_at&sort=desc&archived=false&per_page=${SHIP_PROJECTS}`;
+  const active = (raw: unknown) =>
+    list(raw).flatMap((p) => {
+      const repo = str(p.path_with_namespace);
+      const last = utc(p.last_activity_at);
+      if (!Number.isSafeInteger(p.id) || !REPO_PATH.test(repo) || !inOwners(repo, [owner]) || (last && !sinceDay(last, since))) return [];
+      return [{ id: p.id as number, repo }];
+    });
+  let projects: { id: number; repo: string }[];
+  let mrs: Loose[];
+  try {
+    const [p, m] = await Promise.all([gl.get<unknown>(`/groups/${enc(owner)}/projects${projectsQ}&include_subgroups=true`), gl.getAll<Loose>(`/groups/${enc(owner)}/${merged}`, MAX_SHIPPED_PRS + 1)]);
+    projects = active(p);
+    mrs = list(m);
+  } catch (e) {
+    // Not a group: a user, whose merge requests are listed per project.
+    notFound(undefined)(e);
+    projects = active(await gl.get<unknown>(`/users/${enc(owner)}/projects${projectsQ}`).catch(notFound<unknown>([])));
+    mrs = (await Promise.all(projects.map((p) => slot(() => gl.getAll<Loose>(`/projects/${p.id}/${merged}`, MAX_SHIPPED_PRS + 1)).catch(orElse<Loose[]>([]))))).flatMap(list);
+  }
+  const prs = mrs.flatMap((m) => {
+    const url = onHost(m.web_url, gl.host);
+    const repo = repoOfUrl(url);
+    const mergedAt = utc(m.merged_at);
+    if (!REPO_PATH.test(repo) || !inOwners(repo, [owner]) || !Number.isSafeInteger(m.iid) || m.iid < 1 || !sinceDay(mergedAt, since)) return [];
+    return [{ repo, number: m.iid as number, title: str(m.title, 300), url, mergedAt, author: str(m.author?.username, 100) }];
+  });
+  const releases: ForgeShipped["releases"] = [];
+  const tags: ForgeShipped["tags"] = [];
+  await Promise.all(
+    projects.map(async ({ id, repo }) => {
+      const [rels, refs] = await Promise.all([slot(() => gl.get<unknown>(`/projects/${id}/releases?per_page=${SHIP_RELEASES}`)).catch(orElse<unknown>([])), tagsSince(gl, id, since, slot)]);
+      const released = new Set<string>();
+      for (const x of list(rels)) {
+        const tag = str(x.tag_name);
+        if (!tag) continue;
+        // A release speaks for its tag, in the window or not; one dated ahead hasn't shipped yet.
+        released.add(tag);
+        const at = utc(x.released_at) || utc(x.created_at);
+        if (x.upcoming_release === true || !sinceDay(at, since)) continue;
+        releases.push({ repo, tag, name: str(x.name, 300) || tag, url: onHost(x._links?.self, gl.host) || `https://${gl.host}/${repo}/-/releases/${enc(tag)}`, at });
+      }
+      for (const t of refs) {
+        const tag = str(t.name);
+        const at = tagAt(t);
+        if (!tag || released.has(tag) || t.release || !sinceDay(at, since)) continue;
+        tags.push({ repo, tag, url: `https://${gl.host}/${repo}/-/tags/${tag.split("/").map(enc).join("/")}`, at });
+      }
+    }),
+  );
+  return { prs, more: mrs.length > MAX_SHIPPED_PRS, releases, tags };
+}
+
+/**
+ * What shipped in the owners' groups since a day (YYYY-MM-DD): merge requests merged, releases
+ * published and tags with no release, each newest first. Titles, names, usernames, times and links only.
+ */
+export async function loadShipped(gl: GitLab, owners: string, since: string): Promise<ForgeShipped> {
+  const slot = limiter(PARALLEL);
+  const parts = await Promise.all(ownersList.of(owners).map((o) => ownerShipped(gl, o, since, slot)));
+  const prs = newest(parts.flatMap((p) => p.prs), (p) => p.mergedAt);
+  return {
+    prs: prs.slice(0, MAX_SHIPPED_PRS),
+    ...(parts.some((p) => p.more) || prs.length > MAX_SHIPPED_PRS ? { more: true as const } : {}),
+    releases: newest(parts.flatMap((p) => p.releases), (r) => r.at),
+    tags: newest(parts.flatMap((p) => p.tags), (t) => t.at),
+  };
+}
+
 // ── The forge ─────────────────────────────────────────────────────────────────
 
 export function gitlabForge(gl: GitLab): Forge {
@@ -422,5 +544,6 @@ export function gitlabForge(gl: GitLab): Forge {
     },
     deploys: (repos) => loadDeploys(gl, repos),
     issues: (_login, owners, opts) => loadIssues(gl, owners, opts),
+    shipped: (owners, since) => loadShipped(gl, owners, since),
   };
 }
