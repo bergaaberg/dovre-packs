@@ -1,5 +1,9 @@
 # gitlab
 
+## 1.1.0 — 2026-11-16
+
+- Says what shipped (`forge().shipped`, pack API 2.6): merge requests merged, releases published and tags with no release in your groups since a day, so the Releases pack has something to show on a GitLab cockpit. Needs Dovre with pack API 2.6. Releases and tags are read of projects with activity since that day, 100 per group at most.
+
 ## 1.0.5 — 2026-11-14
 
 - First run suggests it where a checkout has a .gitlab-ci.yml. Nothing changes in what it does.

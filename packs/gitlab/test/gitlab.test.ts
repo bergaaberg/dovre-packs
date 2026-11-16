@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { HOSTILE, testForge } from "dovre/pack-testing.ts";
-import { GitLabError, checksOf, createGitLab, describeEvent, diffCounts, gitlabForge, hostOf, isBot, jobState, toDeploys, toNote } from "../forge.ts";
+import { GitLabError, MAX_SHIPPED_PRS, checksOf, createGitLab, describeEvent, diffCounts, gitlabForge, hostOf, isBot, jobState, loadShipped, toDeploys, toNote } from "../forge.ts";
 import { createGitlabPack } from "../index.ts";
 
 const HOST = "git.example.com";
@@ -275,4 +275,142 @@ test("hostile titles, branches and job names come out as data, and URLs are buil
   const move = describeEvent({ action_name: "pushed to", target_type: null, created_at: "2026-10-25T08:00:00Z", author: { username: "kari" }, push_data: { ref: H, ref_type: "branch", commit_count: 1 } }, { path_with_namespace: "northwind/shop", web_url: `https://${HOST}/northwind/shop` });
   assert.equal(move.title, H);
   assert.ok(move.url!.endsWith(`/-/commits/${encodeURIComponent(H)}`) && !move.url!.includes("<"));
+});
+
+// ── Shipped (pack API 2.6) ────────────────────────────────────────────────────
+
+const SINCE = "2026-10-20";
+const SHOP = { id: 42, path_with_namespace: "northwind/web/shop", web_url: `https://${HOST}/northwind/web/shop`, last_activity_at: "2026-10-25T08:00:00Z" };
+const merged = (iid: number, merged_at: string | null, over: Record<string, unknown> = {}) => ({ iid, title: `MR ${iid}`, web_url: `${SHOP.web_url}/-/merge_requests/${iid}`, merged_at, author: { username: "kari" }, ...over });
+
+test("shipped: a group's merged merge requests, releases and tags with no release since a day, newest first", async () => {
+  const { gl, asked } = fakeGitLab({
+    "/groups/northwind/projects": [
+      SHOP,
+      { id: 43, path_with_namespace: "northwind/old", web_url: `https://${HOST}/northwind/old`, last_activity_at: "2026-09-01T00:00:00Z" },
+      { id: 7, path_with_namespace: "someone-else/tool", web_url: `https://${HOST}/someone-else/tool`, last_activity_at: "2026-10-25T08:00:00Z" },
+      { id: "44", path_with_namespace: "northwind/odd" },
+      null,
+    ],
+    "/groups/northwind/merge_requests": [
+      merged(5, "2026-10-24T10:00:00.000+02:00"),
+      merged(6, "2026-10-26T09:30:00Z", { author: null }),
+      merged(4, "2026-10-19T23:59:59Z"), // merged before the day, touched since
+      merged(8, null),
+      merged(9, "2026-10-25T00:00:00Z", { web_url: `https://${HOST}/someone-else/tool/-/merge_requests/9` }),
+      merged(10, "2026-10-25T00:00:00Z", { web_url: `https://evil.example/northwind/web/shop/-/merge_requests/10` }),
+      merged(0, "2026-10-25T00:00:00Z"),
+    ],
+    "/projects/42/releases": [
+      { tag_name: "v3.0.0", name: "Three", released_at: "2026-12-01T00:00:00Z", created_at: "2026-10-25T00:00:00Z", upcoming_release: true, _links: { self: `${SHOP.web_url}/-/releases/v3.0.0` } },
+      { tag_name: "v2.1.0", name: "Faster checkout", released_at: "2026-10-25T12:00:00.000Z", created_at: "2026-10-25T11:00:00Z", _links: { self: `${SHOP.web_url}/-/releases/v2.1.0` } },
+      { tag_name: "v2.0.1", name: null, released_at: "2026-10-21T12:00:00Z", _links: { self: "javascript:alert(1)" } },
+      { tag_name: "v2.0.0", name: "Two", released_at: "2026-09-01T12:00:00Z" },
+    ],
+    "/projects/42/repository/tags": [
+      { name: "v3.0.0", created_at: "2026-10-25T00:00:00Z", commit: { committed_date: "2026-10-25T00:00:00Z" }, release: { tag_name: "v3.0.0" } },
+      { name: "packs/shop/v1.0.0", created_at: "2026-10-23T08:00:00.000+02:00", commit: { committed_date: "2026-10-01T00:00:00Z" }, release: null },
+      { name: "nightly", created_at: null, commit: { committed_date: "2026-10-22T03:00:00Z" }, release: null },
+      { name: "v2.0.1", created_at: null, commit: { committed_date: "2026-10-21T11:00:00Z" }, release: null }, // its release is in the list
+      { name: "v1.9.0", created_at: null, commit: { committed_date: "2026-08-01T00:00:00Z" }, release: null },
+    ],
+  });
+  const s = await gitlabForge(gl).shipped!("northwind", SINCE);
+  assert.deepEqual(s.prs, [
+    { repo: "northwind/web/shop", number: 6, title: "MR 6", url: `${SHOP.web_url}/-/merge_requests/6`, mergedAt: "2026-10-26T09:30:00Z", author: "" },
+    { repo: "northwind/web/shop", number: 5, title: "MR 5", url: `${SHOP.web_url}/-/merge_requests/5`, mergedAt: "2026-10-24T08:00:00Z", author: "kari" },
+  ]);
+  assert.equal(s.more, undefined);
+  assert.deepEqual(s.releases, [
+    { repo: "northwind/web/shop", tag: "v2.1.0", name: "Faster checkout", url: `${SHOP.web_url}/-/releases/v2.1.0`, at: "2026-10-25T12:00:00Z" },
+    { repo: "northwind/web/shop", tag: "v2.0.1", name: "v2.0.1", url: `${SHOP.web_url}/-/releases/v2.0.1`, at: "2026-10-21T12:00:00Z" },
+  ]);
+  assert.deepEqual(s.tags, [
+    { repo: "northwind/web/shop", tag: "packs/shop/v1.0.0", url: `${SHOP.web_url}/-/tags/packs/shop/v1.0.0`, at: "2026-10-23T06:00:00Z" },
+    { repo: "northwind/web/shop", tag: "nightly", url: `${SHOP.web_url}/-/tags/nightly`, at: "2026-10-22T03:00:00Z" },
+  ]);
+  const mrs = asked.find((a) => a.startsWith("/groups/northwind/merge_requests"))!;
+  assert.match(mrs, /state=merged&merged_after=2026-10-20T00%3A00%3A00Z&updated_after=2026-10-20T00%3A00%3A00Z/);
+  assert.ok(asked.some((a) => a.startsWith("/groups/northwind/projects?") && a.includes("include_subgroups=true") && a.includes("archived=false")));
+  assert.ok(!asked.some((a) => a.startsWith("/projects/43/") || a.startsWith("/projects/7/") || a.startsWith("/projects/44/")), "only the owners' projects with activity since the day are read");
+  assert.equal(asked.filter((a) => a.startsWith("/projects/42/repository/tags")).length, 1, "a short page of tags is the last");
+});
+
+test("shipped: an owner that's a user is read per project; one that's neither gives nothing", async () => {
+  const TOOL = { id: 7, path_with_namespace: "kari/tool", web_url: `https://${HOST}/kari/tool`, last_activity_at: "2026-10-25T08:00:00Z" };
+  const { gl, asked } = fakeGitLab({
+    "/users/kari/projects": [TOOL],
+    "/projects/7/merge_requests": [merged(2, "2026-10-22T10:00:00Z", { web_url: `${TOOL.web_url}/-/merge_requests/2` })],
+    "/projects/7/repository/tags": [{ name: "v0.1.0", created_at: null, commit: { committed_date: "2026-10-22T11:00:00Z" }, release: null }],
+  });
+  const s = await loadShipped(gl, "kari, nobody", SINCE);
+  assert.deepEqual(s.prs.map((p) => `${p.repo}#${p.number}`), ["kari/tool#2"]);
+  assert.deepEqual(s.releases, [], "a project with releases turned off answers 404: none");
+  assert.deepEqual(s.tags.map((t) => t.tag), ["v0.1.0"]);
+  assert.ok(asked.some((a) => a.startsWith("/users/nobody/projects")));
+});
+
+test("shipped: tags are read on while a full page ends inside the window, ten pages at most; more than the cap of merge requests says so", async () => {
+  const pages: number[] = [];
+  const tag = (i: number, day: string) => ({ name: `v0.${i}`, created_at: null, commit: { committed_date: `${day}T00:00:00Z` }, release: null });
+  const fetchFn = (async (input: string) => {
+    const url = new URL(String(input));
+    const path = url.pathname.replace(/^\/api\/v4/, "");
+    const page = Number(url.searchParams.get("page") ?? 1);
+    if (path === "/groups/northwind/projects") return json([SHOP, { ...SHOP, id: 45, path_with_namespace: "northwind/busy" }]);
+    if (path === "/groups/northwind/merge_requests")
+      return new Response(JSON.stringify(Array.from({ length: 100 }, (_, i) => merged(page * 100 + i, "2026-10-25T00:00:00Z"))), { headers: { "content-type": "application/json", "x-next-page": String(page + 1) } });
+    if (path === "/projects/42/repository/tags") {
+      pages.push(page);
+      // Page 1 is all inside the window; page 2 ends before it.
+      return json(Array.from({ length: 100 }, (_, i) => tag(page * 100 + i, page === 1 || i < 50 ? "2026-10-21" : "2026-10-01")));
+    }
+    if (path === "/projects/45/repository/tags") return json(Array.from({ length: 100 }, (_, i) => tag(page * 100 + i, "2026-10-21")));
+    return json([]);
+  }) as unknown as typeof fetch;
+  let busy = 0;
+  const counting = (async (input: string) => {
+    if (String(input).includes("/projects/45/repository/tags")) busy++;
+    return fetchFn(input);
+  }) as unknown as typeof fetch;
+  const s = await loadShipped(createGitLab({ host: HOST, token: "t", fetchFn: counting }), "northwind", SINCE);
+  assert.deepEqual(pages, [1, 2]);
+  assert.equal(s.tags.filter((t) => t.repo === "northwind/web/shop").length, 150);
+  assert.equal(busy, 10, "ten pages at most");
+  assert.equal(s.prs.length, MAX_SHIPPED_PRS);
+  assert.equal(s.more, true);
+});
+
+test("shipped: a failure is a failure (a 500 on the group, a 429 on a project), not nothing shipped", async () => {
+  const down = (async () => new Response("boom", { status: 500 })) as unknown as typeof fetch;
+  await assert.rejects(loadShipped(createGitLab({ host: HOST, token: "t", fetchFn: down }), "northwind", SINCE), /500/);
+  const limited = (async (input: string) => {
+    const path = new URL(String(input)).pathname.replace(/^\/api\/v4/, "");
+    if (path === "/groups/northwind/projects") return json([SHOP]);
+    if (path === "/groups/northwind/merge_requests") return json([]);
+    return new Response("slow down", { status: 429 });
+  }) as unknown as typeof fetch;
+  await assert.rejects(loadShipped(createGitLab({ host: HOST, token: "t", fetchFn: limited }), "northwind", SINCE), /429/);
+});
+
+test("shipped: hostile titles and names come out as data, capped; links are on the host and tags encoded into them", async () => {
+  const H = HOSTILE;
+  const { gl, asked } = fakeGitLab({
+    "/groups/northwind/projects": [SHOP],
+    "/groups/northwind/merge_requests": [merged(5, "2026-10-24T10:00:00Z", { title: H.repeat(40), author: { username: H } }), merged(6, H), { ...merged(7, "2026-10-24T10:00:00Z"), web_url: H }],
+    "/projects/42/releases": [{ tag_name: H, name: H, released_at: "2026-10-25T12:00:00Z", _links: { self: H } }, { tag_name: 5, released_at: "2026-10-25T12:00:00Z" }],
+    "/projects/42/repository/tags": [{ name: `a b/${H}`, created_at: "2026-10-23T08:00:00Z", release: null }, { name: "x", created_at: H, commit: { committed_date: H } }, "junk"],
+  });
+  const s = await loadShipped(gl, "northwind", SINCE);
+  assert.equal(s.prs.length, 1);
+  assert.equal(s.prs[0]!.title.length, 300);
+  assert.equal(s.prs[0]!.author, H);
+  assert.deepEqual(s.releases.map((r) => [r.tag, r.name, r.url]), [[H, H, `${SHOP.web_url}/-/releases/${encodeURIComponent(H)}`]]);
+  assert.deepEqual(s.tags.map((t) => t.url), [`${SHOP.web_url}/-/tags/a%20b/${H.split("/").map(encodeURIComponent).join("/")}`]);
+  assert.ok([...s.prs, ...s.releases, ...s.tags].every((x) => x.url.startsWith(`https://${HOST}/`) && !x.url.includes("<") && !x.url.includes('"')));
+  assert.ok(asked.every((a) => !a.includes("<") && !a.includes('"')), "no raw markup in any request");
+});
+
+test("the pack declares pack API 2.6, which shipped came with", () => {
+  assert.equal(createGitlabPack().manifest.api, "2.6");
 });
