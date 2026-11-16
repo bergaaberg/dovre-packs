@@ -1,6 +1,7 @@
 /** Releases: PR titles sorted by kind, the page by repo and for one repo with its draft, Stats, search, and hostile input. */
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { Hono } from "hono";
 import type { ForgeShipped, PackStat } from "dovre/pack.ts";
 import { assertInert, HOSTILE, packApp, testContext } from "dovre/pack-testing.ts";
 import { byRepo, changeOf, draftOf, perWeek, tally, weeksOf, within } from "../data.ts";
@@ -138,4 +139,53 @@ test("hostile titles, repos, tags and links stay inert, in the lists and in the 
     assert.equal(out.split("<textarea").length, out.split("</textarea>").length, "the draft's box closes once");
   }
   for (const f of pack.finds!(testContext())) assert.equal(f.href, "#", "a link that isn't http(s) goes nowhere");
+});
+
+test("a slow first read doesn't hold the page: it answers at once, says so, and is told when the read is in (dovre-packs#179)", async () => {
+  let give!: (s: ForgeShipped) => void;
+  let asked = 0;
+  const slow = () => (asked++, new Promise<ForgeShipped>((done) => (give = done)));
+  const pack = createReleasesPack({ now: () => NOW, waitMs: 5 });
+  const published: string[][] = [];
+  const deferred: Promise<unknown>[] = [];
+  const ctx = {
+    ...testContext({ forge: () => ({ id: "github", name: "GitHub", host: "github.com", login: "kari", owners: "acme", owns: () => true, shipped: slow }) }),
+    publish: (topics: string[]) => void published.push(topics),
+    page: async (_c: unknown, o: { body: unknown }) => new Response(String(await o.body)),
+  };
+  const hono = new Hono();
+  pack.routes!(hono as never, ctx as never);
+  const exec = { waitUntil: (p: Promise<unknown>) => void deferred.push(p), passThroughOnException() {}, props: {} };
+  const get = async () => (await hono.request("/releases", {}, {}, exec as never)).text();
+
+  const first = await get();
+  assert.match(first, /Reading what shipped/);
+  assert.match(first, /<div data-live id="releases">/, "the region the hub swaps");
+  assert.match(await get(), /Reading what shipped/, "a second page while it reads");
+  assert.equal(asked, 1, "one read, however many pages ask");
+  assert.equal(deferred.length, 2, "the read is kept alive past each answer");
+  assert.deepEqual(published, []);
+
+  give(SHIPPED);
+  await Promise.all(deferred);
+  assert.deepEqual(published, [["releases"], ["releases"]]);
+  const filled = await get();
+  assert.match(filled, /acme\/shop/);
+  assert.doesNotMatch(filled, /Reading what shipped/);
+  assert.equal(deferred.length, 2, "nothing more to wait for");
+});
+
+test("a first read that's quick (an answer core kept) is on the first page, with nothing told after", async () => {
+  const pack = createReleasesPack({ now: () => NOW, waitMs: 200 });
+  const published: string[][] = [];
+  const ctx = {
+    ...testContext({ forge: () => ({ id: "github", name: "GitHub", host: "github.com", login: "kari", owners: "acme", owns: () => true, shipped: async () => SHIPPED }) }),
+    publish: (topics: string[]) => void published.push(topics),
+    page: async (_c: unknown, o: { body: unknown }) => new Response(String(await o.body)),
+  };
+  const hono = new Hono();
+  pack.routes!(hono as never, ctx as never);
+  // No execution context, as locally: nothing to hand the read to, and nothing needed.
+  assert.match(await (await hono.request("/releases")).text(), /acme\/shop/);
+  assert.deepEqual(published, []);
 });

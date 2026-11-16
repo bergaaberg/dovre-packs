@@ -69,7 +69,7 @@ ${Panel({
 })}`;
 }
 
-export type PageAsk = { days: number; repo?: string; now: number; /** The forge's name when it doesn't say what shipped. */ silent?: string };
+export type PageAsk = { days: number; repo?: string; now: number; /** The forge's name when it doesn't say what shipped. */ silent?: string; /** The first read is still under way. */ reading?: boolean };
 
 export function releasesPage(k: Kept | undefined, o: PageAsk): Html {
   const days = WINDOWS.includes(o.days) ? o.days : WINDOWS[0]!;
@@ -85,7 +85,9 @@ export function releasesPage(k: Kept | undefined, o: PageAsk): Html {
   const body = o.silent
     ? Notice({ children: `${o.silent} doesn't say what shipped here yet, so there's nothing to show.` })
     : !k
-      ? Empty({ title: "Not read yet" })
+      ? o.reading
+        ? Empty({ title: "Reading what shipped", children: html`<p>The first read takes a few seconds. It shows here when it's in.</p>` })
+        : Empty({ title: "Not read yet" })
       : html`${k.error ? Notice({ tone: k.shipped ? "warn" : "bad", children: k.shipped ? `Couldn't read what shipped just now (${k.error}): this is from ${format.ago(k.at, o.now)}.` : `Couldn't read what shipped: ${k.error}` }) : ""}
 ${k.shipped?.more ? Notice({ children: "More PRs merged than could be read: these are the newest." }) : ""}
 ${!k.shipped ? "" : one ? repoView(one, { since, until: dayOf(o.now) }) : repos.length ? overview(repos, days) : Empty({ title: `Nothing shipped in the last ${days} days` })}`;
