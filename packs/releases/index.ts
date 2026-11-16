@@ -3,7 +3,8 @@
  * PRs merged, sorted by the conventional-commit type their titles start with, the releases and
  * tags, and a changelog draft for each repo to copy and edit. Shipped per week on Stats, releases
  * and tags in search. It reads the forge's `shipped` (pack API 2.6) every ten minutes and keeps the
- * answer in memory; nothing is stored, and nothing is written anywhere.
+ * answer in memory; nothing is stored, and nothing is written anywhere. A page asked for before the
+ * first read is in answers at once and fills itself in when it is.
  */
 import { type FindItem, type Pack, type PackContext, safeUrl } from "dovre/pack.ts";
 import { byRepo, DAY, type Kept, perWeek, READ_DAYS, sinceOf, weeksOf, WINDOWS, within } from "./data.ts";
@@ -12,9 +13,12 @@ import { HREF, releasesPage } from "./view.ts";
 /** Releases and tags offered in search, the newest. */
 const MAX_FINDS = 50;
 const message = (e: unknown) => String((e as Error)?.message ?? e).slice(0, 200);
+/** How long the first page waits for its read: enough for an answer core kept, not for a fresh one (seconds, dovre-packs#179). */
+const WAIT_MS = 400;
 
-export function createReleasesPack(opts: { now?: () => number } = {}): Pack & { kept(): Kept | undefined } {
+export function createReleasesPack(opts: { now?: () => number; waitMs?: number } = {}): Pack & { kept(): Kept | undefined } {
   const now = opts.now ?? Date.now;
+  const waitMs = opts.waitMs ?? WAIT_MS;
   let kept: Kept | undefined;
   let reading: Promise<void> | undefined;
 
@@ -40,7 +44,7 @@ export function createReleasesPack(opts: { now?: () => number } = {}): Pack & { 
     kept: () => kept,
     manifest: {
       api: "2.6",
-      version: "0.1.0",
+      version: "0.1.1",
       id: "releases",
       name: "Releases",
       description: "What shipped in your repos: merged PRs by kind, releases and tags, and a changelog draft per repo",
@@ -67,12 +71,25 @@ export function createReleasesPack(opts: { now?: () => number } = {}): Pack & { 
     routes(app, ctx) {
       app.get(HREF, async (c) => {
         const forge = ctx.forge();
-        // The first page after a start reads it itself: hosted, another isolate may have, and core kept its answer.
-        if (!kept && forge?.shipped) await read(ctx);
+        if (!kept && forge?.shipped) {
+          // The first page after a start starts the read itself and waits a moment for it: hosted, another
+          // isolate may have read it, and core kept its answer. A fresh read takes seconds, so past that
+          // moment the page answers without it and is told when it's in.
+          const first = read(ctx);
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          const late = await Promise.race([first.then(() => false), new Promise<boolean>((done) => (timer = setTimeout(() => done(true), waitMs)))]);
+          clearTimeout(timer);
+          if (late) {
+            const told = first.then(() => ctx.publish(["releases"])).catch(() => undefined);
+            try {
+              c.executionCtx.waitUntil(told);
+            } catch {}
+          }
+        }
         return ctx.page(c, {
           title: "Releases",
           current: HREF,
-          body: releasesPage(kept, { days: daysOf(ctx, c.req.query("days")), repo: c.req.query("repo"), now: now(), silent: forge && !forge.shipped ? forge.name : undefined }),
+          body: releasesPage(kept, { days: daysOf(ctx, c.req.query("days")), repo: c.req.query("repo"), now: now(), silent: forge && !forge.shipped ? forge.name : undefined, reading: !kept && !!reading }),
         });
       });
     },
