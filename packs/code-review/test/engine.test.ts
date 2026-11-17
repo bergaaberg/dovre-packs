@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 // @ts-expect-error: plain JS, no types
 import { analyse, changedRows, EXT, headerSymbol, langOf, lcs, markChanged, outline, symbolLabel, symbols, tokensOf } from "../engine.js";
 // @ts-expect-error: plain JS, no types
@@ -8,7 +9,7 @@ import { GRAMMARS } from "../gen.mjs";
 
 const vendor = (f: string) => new URL(`../vendor/${f}`, import.meta.url);
 const ts: any = await import(vendor("web-tree-sitter.js").href);
-await ts.Parser.init({ locateFile: () => vendor("runtime.wasm").pathname });
+await ts.Parser.init({ locateFile: () => fileURLToPath(vendor("runtime.wasm")) });
 
 const langs = new Map<string, { parser: any; query: any; tags: any }>();
 async function grammar(name: string) {

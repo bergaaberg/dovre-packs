@@ -1,0 +1,5 @@
+# Every checkout is LF, whatever the machine's git config: packs declare the SHA-256 of files they ship.
+* text=auto eol=lf
+# Vendored files come out byte for byte as committed.
+packs/*/vendor/** -text
+*.wasm binary
